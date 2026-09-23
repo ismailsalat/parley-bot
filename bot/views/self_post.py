@@ -21,7 +21,7 @@ from bot.database.models import Listing
 from bot.services import listings as listing_service
 from bot.services import permissions
 from bot.services.errors import ValidationError
-from bot.utils.helpers import format_members, format_minimum, utcnow
+from bot.utils.helpers import format_members, utcnow
 from bot.utils.mentions import safe_allowed_mentions
 
 if TYPE_CHECKING:
