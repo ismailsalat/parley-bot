@@ -206,8 +206,7 @@ async def test_posting_window_ghost_pings_only_the_person_who_opened_it(db, list
     ping = bot.channel.sent[0]
     assert ping["content"] == f"<@{ADMIN_ID}>"
     mentions = ping["allowed_mentions"].to_dict()
-    assert mentions.get("everyone") is False
-    assert mentions.get("roles") == []
+    assert mentions.get("parse") == []
     assert mentions.get("users") == [ADMIN_ID]
 
 

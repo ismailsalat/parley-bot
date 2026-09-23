@@ -34,7 +34,14 @@ class SetupGuild:
         self.id = MAIN
         self.default_role = Snowflake(MAIN, name="@everyone")
         self.me = Snowflake(99, guild_permissions=discord.Permissions(manage_channels=manage_channels))
-        self.text_channels = [SimpleNamespace(id=100 + i, name=name) for i, name in enumerate(existing)]
+        self.text_channels = [
+            SimpleNamespace(
+                id=100 + i,
+                name=name,
+                permissions_for=lambda _member: discord.Permissions(manage_roles=False),
+            )
+            for i, name in enumerate(existing)
+        ]
         self.fail = fail
         self.created: list[tuple[str, dict]] = []
 

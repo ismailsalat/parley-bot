@@ -34,6 +34,8 @@ class HealthBot:
         self.hub_env_fields: tuple[str, ...] = ()
         me = SimpleNamespace(guild_permissions=discord.Permissions(create_instant_invite=True))
         self.guild = SimpleNamespace(id=MAIN, name="HQ", me=me, get_channel=channels.get)
+        for item in channels.values():
+            item.guild = self.guild
         self._connection = SimpleNamespace(_view_store=SimpleNamespace(_dynamic_items={i: i for i in persistent_items()}))
         self.background = SimpleNamespace(status=lambda: {"running": True})
         states = panels or {}

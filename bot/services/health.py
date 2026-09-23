@@ -21,6 +21,13 @@ log = logging.getLogger(__name__)
 OK, WARN, FAIL = "ok", "warn", "fail"
 ICONS = {OK: "✅", WARN: "⚠️", FAIL: "❌"}
 PANEL_LABELS = {WELCOME_PANEL: "Welcome panel", LISTINGS_PANEL: "Listings panel", LOOKING_PANEL: "Looking panel"}
+CHANNEL_CHECK_NAMES = {
+    "welcome_channel_id": "Welcome channel",
+    "listings_channel_id": "Listings channel",
+    "looking_channel_id": "Looking for partners channel",
+    "support_channel_id": "Support channel",
+    "log_channel_id": "Staff logs channel",
+}
 
 
 @dataclass(frozen=True)
@@ -117,23 +124,24 @@ def _channel_checks(bot: WaypointBot, guild: discord.Guild) -> list[Check]:
     for slot in SLOTS:
         channel_id = getattr(hub, slot.key)
         severity = FAIL if slot.required else WARN
+        check_name = CHANNEL_CHECK_NAMES.get(slot.key, f"{slot.label} channel")
         if not channel_id:
             if slot.required:
-                checks.append(Check(FAIL, f"{slot.label} channel", "not configured", "channels"))
+                checks.append(Check(FAIL, check_name, "not configured", "channels"))
             else:
-                checks.append(Check(OK, f"{slot.label} channel", "optional · not configured"))
+                checks.append(Check(WARN, check_name, "optional · not configured"))
             continue
         channel = guild.get_channel(channel_id)
         if getattr(channel, "type", None) not in (discord.ChannelType.text, discord.ChannelType.news):
-            checks.append(Check(severity, f"{slot.label} channel", "was deleted — choose a new one", "channels"))
+            checks.append(Check(severity, check_name, "was deleted — choose a new one", "channels"))
             continue
         missing = [label for label, ok in permissions.channel_permission_report(channel, guild.me) if not ok]
         if missing:
             checks.append(
-                Check(severity, f"{slot.label} channel", f"missing {', '.join(missing)} in #{channel.name}", "permissions")
+                Check(severity, check_name, f"missing {', '.join(missing)} in #{channel.name}", "permissions")
             )
         else:
-            checks.append(Check(OK, f"{slot.label} channel", f"#{channel.name}"))
+            checks.append(Check(OK, check_name, f"#{channel.name}"))
     invite_ok = guild.me.guild_permissions.create_instant_invite
     checks.append(
         Check(OK, "Create Invite permission")

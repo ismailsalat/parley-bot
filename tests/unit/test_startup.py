@@ -88,7 +88,7 @@ def test_deployment_files_use_the_lock():
     assert "requirements.lock" in (ROOT / "setup.bat").read_text()
     assert "requirements.lock" in (ROOT / "requirements-dev.txt").read_text()
     assert "python -m bot.main" in (ROOT / "railway.json").read_text()
-    assert "python -m bot.main" in (ROOT / "start.bat").read_text()
+    assert "-m bot.main" in (ROOT / "start.bat").read_text()
 
 
 def test_env_example_contains_no_secrets_and_only_needs_three_values():

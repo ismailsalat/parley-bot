@@ -107,6 +107,9 @@ class FakeBot:
     def get_channel(self, channel_id: int):
         return self.channels.get(channel_id)
 
+    def get_guild(self, guild_id: int):
+        return None
+
 
 def service_for(bot: FakeBot) -> PanelService:
     service = PanelService(bot)  # type: ignore[arg-type]

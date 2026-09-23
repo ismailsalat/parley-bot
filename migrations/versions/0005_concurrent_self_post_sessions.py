@@ -24,6 +24,8 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.drop_index("ix_self_post_sessions_expires_at", table_name="self_post_sessions")
     op.rename_table("self_post_sessions", "self_post_sessions_old")
+    if op.get_bind().dialect.name == "postgresql":
+        op.execute(sa.text("ALTER TABLE self_post_sessions_old RENAME CONSTRAINT pk_self_post_sessions TO pk_self_post_sessions_old"))
 
     op.create_table(
         "self_post_sessions",
@@ -55,6 +57,8 @@ def downgrade() -> None:
     op.drop_index("ix_self_post_sessions_listing_guild_id", table_name="self_post_sessions")
     op.drop_index("ix_self_post_sessions_expires_at", table_name="self_post_sessions")
     op.rename_table("self_post_sessions", "self_post_sessions_new")
+    if op.get_bind().dialect.name == "postgresql":
+        op.execute(sa.text("ALTER TABLE self_post_sessions_new RENAME CONSTRAINT pk_self_post_sessions TO pk_self_post_sessions_new"))
 
     op.create_table(
         "self_post_sessions",
