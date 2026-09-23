@@ -67,6 +67,11 @@ async def get_guilds(session: AsyncSession, guild_ids: Iterable[int]) -> dict[in
     return {g.guild_id: g for g in rows}
 
 
+async def guild_ids_connected_by(session: AsyncSession, user_id: int) -> list[int]:
+    """Servers this user personally verified while Parley was connected."""
+    return list(await session.scalars(select(Guild.guild_id).where(Guild.connected_by == user_id)))
+
+
 # ---------------------------------------------------------------- listings
 
 

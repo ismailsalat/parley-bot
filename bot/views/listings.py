@@ -298,27 +298,81 @@ async def start_post_flow(interaction: discord.Interaction) -> None:
         await open_listing_form(interaction, guild)
         return
 
-    # In DMs / the Parley hub, always show every connected server the user can
-    # manage. Do not silently skip live servers or auto-open the only unlisted one.
+    # In DMs / the Parley hub, new servers still need Parley installed once so
+    # Manage Server can be verified. Existing verified listings remain manageable
+    # through the manager who originally verified them, even after Parley is removed.
     candidates = [
         g for g in permissions.cached_manageable_guilds(bot, user.id)
         if g.id != bot.runtime.hub.main_guild_id
     ]
+    candidate_ids = {g.id for g in candidates}
+    async with bot.db.session() as session:
+        delegated_ids = set(await repository.guild_ids_connected_by(session, user.id))
+        disconnected_ids = delegated_ids - candidate_ids
+        disconnected_rows = [
+            row
+            for row in await repository.get_listings(session, disconnected_ids)
+            if row.status != ListingStatus.REMOVED
+        ]
+        disconnected_guilds = await repository.get_guilds(
+            session, [row.guild_id for row in disconnected_rows]
+        )
+        existing = {
+            row.guild_id: row
+            for row in await repository.get_listings(session, candidate_ids)
+        }
+
+    if not candidates and disconnected_rows:
+        from bot.views.management import show_management
+
+        if len(disconnected_rows) == 1:
+            await show_management(interaction, disconnected_rows[0].guild_id)
+            return
+
+        from bot.views.partnership import GuildPickerView
+
+        async def picked(inter: discord.Interaction, guild_id: int) -> None:
+            await show_management(inter, guild_id)
+
+        embed = discord.Embed(
+            title="Your existing listings",
+            description=(
+                "Parley is not currently connected to these servers, but their verified basic listings can still be managed."
+            ),
+            color=bot.runtime.bot.color_primary,
+        )
+        await reply(
+            interaction,
+            embed=embed,
+            view=GuildPickerView(
+                user.id,
+                [
+                    (
+                        row.guild_id,
+                        disconnected_guilds[row.guild_id].name
+                        if row.guild_id in disconnected_guilds
+                        else f"Server {row.guild_id}",
+                    )
+                    for row in disconnected_rows
+                ],
+                picked,
+                placeholder="Choose a listing",
+            ),
+        )
+        return
+
     if not candidates:
         add = add_bot_button(bot)
         embed = discord.Embed(
-            title="No connected servers yet",
+            title="Connect Parley once to list a new server",
             description=(
-                "I couldn't find a server where you have **Manage Server** and Parley is installed.\n\n"
-                "Add Parley to a server you manage, then come back to **Post My Server**."
+                "For a server's first listing, Parley must be installed once so Discord can verify that you have **Manage Server**.\n\n"
+                "After the listing is verified and live, you can remove Parley and keep managing the basic listing here."
             ),
             color=bot.runtime.bot.color_primary,
         )
         await reply(interaction, embed=embed, view=persistent_view(add) if add else None)
         return
-
-    async with bot.db.session() as session:
-        existing = {row.guild_id: row for row in await repository.get_listings(session, [g.id for g in candidates])}
 
     view = PostServerPickerView(bot, user.id, candidates, existing)
     await reply(interaction, embed=view.embed(), view=view)
@@ -371,6 +425,7 @@ class ListingFormView(OwnedView):
         *,
         mode: str,
         in_dm: bool,
+        connected: bool = True,
     ) -> None:
         super().__init__(owner_id)
         self.bot = bot
@@ -379,6 +434,7 @@ class ListingFormView(OwnedView):
         self.draft = draft
         self.mode = mode
         self.in_dm = in_dm
+        self.connected = connected
         self.invite_changed = False
         self._build()
 
@@ -389,7 +445,10 @@ class ListingFormView(OwnedView):
         helper = "Set up your listing." if self.mode == "create" else "Update your listing details."
         lines = [f"## {title}", helper]
         if self.mode != "create" and self.draft.accepting:
-            lines.append("-# Choose who should receive partnership requests.")
+            if self.connected:
+                lines.append("-# Choose who should receive partnership requests.")
+            else:
+                lines.append("-# Parley is disconnected. Saved partnership contacts stay unchanged until you reconnect it.")
         if notice:
             lines.insert(0, f"⚠️ {notice}\n")
         return "\n".join(lines)
@@ -442,7 +501,7 @@ class ListingFormView(OwnedView):
             # On first-time setup the creator is already the default contact. Keeping
             # that advanced choice out of the wizard makes the screen much easier to
             # understand; it remains editable later under Edit Server Info.
-            if self.mode != "create":
+            if self.mode != "create" and self.connected:
                 contacts = discord.ui.UserSelect(
                     placeholder="Requests go to",
                     min_values=1,
@@ -692,10 +751,18 @@ class ListingFormView(OwnedView):
 
     async def _submit_invite(self, interaction: discord.Interaction, raw: str) -> None:
         guild = self.bot.get_guild(self.guild_id)
-        if guild is None:
-            raise ValidationError("Parley is no longer in that server.")
         try:
-            self.draft.invite_url = await resolve_invite(self.bot, guild, raw)
+            if guild is not None:
+                self.draft.invite_url = await resolve_invite(self.bot, guild, raw)
+            else:
+                code = listing_service.parse_invite_code(raw)
+                try:
+                    invite = await self.bot.fetch_invite(code, with_counts=False)
+                except discord.NotFound as exc:
+                    raise ValidationError("That invite link is invalid or has expired.") from exc
+                if invite.guild is None or invite.guild.id != self.guild_id:
+                    raise ValidationError("That invite link points to a different server.")
+                self.draft.invite_url = listing_service.canonical_invite(invite.code)
         except ParleyError as exc:
             await self._rerender(interaction, exc.user_message)
             return
@@ -706,8 +773,18 @@ class ListingFormView(OwnedView):
         await interaction.response.defer()
         bot = self.bot
         try:
-            guild, _member = await permissions.require_manager(bot, self.guild_id, interaction.user.id)
-            contacts = await validate_contacts(guild, self.draft.contacts)
+            guild = bot.get_guild(self.guild_id)
+            if guild is not None:
+                await permissions.require_manager(bot, self.guild_id, interaction.user.id)
+                contacts = await validate_contacts(guild, self.draft.contacts)
+            else:
+                async with bot.db.session() as session:
+                    stored = await repository.get_guild(session, self.guild_id)
+                    if stored is None or stored.connected_by != interaction.user.id:
+                        raise PermissionDenied(
+                            "Only the manager who originally verified this listing can manage it while Parley is disconnected."
+                        )
+                    contacts = await repository.get_contact_ids(session, self.guild_id)
             async with bot.db.session() as session:
                 listing = await listing_service.update_info(
                     session,

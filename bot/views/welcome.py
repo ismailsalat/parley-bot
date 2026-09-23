@@ -8,6 +8,7 @@ old panels keep working after restarts without storing anything in memory.
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
@@ -200,15 +201,16 @@ def set_listing_button_label(view: discord.ui.View, *, multiple: bool) -> None:
 
 async def personalize_control_panel(bot: ParleyBot, user_id: int, *, staff: bool = False) -> tuple[str, discord.ui.View]:
     content, view = control_panel(bot, staff=staff)
-    managed_ids = [g.id for g in permissions.cached_manageable_guilds(bot, user_id)]
-    if managed_ids:
-        from bot.database import repository
-        from bot.database.models import ListingStatus
-        async with bot.db.session() as session:
-            rows = [
-                row for row in await repository.get_listings(session, managed_ids)
-                if row.status != ListingStatus.REMOVED
-            ]
+    managed_ids = {g.id for g in permissions.cached_manageable_guilds(bot, user_id)}
+    from bot.database import repository
+    from bot.database.models import ListingStatus
+    async with bot.db.session() as session:
+        managed_ids.update(await repository.guild_ids_connected_by(session, user_id))
+        rows = [
+            row for row in await repository.get_listings(session, managed_ids)
+            if row.status != ListingStatus.REMOVED
+        ]
+    if rows:
         set_listing_button_label(view, multiple=len(rows) > 1)
     return content, view
 
@@ -340,11 +342,15 @@ class DirectoryOverviewView(OwnedView):
         listings: dict[int, object],
         *,
         page: int = 0,
+        connected_ids: set[int] | None = None,
     ) -> None:
         super().__init__(owner_id)
         self.bot = bot
         self.guilds = sorted(guilds, key=lambda g: g.name.lower())
         self.listings = listings
+        # Normal callers/tests pass live guilds only. The production overview
+        # supplies connected_ids when it mixes stored disconnected listings in.
+        self.connected_ids = set(connected_ids) if connected_ids is not None else {g.id for g in guilds}
         self.page = max(0, page)
         self._build_controls()
 
@@ -416,8 +422,9 @@ class DirectoryOverviewView(OwnedView):
 
     def render(self) -> discord.Embed:
         listings = [self.listings[g.id] for g in self.listed_guilds]
-        connected = len(self.guilds)
-        unlisted = max(0, connected - len(listings))
+        connected = sum(1 for guild in self.guilds if guild.id in self.connected_ids)
+        connected_listed = sum(1 for guild in self.listed_guilds if guild.id in self.connected_ids)
+        unlisted = max(0, connected - connected_listed)
         partnership_open = sum(1 for listing in listings if listing.accepting_partnerships)
         ready_relist = sum(
             1
@@ -425,7 +432,9 @@ class DirectoryOverviewView(OwnedView):
             if listing.status in (ListingStatus.ACTIVE, ListingStatus.EXPIRED)
             and (
                 listing.status == ListingStatus.EXPIRED
-                or listing_service.refresh_remaining(listing, self.bot.runtime, utcnow()) is None
+                or listing_service.refresh_remaining(
+                    listing, self.bot.runtime, utcnow(), connected=listing.guild_id in self.connected_ids
+                ) is None
             )
         )
 
@@ -466,7 +475,9 @@ class DirectoryOverviewView(OwnedView):
                     else "Partnerships off"
                 )
                 if listing.status == ListingStatus.ACTIVE:
-                    remaining = listing_service.refresh_remaining(listing, self.bot.runtime, utcnow())
+                    remaining = listing_service.refresh_remaining(
+                        listing, self.bot.runtime, utcnow(), connected=listing.guild_id in self.connected_ids
+                    )
                     relist = f"Relist in {format_duration(remaining)}" if remaining is not None else "Relist ready"
                 elif listing.status == ListingStatus.EXPIRED:
                     relist = "Relist ready"
@@ -509,15 +520,35 @@ class DirectoryOverviewView(OwnedView):
 @register_action("directory")
 async def directory_overview(interaction: discord.Interaction) -> None:
     bot = get_bot(interaction)
-    guilds = [
-        guild
+    live = {
+        guild.id: guild
         for guild in permissions.cached_manageable_guilds(bot, interaction.user.id)
         if guild.id != bot.runtime.hub.main_guild_id
-    ]
+    }
     async with bot.db.session() as session:
-        rows = await repository.get_listings(session, [guild.id for guild in guilds]) if guilds else []
+        delegated_ids = set(await repository.guild_ids_connected_by(session, interaction.user.id))
+        guild_ids = set(live) | delegated_ids
+        rows = await repository.get_listings(session, guild_ids) if guild_ids else []
+        stored = await repository.get_guilds(session, guild_ids) if guild_ids else {}
+
+    guilds: list[object] = list(live.values())
+    for guild_id in sorted(delegated_ids - set(live)):
+        known = stored.get(guild_id)
+        if known is None:
+            continue
+        guilds.append(
+            SimpleNamespace(
+                id=known.guild_id,
+                name=known.name,
+                member_count=known.member_count,
+                icon=SimpleNamespace(url=known.icon_url) if known.icon_url else None,
+            )
+        )
+
     listings = {row.guild_id: row for row in rows if row.status != ListingStatus.REMOVED}
-    view = DirectoryOverviewView(bot, interaction.user.id, guilds, listings)
+    view = DirectoryOverviewView(
+        bot, interaction.user.id, guilds, listings, connected_ids=set(live)
+    )
     await show_screen(interaction, embed=view.render(), view=view)
 
 

@@ -430,3 +430,45 @@ async def test_exchange_refuses_unless_both_sides_can_receive(db, config, pair):
 
     assert await exchange_partner_ads(bot, MAIN, OTHER) is False
     assert source_channel.sent == [] and target_channel.sent == []
+
+# ---------------------------------------------------------------- disconnected basic management
+
+
+async def test_verified_manager_can_manage_after_parley_is_removed(db, config):
+    from bot.services.errors import PermissionDenied
+    from bot.views.management import load_managed_listing
+
+    bot = FakeBot(db)
+    bot.get_guild = lambda _gid: None
+    async with db.session() as session:
+        await make_listing(session, config, OTHER, actor_id=ADMIN_ID, contact_ids=[OWNER])
+
+    guild, listing, contacts = await load_managed_listing(bot, OTHER, ADMIN_ID)
+    assert guild.id == OTHER and guild.name == f"Server {OTHER}"
+    assert listing.guild_id == OTHER
+    assert OWNER in contacts
+
+    # Partnership contacts are not automatically listing managers.
+    with pytest.raises(PermissionDenied):
+        await load_managed_listing(bot, OTHER, OWNER)
+
+
+async def test_post_server_routes_to_existing_disconnected_listing(db, config):
+    """Post My Server should open an already-verified listing instead of pretending it vanished."""
+    from bot.views.listings import start_post_flow
+    from tests.fakes import FakeInteraction
+
+    bot = FakeBot(db)
+    bot.application_id = 123456789012345678
+    bot.guilds = []
+    bot.get_guild = lambda _gid: None
+    async with db.session() as session:
+        await make_listing(session, config, OTHER, actor_id=ADMIN_ID)
+
+    interaction = FakeInteraction(bot, ADMIN_ID)
+    await start_post_flow(interaction)
+
+    sent = interaction.response.sent[-1]
+    assert sent["embed"].title == "🧭 Listing Manager"
+    assert any(field.name == "Parley" and field.value == "⚪ Not Connected" for field in sent["embed"].fields)
+    assert "Connect Parley" in labels(sent["view"])

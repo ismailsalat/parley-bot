@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import discord
@@ -14,7 +15,7 @@ from bot.database.models import Listing, ListingStatus
 from bot.modals.advertisement import AdvertisementModal
 from bot.services import listings as listing_service
 from bot.services import permissions
-from bot.services.errors import LISTING_GONE, NotFound, ValidationError
+from bot.services.errors import LISTING_GONE, NotFound, PermissionDenied, ValidationError
 from bot.utils.helpers import format_duration, format_members, format_minimum, listing_jump_url, truncate, utcnow
 from bot.views.base import ConfirmView, OwnedView, get_bot, guard, handle_error, home_button, reply
 from bot.views.listings import ListingDraft, ListingFormView
@@ -133,13 +134,17 @@ def manage_button(bot: ParleyBot, guild_id: int, guild_name: str, row: int | Non
 @register_action("servers")
 async def show_my_servers(interaction: discord.Interaction) -> None:
     bot = get_bot(interaction)
-    managed = {g.id: g for g in permissions.cached_manageable_guilds(bot, interaction.user.id)}
+    connected = {g.id: g for g in permissions.cached_manageable_guilds(bot, interaction.user.id)}
     async with bot.db.session() as session:
+        delegated_ids = set(await repository.guild_ids_connected_by(session, interaction.user.id))
+        guild_ids = set(connected) | delegated_ids
         rows = [
             row
-            for row in await repository.get_listings(session, managed.keys())
+            for row in await repository.get_listings(session, guild_ids)
             if row.status != ListingStatus.REMOVED
         ]
+        stored = await repository.get_guilds(session, [row.guild_id for row in rows])
+
     if not rows:
         await reply(
             interaction,
@@ -152,7 +157,14 @@ async def show_my_servers(interaction: discord.Interaction) -> None:
         await show_management(interaction, rows[0].guild_id)
         return
 
-    rows.sort(key=lambda row: managed[row.guild_id].name.lower())
+    def name_for(guild_id: int) -> str:
+        live = connected.get(guild_id)
+        if live is not None:
+            return live.name
+        known = stored.get(guild_id)
+        return known.name if known is not None else f"Server {guild_id}"
+
+    rows.sort(key=lambda row: name_for(row.guild_id).lower())
     from bot.views.partnership import GuildPickerView
 
     async def picked(inter: discord.Interaction, guild_id: int) -> None:
@@ -160,7 +172,9 @@ async def show_my_servers(interaction: discord.Interaction) -> None:
 
     embed = discord.Embed(
         title="My Servers",
-        description="Choose a server to manage.",
+        description=(
+            "Choose a server to manage. Listings you previously verified stay here even when Parley is disconnected."
+        ),
         color=bot.runtime.bot.color_primary,
     )
     await reply(
@@ -168,7 +182,7 @@ async def show_my_servers(interaction: discord.Interaction) -> None:
         embed=embed,
         view=GuildPickerView(
             interaction.user.id,
-            [(row.guild_id, managed[row.guild_id].name) for row in rows],
+            [(row.guild_id, name_for(row.guild_id)) for row in rows],
             picked,
             placeholder="Choose a server",
         ),
@@ -286,13 +300,43 @@ def management_view(bot: ParleyBot, listing: Listing, guild: discord.Guild) -> d
     )
 
 
-async def load_managed_listing(bot: ParleyBot, guild_id: int, user_id: int) -> tuple[discord.Guild, Listing, list[int]]:
-    guild, _member = await permissions.require_manager(bot, guild_id, user_id)
+async def load_managed_listing(bot: ParleyBot, guild_id: int, user_id: int) -> tuple[object, Listing, list[int]]:
+    """Load a listing the user is allowed to manage.
+
+    While Parley is connected, Discord's live Manage Server permission is the
+    authority. After Parley is removed, the manager who originally verified
+    the listing remains the stored delegation for basic listing management.
+    """
+    live_guild = bot.get_guild(guild_id)
+    if live_guild is not None:
+        guild, _member = await permissions.require_manager(bot, guild_id, user_id)
+        async with bot.db.session() as session:
+            listing = await repository.get_listing(session, guild_id)
+            if listing is None or listing.status == ListingStatus.REMOVED:
+                raise NotFound(LISTING_GONE)
+            contacts = await repository.get_contact_ids(session, guild_id)
+        return guild, listing, contacts
+
     async with bot.db.session() as session:
         listing = await repository.get_listing(session, guild_id)
         if listing is None or listing.status == ListingStatus.REMOVED:
             raise NotFound(LISTING_GONE)
+        stored = await repository.get_guild(session, guild_id)
+        if stored is None:
+            raise NotFound(LISTING_GONE)
+        if stored.connected_by != user_id:
+            raise PermissionDenied(
+                "Parley is disconnected from that server. Only the manager who originally verified this listing can manage it while disconnected."
+            )
         contacts = await repository.get_contact_ids(session, guild_id)
+
+    icon = SimpleNamespace(url=stored.icon_url) if stored.icon_url else None
+    guild = SimpleNamespace(
+        id=stored.guild_id,
+        name=stored.name,
+        member_count=stored.member_count,
+        icon=icon,
+    )
     return guild, listing, contacts
 
 
@@ -450,7 +494,7 @@ async def edit_ad(interaction: discord.Interaction, guild_id: int) -> None:
         from bot.views.listings import after_edit
 
         await inter.response.defer(ephemeral=True, thinking=True)
-        await permissions.require_manager(bot, guild_id, inter.user.id)
+        await load_managed_listing(bot, guild_id, inter.user.id)
         async with bot.db.session() as session:
             updated = await listing_service.update_advertisement(
                 session, bot.runtime, guild_id=guild_id, text=text, actor_id=inter.user.id, now=utcnow()
@@ -479,7 +523,10 @@ async def edit_info(interaction: discord.Interaction, guild_id: int) -> None:
         ad_text=listing.advertisement_text,
         invite_url=listing.invite_url,
     )
-    form = ListingFormView(bot, interaction.user.id, guild_id, guild.name, draft, mode="edit", in_dm=interaction.guild is None)
+    form = ListingFormView(
+        bot, interaction.user.id, guild_id, guild.name, draft, mode="edit",
+        in_dm=interaction.guild is None, connected=permissions.is_connected(bot, guild_id),
+    )
     await reply(interaction, form.render(), view=form)
 
 
@@ -503,13 +550,17 @@ async def relist(interaction: discord.Interaction, guild_id: int) -> None:
     """Move a server back to the newest position. Cooldown is per server."""
     bot = get_bot(interaction)
     guild, listing, _contacts = await load_managed_listing(bot, guild_id, interaction.user.id)
-    permissions.require_public_bot_channel(guild)
+    connected = permissions.is_connected(bot, guild_id)
+    if connected:
+        live_guild = bot.get_guild(guild_id)
+        if live_guild is not None:
+            permissions.require_public_bot_channel(live_guild)
     if not interaction.response.is_done():
         await interaction.response.defer(ephemeral=True, thinking=True)
     async with bot.db.session() as session:
         await listing_service.claim_refresh(
             session, bot.runtime, guild_id=guild_id, actor_id=interaction.user.id, now=utcnow(),
-            connected=permissions.is_connected(bot, guild_id),
+            connected=connected,
         )
 
     if listing.self_posted:
@@ -522,7 +573,8 @@ async def relist(interaction: discord.Interaction, guild_id: int) -> None:
         return
     await reply(
         interaction,
-        f"## Relisted\n**{guild.name}** is back at the top of the directory.\n-# Available again in {bot.runtime.listings.refresh_cooldown_minutes} minutes.",
+        f"## Relisted\n**{guild.name}** is back at the top of the directory.\n-# Available again in "
+        f"{bot.runtime.listings.connected_refresh_cooldown_minutes if connected else bot.runtime.listings.refresh_cooldown_minutes} minutes.",
         view=persistent_view(home_button(bot)),
     )
 
@@ -547,10 +599,13 @@ async def relist_from_anywhere(interaction: discord.Interaction) -> None:
 
     managed = {g.id: g for g in permissions.cached_manageable_guilds(bot, interaction.user.id)}
     async with bot.db.session() as session:
+        delegated_ids = set(await repository.guild_ids_connected_by(session, interaction.user.id))
+        guild_ids = set(managed) | delegated_ids
         rows = [
-            row for row in await repository.get_listings(session, managed.keys())
+            row for row in await repository.get_listings(session, guild_ids)
             if row.status != ListingStatus.REMOVED
         ]
+        stored = await repository.get_guilds(session, [row.guild_id for row in rows])
     if not rows:
         await reply(interaction, "You don't have a listed server yet.", view=persistent_view(action_button(bot, "post")))
         return
@@ -571,7 +626,19 @@ async def relist_from_anywhere(interaction: discord.Interaction) -> None:
     await reply(
         interaction,
         embed=embed,
-        view=GuildPickerView(interaction.user.id, [(row.guild_id, managed[row.guild_id].name) for row in rows], picked),
+        view=GuildPickerView(
+            interaction.user.id,
+            [
+                (
+                    row.guild_id,
+                    managed[row.guild_id].name
+                    if row.guild_id in managed
+                    else (stored[row.guild_id].name if row.guild_id in stored else f"Server {row.guild_id}"),
+                )
+                for row in rows
+            ],
+            picked,
+        ),
     )
 
 
@@ -589,7 +656,7 @@ async def remove(interaction: discord.Interaction, guild_id: int) -> None:
         return
     done = confirm.interaction
     await done.response.defer()
-    await permissions.require_manager(bot, guild_id, done.user.id)
+    await load_managed_listing(bot, guild_id, done.user.id)
     async with bot.db.session() as session:
         listing = await listing_service.remove_listing(session, guild_id=guild_id, actor_id=done.user.id, now=utcnow())
     await bot.panels.take_down_listing(listing)
