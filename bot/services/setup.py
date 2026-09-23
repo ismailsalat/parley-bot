@@ -1,4 +1,4 @@
-"""First-run setup of the main Waypoint server.
+"""First-run setup of the main Parley server.
 
 Automatic Setup creates (or reuses, by name) exactly five channels:
 #start-here, #server-directory, #find-partners, #support and a staff-only
@@ -39,24 +39,24 @@ SLOTS: tuple[ChannelSlot, ...] = (
     ),
     ChannelSlot(
         "looking_channel_id", "find-partners", "Find partners", True,
-        "Talk about partnerships or use Waypoint to discover a server.",
+        "Post a partner ad or browse matches with Parley.",
         ("looking-for-partners",),
     ),
-    ChannelSlot("support_channel_id", "support", "Support", False, "Questions about Waypoint."),
-    ChannelSlot("log_channel_id", "waypoint-logs", "Staff logs", False, "Waypoint staff log and approvals."),
+    ChannelSlot("support_channel_id", "support", "Support", False, "Questions about Parley."),
+    ChannelSlot("log_channel_id", "parley-logs", "Staff logs", False, "Parley staff log and approvals.", ("waypoint-logs",)),
 )
 SLOT_BY_KEY = {slot.key: slot for slot in SLOTS}
 
 
 def bot_channel_permissions() -> discord.PermissionOverwrite:
-    """What Waypoint itself needs in every channel it manages."""
+    """What Parley itself needs in every channel it manages."""
     return discord.PermissionOverwrite(
         view_channel=True, send_messages=True, read_message_history=True, embed_links=True, use_external_emojis=True
     )
 
 
 def listings_channel_permissions() -> discord.PermissionOverwrite:
-    """The listings channel also needs message and permission management, so Waypoint can
+    """The listings channel also needs message and permission management, so Parley can
     open a one-off posting window for "Paste My Own Ad" and clean up afterwards."""
     overwrite = bot_channel_permissions()
     overwrite.update(manage_messages=True, manage_roles=True)
@@ -72,9 +72,9 @@ def overwrites_for(
     * waypoint-logs: hidden from everyone except staff roles, admins and the bot
     """
     everyone = guild.default_role
-    own = listings_channel_permissions() if slot.key == "listings_channel_id" else bot_channel_permissions()
+    own = listings_channel_permissions() if slot.key in ("listings_channel_id", "looking_channel_id") else bot_channel_permissions()
     result: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {guild.me: own}
-    if slot.key in ("welcome_channel_id", "listings_channel_id"):
+    if slot.key in ("welcome_channel_id", "listings_channel_id", "looking_channel_id"):
         result[everyone] = discord.PermissionOverwrite(send_messages=False, create_public_threads=False)
     elif slot.key == "log_channel_id":
         result[everyone] = discord.PermissionOverwrite(view_channel=False)
@@ -100,7 +100,7 @@ def can_auto_setup(guild: discord.Guild) -> bool:
 
 
 def find_existing(guild: discord.Guild, slot: ChannelSlot) -> discord.TextChannel | None:
-    """Reuse the recommended name or a legacy name from an older Waypoint install."""
+    """Reuse the recommended name or a legacy name from an older Parley install."""
     names = {slot.name, *slot.legacy_names}
     for channel in guild.text_channels:
         if channel.name in names:
@@ -109,11 +109,11 @@ def find_existing(guild: discord.Guild, slot: ChannelSlot) -> discord.TextChanne
 
 
 async def _repair_reused_channel(slot: ChannelSlot, channel: discord.TextChannel, guild: discord.Guild) -> None:
-    """Apply only Waypoint's essential safety overwrites to a reused default channel."""
+    """Apply only Parley's essential safety overwrites to a reused default channel."""
     if guild.me is None or not channel.permissions_for(guild.me).manage_roles:
         return
     try:
-        if slot.key == "listings_channel_id":
+        if slot.key in ("listings_channel_id", "looking_channel_id"):
             everyone = guild.default_role
             current = channel.overwrites_for(everyone)
             allow, deny = current.pair()
@@ -123,7 +123,7 @@ async def _repair_reused_channel(slot: ChannelSlot, channel: discord.TextChannel
                 locked.create_public_threads = False
             if hasattr(locked, "send_messages_in_threads"):
                 locked.send_messages_in_threads = False
-            await channel.set_permissions(everyone, overwrite=locked, reason="Waypoint: lock server directory")
+            await channel.set_permissions(everyone, overwrite=locked, reason="Parley: lock server directory")
 
             mine = channel.overwrites_for(guild.me)
             a2, d2 = mine.pair()
@@ -132,14 +132,14 @@ async def _repair_reused_channel(slot: ChannelSlot, channel: discord.TextChannel
                 view_channel=True, send_messages=True, read_message_history=True, embed_links=True,
                 use_external_emojis=True, manage_messages=True, manage_roles=True,
             )
-            await channel.set_permissions(guild.me, overwrite=bot_ow, reason="Waypoint: directory permissions")
+            await channel.set_permissions(guild.me, overwrite=bot_ow, reason="Parley: directory permissions")
         elif slot.key == "welcome_channel_id":
             everyone = guild.default_role
             current = channel.overwrites_for(everyone)
             allow, deny = current.pair()
             locked = discord.PermissionOverwrite.from_pair(allow, deny)
             locked.send_messages = False
-            await channel.set_permissions(everyone, overwrite=locked, reason="Waypoint: lock start-here")
+            await channel.set_permissions(everyone, overwrite=locked, reason="Parley: lock start-here")
     except discord.HTTPException as exc:
         log.warning("setup.permission_repair_failed channel=%s guild_id=%s: %s", channel.name, guild.id, exc)
 
@@ -159,7 +159,7 @@ async def automatic_setup(guild: discord.Guild, staff_roles: list[discord.Role])
                 slot.name,
                 topic=slot.topic,
                 overwrites=overwrites_for(slot, guild, staff_roles),
-                reason="Waypoint automatic setup",
+                reason="Parley automatic setup",
             )
         except discord.HTTPException as exc:
             log.warning("setup.create_failed channel=%s guild_id=%s: %s", slot.name, guild.id, exc)

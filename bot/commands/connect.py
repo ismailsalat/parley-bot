@@ -1,4 +1,4 @@
-"""/connect: list the current server on Waypoint."""
+"""/connect: list the current server on Parley."""
 
 from __future__ import annotations
 
@@ -13,14 +13,14 @@ from bot.services.errors import MANAGE_SERVER_REQUIRED, PermissionDenied
 from bot.views.listings import open_listing_form
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 
 class ConnectCommands(commands.Cog):
-    def __init__(self, bot: WaypointBot) -> None:
+    def __init__(self, bot: ParleyBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="connect", description="List this server on the Waypoint partner network.")
+    @app_commands.command(name="connect", description="List this server on the Parley partner network.")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def connect(self, interaction: discord.Interaction) -> None:
@@ -32,5 +32,5 @@ class ConnectCommands(commands.Cog):
         await open_listing_form(interaction, interaction.guild)
 
 
-async def setup(bot: WaypointBot) -> None:
+async def setup(bot: ParleyBot) -> None:
     await bot.add_cog(ConnectCommands(bot))

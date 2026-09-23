@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING
 import discord
 
 from bot.services import configuration
-from bot.services.errors import ValidationError, WaypointError
+from bot.services.errors import ValidationError, ParleyError
 from bot.views.admin.common import Field, FieldsModal, Page, on_off
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 
 @dataclass(frozen=True)
@@ -81,7 +81,7 @@ SECTIONS: dict[str, tuple[str, str, tuple, str]] = {
 }
 
 
-def current(bot: WaypointBot, key: str):
+def current(bot: ParleyBot, key: str):
     section, _, attr = key.partition(".")
     return getattr(getattr(bot.runtime, section), attr)
 
@@ -97,7 +97,7 @@ def parse_number(spec: Number, raw: str) -> int:
 
 
 class RulesPage(Page):
-    def __init__(self, bot: WaypointBot, owner_id: int, section: str, *, back) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, section: str, *, back) -> None:
         super().__init__(bot, owner_id, back=back)
         self.section = section
         self.title, self.emoji, self.specs, self.reset_key = SECTIONS[section]
@@ -156,7 +156,7 @@ class RulesPage(Page):
                 changes = {spec.key: parse_number(spec, values[spec.key]) for spec in numbers}
                 async with self.bot.db.session() as session:
                     await configuration.save(session, changes, actor_id=inter.user.id)
-            except WaypointError as exc:
+            except ParleyError as exc:
                 await self.show(inter, f"⚠️ {exc.user_message}")
                 return
             await self.bot.settings_changed()

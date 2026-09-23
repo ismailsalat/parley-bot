@@ -43,11 +43,11 @@ async def test_listing_message_uses_safe_mentions_and_buttons():
 
 async def test_client_wide_default_is_also_safe(tmp_path):
     from bot.config.settings import Settings
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
     from bot.database.session import Database
 
     db = Database(f"sqlite+aiosqlite:///{tmp_path / 'x.db'}")
-    bot = WaypointBot(Settings(discord_token="", database_url=db.url), db)
+    bot = ParleyBot(Settings(discord_token="", database_url=db.url), db)
     try:
         assert isinstance(bot.allowed_mentions, discord.AllowedMentions)
         assert bot.allowed_mentions.to_dict()["parse"] == []

@@ -51,14 +51,14 @@ def _request_shutdown(bot: discord.Client, sig: signal.Signals) -> None:
 
 def fatal(settings: Settings, problem: str, hint: str, exc: BaseException | None = None) -> None:
     """One clean line on the console; the traceback only goes to the log file (or DEBUG console)."""
-    where = " Details: logs/waypoint.log" if settings.log_to_file and exc is not None else ""
-    log.error("[Waypoint] %s %s%s", problem, hint, where)
+    where = " Details: logs/parley.log" if settings.log_to_file and exc is not None else ""
+    log.error("[Parley] %s %s%s", problem, hint, where)
     if exc is not None:
         details_logger().error("Startup failure details", exc_info=exc)
 
 
 async def run(settings: Settings) -> int:
-    from bot.core import WaypointBot  # imported here so logging is configured first
+    from bot.core import ParleyBot  # imported here so logging is configured first
 
     db = Database(settings.database_url, settings.database_connect_args)
     try:
@@ -79,7 +79,7 @@ async def run(settings: Settings) -> int:
             )
             return EXIT_STARTUP_ERROR
 
-        bot = WaypointBot(settings, db)
+        bot = ParleyBot(settings, db)
         async with bot:
             install_signal_handlers(bot)
             try:
@@ -111,11 +111,11 @@ def main() -> int:
     try:
         settings = load_settings()
     except SettingsError as exc:
-        print(f"[Waypoint] Configuration problem: {exc}", file=sys.stderr)
+        print(f"[Parley] Configuration problem: {exc}", file=sys.stderr)
         return EXIT_CONFIG_ERROR
 
     configure_logging(settings)
-    log.info("Starting Waypoint %s (%s)", __version__, settings.environment)
+    log.info("Starting Parley %s (%s)", __version__, settings.environment)
 
     if not settings.discord_token:
         fatal(settings, "DISCORD_TOKEN is not set.", "Put your bot token in .env (locally) or the Railway variables.")
@@ -140,7 +140,7 @@ def main() -> int:
     except OSError as exc:
         fatal(settings, "Could not connect.", "Check your internet connection and DATABASE_URL.", exc)
         code = EXIT_STARTUP_ERROR
-    log.info("Waypoint stopped")
+    log.info("Parley stopped")
     return code
 
 

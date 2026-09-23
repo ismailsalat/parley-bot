@@ -120,12 +120,18 @@ class Listing(Base):
     # One advertisement edit is allowed per Relist cycle.
     last_ad_edit_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default=ListingStatus.ACTIVE, index=True)
-    # Created while Waypoint was in TEST mode: never shown to real users in LIVE mode.
+    # Created while Parley was in TEST mode: never shown to real users in LIVE mode.
     is_test: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     # A listing the owner posted themselves (keeps their own custom emoji).
     self_posted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
-    # Waypoint's [Join Server] [Request Partnership] message under a self-posted listing.
+    # Parley's [Join Server] [Request Partnership] message under a self-posted listing.
     controls_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Independent owner-authored post in #find-partners.
+    partner_ad_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    partner_channel_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    partner_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    partner_controls_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    partner_posted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # Approved listings keep their live content while an edit waits for staff review.
     pending_changes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     pending_submitted_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

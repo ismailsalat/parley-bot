@@ -11,11 +11,11 @@ from discord.ext import commands
 from bot.views.partnership import start_find_flow
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 
 class FindCommands(commands.Cog):
-    def __init__(self, bot: WaypointBot) -> None:
+    def __init__(self, bot: ParleyBot) -> None:
         self.bot = bot
 
     @app_commands.command(name="find", description="Find servers to partner with.")
@@ -23,5 +23,5 @@ class FindCommands(commands.Cog):
         await start_find_flow(interaction)
 
 
-async def setup(bot: WaypointBot) -> None:
+async def setup(bot: ParleyBot) -> None:
     await bot.add_cog(FindCommands(bot))

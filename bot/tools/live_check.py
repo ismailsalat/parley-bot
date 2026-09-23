@@ -1,14 +1,14 @@
 """Live check against real Discord, using a separate TEST bot.
 
-    set WAYPOINT_LIVE_TOKEN=...              (a test bot's token, never production)
-    set WAYPOINT_TEST_GUILD_ID=...           (optional: a server the test bot is in)
-    set WAYPOINT_TEST_CHANNEL_ID=...         (optional: a channel it may post in)
+    set PARLEY_LIVE_TOKEN=...              (a test bot's token, never production)
+    set PARLEY_TEST_GUILD_ID=...           (optional: a server the test bot is in)
+    set PARLEY_TEST_CHANNEL_ID=...         (optional: a channel it may post in)
     python -m bot.tools.live_check
 
 It verifies: login, intents, registered slash commands, DM capability (to the
 bot owner), guild access, channel permissions, invite creation, sending and
 deleting a message, and that every persistent button type loads. Everything it
-creates is deleted again. It never touches the Waypoint database.
+creates is deleted again. It never touches the Parley database.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def invalid_built_in_emoji() -> list[str]:
 
 
 def real_views() -> dict[str, discord.ui.View]:
-    """The views a user actually sees, built exactly as Waypoint builds them."""
+    """The views a user actually sees, built exactly as Parley builds them."""
     from bot.config.runtime import default_config
     from bot.database.models import Listing
     from bot.views.partnership import listing_message_kwargs
@@ -82,18 +82,18 @@ class LiveCheck(discord.Client):
         app = await self.application_info()
         commands = await self.http.get_global_commands(app.id)
         names = sorted(c["name"] for c in commands)
-        self.add(OK if names else WARN, "Global slash commands", ", ".join(names) or "none registered yet (start Waypoint once)")
+        self.add(OK if names else WARN, "Global slash commands", ", ".join(names) or "none registered yet (start Parley once)")
 
         owner = app.team.owner if app.team and app.team.owner else app.owner
         try:
-            message = await owner.send("🧪 Waypoint live check: DMs work. (This message deletes itself.)")
+            message = await owner.send("🧪 Parley live check: DMs work. (This message deletes itself.)")
             await message.delete()
             self.add(OK, "DM to owner")
         except discord.HTTPException as exc:
             self.add(WARN, "DM to owner", f"failed: {exc.text or exc}")
 
         if self.guild_id is None:
-            self.add(WARN, "Test server", "set WAYPOINT_TEST_GUILD_ID to check permissions and posting")
+            self.add(WARN, "Test server", "set PARLEY_TEST_GUILD_ID to check permissions and posting")
             return
         guild = self.get_guild(self.guild_id)
         if guild is None:
@@ -106,10 +106,10 @@ class LiveCheck(discord.Client):
 
         channel = guild.get_channel(self.channel_id) if self.channel_id else None
         if not isinstance(channel, discord.TextChannel):
-            self.add(WARN, "Test channel", "set WAYPOINT_TEST_CHANNEL_ID to test posting and invites")
+            self.add(WARN, "Test channel", "set PARLEY_TEST_CHANNEL_ID to test posting and invites")
             return
         try:
-            message = await channel.send("🧪 Waypoint live check (deleting)", allowed_mentions=discord.AllowedMentions.none())
+            message = await channel.send("🧪 Parley live check (deleting)", allowed_mentions=discord.AllowedMentions.none())
             await message.delete()
             self.add(OK, "Send + delete message", f"#{channel.name}")
         except discord.HTTPException as exc:
@@ -118,14 +118,14 @@ class LiveCheck(discord.Client):
         # Render the real user-facing buttons: this is what catches emoji Discord refuses.
         for name, view in real_views().items():
             try:
-                message = await channel.send(f"🧪 Waypoint live check · {name}", view=view,
+                message = await channel.send(f"🧪 Parley live check · {name}", view=view,
                                              allowed_mentions=discord.AllowedMentions.none())
                 await message.delete()
                 self.add(OK, f"Buttons: {name}")
             except discord.HTTPException as exc:
                 self.add(FAIL, f"Buttons: {name}", (exc.text or str(exc))[:200])
         try:
-            invite = await channel.create_invite(max_age=60, max_uses=1, unique=True, reason="Waypoint live check")
+            invite = await channel.create_invite(max_age=60, max_uses=1, unique=True, reason="Parley live check")
             await invite.delete()
             self.add(OK, "Create invite")
         except discord.HTTPException as exc:
@@ -133,12 +133,12 @@ class LiveCheck(discord.Client):
 
 
 def main() -> int:
-    token = os.getenv("WAYPOINT_LIVE_TOKEN", "").strip()
+    token = os.getenv("PARLEY_LIVE_TOKEN", "").strip()
     if not token:
-        print("Set WAYPOINT_LIVE_TOKEN to a TEST bot's token (never your production token).", file=sys.stderr)
+        print("Set PARLEY_LIVE_TOKEN to a TEST bot's token (never your production token).", file=sys.stderr)
         return 2
-    guild_id = int(os.getenv("WAYPOINT_TEST_GUILD_ID") or 0) or None
-    channel_id = int(os.getenv("WAYPOINT_TEST_CHANNEL_ID") or 0) or None
+    guild_id = int(os.getenv("PARLEY_TEST_GUILD_ID") or 0) or None
+    channel_id = int(os.getenv("PARLEY_TEST_CHANNEL_ID") or 0) or None
     client = LiveCheck(guild_id, channel_id)
     try:
         asyncio.run(client.start(token))

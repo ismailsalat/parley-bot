@@ -1,6 +1,6 @@
 """Minimal stand-ins for Discord objects.
 
-They let unit tests check *Waypoint's decisions* (who may do what, what gets
+They let unit tests check *Parley's decisions* (who may do what, what gets
 sent where, what is stored). They do not claim to reproduce Discord itself;
 live behaviour is covered by tests/integration and ``python -m bot.tools.live_check``.
 """
@@ -49,7 +49,7 @@ def member(user_id: int, *, admin: bool = False, roles: tuple[int, ...] = ()) ->
 class FakeGuild:
     def __init__(self, guild_id: int = MAIN, members: dict[int, Any] | None = None) -> None:
         self.id = guild_id
-        self.name = "Waypoint HQ"
+        self.name = "Parley HQ"
         self.member_count = 530
         self.icon = None
         self.members = members or {}
@@ -64,7 +64,7 @@ class FakeGuild:
 
 
 class FakeBot:
-    """Enough of WaypointBot for services and guards."""
+    """Enough of ParleyBot for services and guards."""
 
     def __init__(
         self,

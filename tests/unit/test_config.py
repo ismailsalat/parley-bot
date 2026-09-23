@@ -99,7 +99,7 @@ def test_button_labels_are_configurable():
         runtime.default_config(), {"panels.buttons": {"post": {"label": "Advertise", "emoji": "🚀"}}}
     )
     assert config.button("post") == ("Advertise", "🚀")
-    assert config.button("find")[0] == "Find Partners"
+    assert config.button("find")[0] == "Browse Partners"
 
 
 def test_every_setting_has_a_default_key():

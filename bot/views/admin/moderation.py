@@ -14,10 +14,10 @@ from bot.utils.helpers import format_members, format_minimum, truncate
 from bot.views.admin.common import ConfirmPage, Field, FieldsModal, Page
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 
-async def listing_embed(bot: WaypointBot, guild_id: int) -> tuple[discord.Embed, Listing | None, bool]:
+async def listing_embed(bot: ParleyBot, guild_id: int) -> tuple[discord.Embed, Listing | None, bool]:
     """Staff view of one server: listing, contacts, ban, network, recent activity."""
     async with bot.db.session() as session:
         listing = await repository.get_listing(session, guild_id)
@@ -117,7 +117,7 @@ LIST_TITLES = {
 
 
 class ListPage(Page):
-    def __init__(self, bot: WaypointBot, owner_id: int, kind: str, *, back, rows: list[tuple[int, str]] | None = None) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, kind: str, *, back, rows: list[tuple[int, str]] | None = None) -> None:
         super().__init__(bot, owner_id, back=back)
         self.kind = kind
         self.rows = rows
@@ -178,7 +178,7 @@ class ListPage(Page):
 
 
 class ServerPage(Page):
-    def __init__(self, bot: WaypointBot, owner_id: int, guild_id: int, *, back) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, guild_id: int, *, back) -> None:
         super().__init__(bot, owner_id, back=back)
         self.guild_id = guild_id
         self._embed: discord.Embed | None = None
@@ -252,10 +252,10 @@ class ServerPage(Page):
         return callback
 
 
-async def apply_staff_action(bot: WaypointBot, action: str, guild_id: int, actor_id: int) -> None:
+async def apply_staff_action(bot: ParleyBot, action: str, guild_id: int, actor_id: int) -> None:
     """Shared by the Moderation page and /admin. Discord messages follow the database change."""
     if action == "ban" and guild_id == bot.runtime.hub.main_guild_id:
-        raise ValidationError("You can't ban the main Waypoint server.")
+        raise ValidationError("You can't ban the main Parley server.")
     async with bot.db.session() as session:
         listing = None
         if action == "suspend":
@@ -276,12 +276,12 @@ async def apply_staff_action(bot: WaypointBot, action: str, guild_id: int, actor
 
 
 class UserPage(Page):
-    def __init__(self, bot: WaypointBot, owner_id: int, user_id: int, *, back) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, user_id: int, *, back) -> None:
         super().__init__(bot, owner_id, back=back)
         self.user_id = user_id
 
     def content(self) -> str:
-        return f"## Blocked user\n<@{self.user_id}> (`{self.user_id}`) can't use Waypoint."
+        return f"## Blocked user\n<@{self.user_id}> (`{self.user_id}`) can't use Parley."
 
     def build(self) -> None:
         self.button("Unblock", self._unblock, emoji="🔓", style=discord.ButtonStyle.success, row=0)
@@ -294,6 +294,6 @@ class UserPage(Page):
             await self.back().show(inter, "🔓 User unblocked.")
 
         await ConfirmPage(
-            self.bot, self.owner_id, question="Let this user use Waypoint again?", confirm_label="Unblock",
+            self.bot, self.owner_id, question="Let this user use Parley again?", confirm_label="Unblock",
             on_confirm=apply, back=lambda: UserPage(self.bot, self.owner_id, self.user_id, back=self.back), danger=False,
         ).show(interaction)

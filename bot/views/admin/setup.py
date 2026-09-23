@@ -1,4 +1,4 @@
-"""/setup: turn a server into the Waypoint hub with a few buttons.
+"""/setup: turn a server into the Parley hub with a few buttons.
 
 Only the owner of the bot application can run it, so an unrelated server can't
 claim itself as the central hub.
@@ -20,7 +20,7 @@ from bot.views.base import get_bot, reply
 from bot.views.welcome import register_action, setup_invite_url
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ async def start_setup(interaction: discord.Interaction) -> None:
     bot = get_bot(interaction)
     guild = interaction.guild
     if guild is None:
-        await reply(interaction, "Run **/setup** inside the server that should become your Waypoint hub.")
+        await reply(interaction, "Run **/setup** inside the server that should become your Parley hub.")
         return
     await permissions.require_owner(bot, interaction.user.id)
     hub = bot.runtime.hub
@@ -52,12 +52,12 @@ async def start_setup(interaction: discord.Interaction) -> None:
 
 
 class AlreadySetUpPage(Page):
-    def __init__(self, bot: WaypointBot, owner_id: int, guild: discord.Guild) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, guild: discord.Guild) -> None:
         super().__init__(bot, owner_id)
         self.guild = guild
 
     def content(self) -> str:
-        return f"## Waypoint is already set up\n**{self.guild.name}** is your main server."
+        return f"## Parley is already set up\n**{self.guild.name}** is your main server."
 
     def build(self) -> None:
         self.button("Settings", self._settings, emoji="⚙️", row=0)
@@ -81,7 +81,7 @@ class AlreadySetUpPage(Page):
 # ---------------------------------------------------------------- saving
 
 
-async def save_hub(bot: WaypointBot, guild: discord.Guild, channels: dict[str, int], *, actor_id: int) -> None:
+async def save_hub(bot: ParleyBot, guild: discord.Guild, channels: dict[str, int], *, actor_id: int) -> None:
     """Store the main server + channels. A first-time setup starts in TEST mode."""
     changes: dict[str, object] = {"hub.main_guild_id": guild.id, "hub.setup_completed": True}
     changes.update({f"hub.{key}": value for key, value in channels.items()})
@@ -94,8 +94,8 @@ async def save_hub(bot: WaypointBot, guild: discord.Guild, channels: dict[str, i
     await bot.panels.restore_panels(force_edit=True)
 
 
-def permission_report(bot: WaypointBot, guild: discord.Guild) -> tuple[str, bool]:
-    """Checklist of Waypoint's permissions in each configured channel + how to fix problems."""
+def permission_report(bot: ParleyBot, guild: discord.Guild) -> tuple[str, bool]:
+    """Checklist of Parley's permissions in each configured channel + how to fix problems."""
     hub = bot.runtime.hub
     lines: list[str] = []
     all_ok = True
@@ -120,7 +120,7 @@ def permission_report(bot: WaypointBot, guild: discord.Guild) -> tuple[str, bool
         lines.append("⚠️ Missing **Create Invite** (only needed for the Test Invite button)")
     if not all_ok:
         lines.append(
-            "\n**How to fix:** open the channel's settings → **Permissions** → add **Waypoint** "
+            "\n**How to fix:** open the channel's settings → **Permissions** → add **Parley** "
             "and allow the ❌ items. Then press **Check Again**."
         )
     return "\n".join(lines), all_ok
@@ -130,15 +130,15 @@ def permission_report(bot: WaypointBot, guild: discord.Guild) -> tuple[str, bool
 
 
 class SetupWelcome(Page):
-    title = "Set Up Waypoint"
+    title = "Set Up Parley"
 
-    def __init__(self, bot: WaypointBot, owner_id: int, guild: discord.Guild) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, guild: discord.Guild) -> None:
         super().__init__(bot, owner_id)
         self.guild = guild
 
     def content(self) -> str:
         return (
-            "## Set up Waypoint\n"
+            "## Set up Parley\n"
             "Automatic Setup creates the recommended channels.\n"
             "Choose Channels uses channels you already have."
         )
@@ -169,7 +169,7 @@ class SetupWelcome(Page):
 
 
 class MoveHubPage(Page):
-    def __init__(self, bot: WaypointBot, owner_id: int, guild: discord.Guild, current_name: str) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, guild: discord.Guild, current_name: str) -> None:
         super().__init__(bot, owner_id)
         self.guild = guild
         self.current_name = current_name
@@ -177,7 +177,7 @@ class MoveHubPage(Page):
     def content(self) -> str:
         return (
             "## Change the main server?\n"
-            f"Waypoint's main server is currently **{self.current_name}**.\n"
+            f"Parley's main server is currently **{self.current_name}**.\n"
             f"Make **{self.guild.name}** the main server instead? Listings will be posted here from now on."
         )
 
@@ -194,7 +194,7 @@ class MoveHubPage(Page):
 
 
 class NoManageChannelsPage(Page):
-    def __init__(self, bot: WaypointBot, owner_id: int, guild: discord.Guild) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, guild: discord.Guild) -> None:
         super().__init__(bot, owner_id, back=lambda: SetupWelcome(bot, owner_id, guild))
         self.guild = guild
         self.show_permission = False
@@ -203,9 +203,9 @@ class NoManageChannelsPage(Page):
         text = "## I can't create channels automatically.\nChoose existing channels instead, or give me **Manage Channels**."
         if self.show_permission:
             text += (
-                "\n\n**Manage Channels** lets Waypoint create its five channels. Waypoint never needs Administrator.\n"
-                "Either give Waypoint's role **Manage Channels** in Server Settings → Roles, "
-                "or re-add Waypoint with the button below (it asks for exactly the right permissions)."
+                "\n\n**Manage Channels** lets Parley create its five channels. Parley never needs Administrator.\n"
+                "Either give Parley's role **Manage Channels** in Server Settings → Roles, "
+                "or re-add Parley with the button below (it asks for exactly the right permissions)."
             )
         return text
 
@@ -236,7 +236,7 @@ class ChannelPicker(Page):
 
     title = "Choose Channels"
 
-    def __init__(self, bot: WaypointBot, owner_id: int, guild: discord.Guild, *, back, page: int = 0) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, guild: discord.Guild, *, back, page: int = 0) -> None:
         super().__init__(bot, owner_id, back=back)
         self.guild = guild
         self.page = page
@@ -307,14 +307,14 @@ class ChannelPicker(Page):
 
 
 class ReadyPage(Page):
-    def __init__(self, bot: WaypointBot, owner_id: int, guild: discord.Guild, *, result=None) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, guild: discord.Guild, *, result=None) -> None:
         super().__init__(bot, owner_id)
         self.guild = guild
         self.result = result
 
     def content(self) -> str:
         report, ok = permission_report(self.bot, self.guild)
-        lines = ["## ✅ Waypoint is ready." if ok else "## ⚠️ Almost ready"]
+        lines = ["## ✅ Parley is ready." if ok else "## ⚠️ Almost ready"]
         if self.result is not None:
             if self.result.created:
                 lines.append("Created: " + ", ".join(f"#{n}" for n in self.result.created))
@@ -324,7 +324,7 @@ class ReadyPage(Page):
                 lines.append("Couldn't create: " + ", ".join(f"#{n}" for n in self.result.failed))
         mode = self.bot.runtime.hub.mode
         if mode == "test":
-            lines.append("\n🧪 Waypoint is in **TEST mode**: only staff can use it. Try everything, then press **Go Live**.")
+            lines.append("\n🧪 Parley is in **TEST mode**: only staff can use it. Try everything, then press **Go Live**.")
         lines.append("\n" + report)
         return "\n".join(lines)
 
@@ -352,17 +352,17 @@ class ReadyPage(Page):
 # ---------------------------------------------------------------- going live
 
 
-def go_live_page(bot: WaypointBot, owner_id: int, *, back) -> Page:
+def go_live_page(bot: ParleyBot, owner_id: int, *, back) -> Page:
     return GoLivePage(bot, owner_id, back=back)
 
 
 class GoLivePage(Page):
-    def __init__(self, bot: WaypointBot, owner_id: int, *, back) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, *, back) -> None:
         super().__init__(bot, owner_id, back=back)
         self.test_count: int | None = None
 
     def content(self) -> str:
-        text = "## Go Live 🟢\nEveryone will be able to use Waypoint and network ads will start."
+        text = "## Go Live 🟢\nEveryone will be able to use Parley and network ads will start."
         if self.test_count:
             text += (
                 f"\n\nThere are **{self.test_count} test listing(s)**. Delete them (recommended) "
@@ -397,8 +397,8 @@ class GoLivePage(Page):
         await self._live(interaction, keep=True)
 
 
-def confirm_mode(bot: WaypointBot, owner_id: int, mode: str, *, back) -> Page:
-    """TEST and OFF hide Waypoint from users, so they need a confirmation."""
+def confirm_mode(bot: ParleyBot, owner_id: int, mode: str, *, back) -> Page:
+    """TEST and OFF hide Parley from users, so they need a confirmation."""
 
     async def apply(interaction: discord.Interaction) -> None:
         async with bot.db.session() as session:
@@ -410,7 +410,7 @@ def confirm_mode(bot: WaypointBot, owner_id: int, mode: str, *, back) -> Page:
         await SettingsHome(bot, owner_id).show(interaction, f"Mode is now **{mode.upper()}**.")
 
     question = {
-        "test": "In **TEST** mode only staff can use Waypoint and network ads pause.",
+        "test": "In **TEST** mode only staff can use Parley and network ads pause.",
         "off": "In **OFF** mode users see a maintenance message. Staff can still use Settings.",
     }[mode]
     return ConfirmPage(bot, owner_id, question=question, confirm_label=f"Switch to {mode.upper()}", on_confirm=apply, back=back)

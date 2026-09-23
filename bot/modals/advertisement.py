@@ -44,7 +44,7 @@ class AdvertisementModal(discord.ui.Modal):
             label = "Invite link" if invite_required else "Invite link (optional)"
             self.invite = discord.ui.TextInput(
                 label=label,
-                placeholder=INVITE_PLACEHOLDER + " (leave blank and Waypoint will create one)",
+                placeholder=INVITE_PLACEHOLDER + " (leave blank and Parley will create one)",
                 default=default_invite or None,
                 required=False,
                 max_length=200,
@@ -65,7 +65,7 @@ class InviteModal(discord.ui.Modal):
         self._callback = on_submit
         self.invite = discord.ui.TextInput(
             label="Invite link",
-            placeholder=INVITE_PLACEHOLDER + " (blank = let Waypoint create one)",
+            placeholder=INVITE_PLACEHOLDER + " (blank = let Parley create one)",
             default=default_invite or None,
             required=False,
             max_length=200,

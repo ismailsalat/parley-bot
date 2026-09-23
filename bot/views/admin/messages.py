@@ -13,7 +13,7 @@ from bot.utils.helpers import truncate
 from bot.views.admin.common import ConfirmPage, Field, FieldsModal, Page, on_off
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 EXAMPLE_VALUES = {
     "server_name": "Example Café",
@@ -25,7 +25,7 @@ EXAMPLE_VALUES = {
 }
 
 
-def example(bot: WaypointBot, key: str, text: str | None = None) -> str:
+def example(bot: ParleyBot, key: str, text: str | None = None) -> str:
     """Render a template (or unsaved text) with example values."""
     spec = templates.TEMPLATES[key]
     values = {name: EXAMPLE_VALUES.get(name, "") for name in spec.placeholders}
@@ -74,7 +74,7 @@ class MessagesPage(Page):
 
 
 class TemplatePage(Page):
-    def __init__(self, bot: WaypointBot, owner_id: int, key: str, *, back) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, key: str, *, back) -> None:
         super().__init__(bot, owner_id, back=back)
         self.key = key
         self.show_preview = False
@@ -108,10 +108,10 @@ class TemplatePage(Page):
             try:
                 async with self.bot.db.session() as session:
                     await configuration.set_template(session, self.key, values["text"], actor_id=inter.user.id)
-            except Exception as exc:  # noqa: BLE001 - shown on the page (WaypointError) or handled
-                from bot.services.errors import WaypointError
+            except Exception as exc:  # noqa: BLE001 - shown on the page (ParleyError) or handled
+                from bot.services.errors import ParleyError
 
-                if isinstance(exc, WaypointError):
+                if isinstance(exc, ParleyError):
                     await self.show(inter, f"⚠️ {exc.user_message}")
                     return
                 raise
@@ -185,7 +185,7 @@ class ButtonsPage(Page):
 
     title = "Buttons"
 
-    def __init__(self, bot: WaypointBot, owner_id: int, *, back) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, *, back) -> None:
         super().__init__(bot, owner_id, back=back)
         self.selected: str | None = None
 
@@ -230,7 +230,7 @@ class ButtonsPage(Page):
         style = self.bot.runtime.button_style(key)
 
         async def submitted(inter: discord.Interaction, values: dict[str, str]) -> None:
-            from bot.services.errors import WaypointError
+            from bot.services.errors import ParleyError
 
             await inter.response.defer()
             try:
@@ -239,7 +239,7 @@ class ButtonsPage(Page):
                         session, key, label=values["label"], emoji=values["emoji"],
                         style=values["style"] or None, actor_id=inter.user.id,
                     )
-            except WaypointError as exc:
+            except ParleyError as exc:
                 await self.show(inter, f"⚠️ {exc.user_message}")
                 return
             await self._saved(inter, "✅ Button updated.")
@@ -281,7 +281,7 @@ class LinksPage(Page):
         cfg = self.bot.runtime.bot
 
         async def submitted(inter: discord.Interaction, values: dict[str, str]) -> None:
-            from bot.services.errors import WaypointError
+            from bot.services.errors import ParleyError
 
             await inter.response.defer()
             try:
@@ -290,7 +290,7 @@ class LinksPage(Page):
                         session, support=values["support"], rules=values["rules"], website=values["website"],
                         actor_id=inter.user.id,
                     )
-            except WaypointError as exc:
+            except ParleyError as exc:
                 await self.show(inter, f"⚠️ {exc.user_message}")
                 return
             await self.bot.settings_changed(refresh_panels=True)
@@ -341,7 +341,7 @@ class ThemePage(Page):
             await inter.response.defer()
             async with self.bot.db.session() as session:
                 await configuration.save(
-                    session, {"bot.name": values["name"].strip() or "Waypoint", "bot.activity_text": values["status"].strip()},
+                    session, {"bot.name": values["name"].strip() or "Parley", "bot.activity_text": values["status"].strip()},
                     actor_id=inter.user.id,
                 )
             await self.bot.settings_changed(refresh_panels=True)

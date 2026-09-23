@@ -32,7 +32,7 @@ def describe_database_error(exc: BaseException) -> tuple[str, str]:
         if isinstance(item, (ConnectionRefusedError, TimeoutError)) or name in ("ConnectionDoesNotExistError",):
             return "Database connection failed.", "Check DATABASE_URL and that the database is running, then try again."
         if "unable to open database file" in text:
-            return "Could not open the local database file.", "Check that the Waypoint folder is writable."
+            return "Could not open the local database file.", "Check that the Parley folder is writable."
         if isinstance(item, OSError):
             return "Database connection failed.", "Check DATABASE_URL and that the database is running, then try again."
     return "Database setup failed.", "Check DATABASE_URL and try again."

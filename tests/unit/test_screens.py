@@ -22,7 +22,7 @@ def make_bot(db):
     guild.get_channel = lambda _id: None
     guild.get_role = lambda _id: None
     guild.text_channels = []
-    guild.name = "Waypoint HQ"
+    guild.name = "Parley HQ"
     return bot
 
 
@@ -91,7 +91,7 @@ async def test_settings_screens_refuse_non_staff(db):
     page = settings.SettingsHome(bot, USER_ID)
     interaction = FakeInteraction(bot, USER_ID)
     assert await page.interaction_check(interaction) is False
-    assert "Only Waypoint staff" in interaction.response.sent[0]["content"]
+    assert "Only Parley staff" in interaction.response.sent[0]["content"]
 
 
 async def test_menus_belong_to_whoever_opened_them(db):

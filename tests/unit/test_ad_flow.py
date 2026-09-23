@@ -74,7 +74,7 @@ async def test_custom_emoji_warning_only_for_emoji_the_bot_cannot_use(db):
     bot = FakeBot(db)
     bot.get_emoji = lambda _id: None
     assert unusable_custom_emoji(bot, PASTED_AD) == [123456789012345678]
-    bot.get_emoji = lambda _id: object()  # Waypoint is in that server
+    bot.get_emoji = lambda _id: object()  # Parley is in that server
     assert unusable_custom_emoji(bot, PASTED_AD) == []
 
 

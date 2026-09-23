@@ -1,10 +1,10 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
-title Waypoint - Setup
+title Parley - Setup
 
 echo ============================================
-echo   Installing Waypoint
+echo   Installing Parley
 echo ============================================
 echo.
 
@@ -26,9 +26,9 @@ if not defined PY (
 )
 for /f "delims=" %%v in ('%PY% --version') do echo Found %%v
 
-rem ---- 2. Private Python environment for Waypoint ---------------------
+rem ---- 2. Private Python environment for Parley ---------------------
 if not exist ".venv\Scripts\python.exe" (
-    echo Preparing Waypoint's own Python environment ...
+    echo Preparing Parley's own Python environment ...
     %PY% -m venv .venv
     if errorlevel 1 (
         echo Could not prepare the Python environment. Try running setup.bat again.
@@ -39,7 +39,7 @@ if not exist ".venv\Scripts\python.exe" (
 call ".venv\Scripts\activate.bat"
 
 rem ---- 3. Install the exact tested versions ---------------------------
-echo Downloading what Waypoint needs (this can take a minute) ...
+echo Downloading what Parley needs (this can take a minute) ...
 python -m pip install --upgrade pip --quiet
 python -m pip install -r requirements.lock --quiet
 if errorlevel 1 (
@@ -60,13 +60,13 @@ rem ---- 5. Prepare the database -----------------------------------------
 echo Preparing the database ...
 python -m alembic upgrade head >nul 2>nul
 if errorlevel 1 (
-    echo Note: the database will be prepared when Waypoint starts.
+    echo Note: the database will be prepared when Parley starts.
 )
 
 rem ---- 6. Done -------------------------------------------------------------
 echo.
 echo ============================================
-echo   Waypoint is installed.
+echo   Parley is installed.
 echo ============================================
 echo.
 echo 1. Add your Discord token to .env

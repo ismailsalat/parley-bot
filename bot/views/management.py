@@ -21,7 +21,7 @@ from bot.views.listings import ListingDraft, ListingFormView
 from bot.views.welcome import action_button, persistent_view, register_action, show_screen
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class ManagementButton(
     # "refresh" stays accepted so buttons on older messages keep working after upgrades.
     template=r"wp:m:(?P<action>edit_ad|edit_info|partnerships|edit|preview|refresh|relist|remove|self_post):(?P<gid>\d+)",
 ):
-    def __init__(self, action: str, guild_id: int, bot: WaypointBot | None = None, row: int | None = None) -> None:
+    def __init__(self, action: str, guild_id: int, bot: ParleyBot | None = None, row: int | None = None) -> None:
         from bot.views.welcome import BUTTON_STYLE_MAP
 
         config_key = "relist" if action == "refresh" else action
@@ -123,7 +123,7 @@ class ManagementButton(
             await handle_error(interaction, exc)
 
 
-def manage_button(bot: WaypointBot, guild_id: int, guild_name: str, row: int | None = None) -> ManageButton:
+def manage_button(bot: ParleyBot, guild_id: int, guild_name: str, row: int | None = None) -> ManageButton:
     return ManageButton(guild_id, label=truncate(f"Manage {guild_name}", 80), row=row)
 
 
@@ -178,7 +178,7 @@ async def show_my_servers(interaction: discord.Interaction) -> None:
 # ---------------------------------------------------------------- management panel
 
 
-def management_text(bot: WaypointBot, listing: Listing, guild: discord.Guild) -> str:
+def management_text(bot: ParleyBot, listing: Listing, guild: discord.Guild) -> str:
     """Plain-text fallback for tests/logs. Discord uses ``management_embed``."""
     category = ", ".join(listing.categories) or "Other"
     partnership = (
@@ -203,7 +203,7 @@ def management_text(bot: WaypointBot, listing: Listing, guild: discord.Guild) ->
     return "\n".join(lines)
 
 
-def management_embed(bot: WaypointBot, listing: Listing, guild: discord.Guild) -> discord.Embed:
+def management_embed(bot: ParleyBot, listing: Listing, guild: discord.Guild) -> discord.Embed:
     """A calm, information-first control card for one server listing."""
     category = ", ".join(listing.categories) or "Other"
     embed = discord.Embed(
@@ -255,7 +255,7 @@ def management_embed(bot: WaypointBot, listing: Listing, guild: discord.Guild) -
     return embed
 
 
-def management_view(bot: WaypointBot, listing: Listing, guild: discord.Guild) -> discord.ui.View:
+def management_view(bot: ParleyBot, listing: Listing, guild: discord.Guild) -> discord.ui.View:
     """Server-specific actions grouped by task, not one wall of buttons."""
     ad_url = listing_jump_url(bot.runtime.hub.main_guild_id, listing.channel_id, listing.message_id)
     all_listings = action_button(bot, "directory", style=discord.ButtonStyle.secondary, row=3)
@@ -273,7 +273,7 @@ def management_view(bot: WaypointBot, listing: Listing, guild: discord.Guild) ->
     )
 
 
-async def load_managed_listing(bot: WaypointBot, guild_id: int, user_id: int) -> tuple[discord.Guild, Listing, list[int]]:
+async def load_managed_listing(bot: ParleyBot, guild_id: int, user_id: int) -> tuple[discord.Guild, Listing, list[int]]:
     guild, _member = await permissions.require_manager(bot, guild_id, user_id)
     async with bot.db.session() as session:
         listing = await repository.get_listing(session, guild_id)
@@ -292,7 +292,7 @@ async def show_management(interaction: discord.Interaction, guild_id: int) -> No
 class PartnershipSettingsView(OwnedView):
     """One-server partnership switch with an explicit state before changing it."""
 
-    def __init__(self, bot: WaypointBot, owner_id: int, guild_id: int, *, enabled: bool) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, guild_id: int, *, enabled: bool) -> None:
         super().__init__(owner_id)
         self.bot = bot
         self.guild_id = guild_id
@@ -518,7 +518,7 @@ refresh = relist
 
 @register_action("relist")
 async def relist_from_anywhere(interaction: discord.Interaction) -> None:
-    """Relist from DM, the Waypoint hub, or the connected server itself."""
+    """Relist from DM, the Parley hub, or the connected server itself."""
     bot = get_bot(interaction)
 
     # In a connected non-hub server, that server is the obvious target.
@@ -577,9 +577,6 @@ async def remove(interaction: discord.Interaction, guild_id: int) -> None:
     await permissions.require_manager(bot, guild_id, done.user.id)
     async with bot.db.session() as session:
         listing = await listing_service.remove_listing(session, guild_id=guild_id, actor_id=done.user.id, now=utcnow())
-    await bot.panels.delete_listing_message(listing.channel_id, listing.controls_message_id)
-    await bot.panels.delete_listing_message(listing.channel_id, listing.message_id)
-    async with bot.db.session() as session:
-        await listing_service.record_message(session, guild_id=guild_id, channel_id=None, message_id=None)
+    await bot.panels.take_down_listing(listing)
     await bot.log_event(f"**{guild.name}** (`{guild_id}`) removed its listing ({done.user.mention}).")
     await done.edit_original_response(content=f"The listing for **{guild.name}** was removed.", view=None)

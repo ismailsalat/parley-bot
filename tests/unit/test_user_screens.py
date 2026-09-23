@@ -115,7 +115,7 @@ async def test_my_listing_is_a_short_summary(db, config):
     message = sent(interaction)
     embed = message["embed"]
     assert embed.title == "🧭 Listing Manager"
-    assert "Waypoint HQ" in (embed.description or "") and "Gaming" in (embed.description or "")
+    assert "Parley HQ" in (embed.description or "") and "Gaming" in (embed.description or "")
     assert any("Partnerships" in field.name and "Open" in field.value for field in embed.fields)
     assert any("Relist" in field.name for field in embed.fields)
     assert "Invite" not in str(embed.to_dict()) and "Contacts" not in str(embed.to_dict())
@@ -164,7 +164,7 @@ async def test_one_result_at_a_time(db, config):
     interaction = FakeInteraction(bot, ADMIN_ID)
     await view.show(interaction)
     message = sent(interaction)
-    assert labels(message["view"]) == ["Request Partnership", "Next Server", "View Ad", "Back"]
+    assert labels(message["view"]) == ["Send Partner Request", "Next Match", "View Server Ad", "Home"]
     assert message.get("content") is None
     assert message["embed"].title == "Server 1"
     assert "Gaming • 742 members" in message["embed"].description

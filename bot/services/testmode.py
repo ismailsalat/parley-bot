@@ -1,9 +1,9 @@
 """TEST mode support: test listings, Test Center messages and going live.
 
-In TEST mode only staff can use Waypoint, network ads are paused, DMs to
+In TEST mode only staff can use Parley, network ads are paused, DMs to
 non-staff users are held back (the acting admin gets a copy instead) and new
 listings are flagged ``is_test`` so they never appear to real users after
-Waypoint goes LIVE unless the owner explicitly keeps them.
+Parley goes LIVE unless the owner explicitly keeps them.
 """
 
 from __future__ import annotations
@@ -20,12 +20,12 @@ from bot.services.errors import ValidationError
 from bot.database.models import Cooldown, ListingContact, ListingStatus, RequestStatus, utcnow
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
 TEST_LABEL = "🧪 TEST"
-TEST_LISTING_NOTE = "-# 🧪 TEST listing: only visible while Waypoint is in test mode"
+TEST_LISTING_NOTE = "-# 🧪 TEST listing: only visible while Parley is in test mode"
 
 SAMPLE_AD = (
     "# 🌙 Example Café\n"
@@ -34,7 +34,7 @@ SAMPLE_AD = (
     "- 🎮 Weekly game nights\n"
     "- 🎨 Art & music channels\n"
     "- 🤝 Friendly staff\n\n"
-    "> *Everyone is welcome!* `@everyone` pings are never sent by Waypoint."
+    "> *Everyone is welcome!* `@everyone` pings are never sent by Parley."
 )
 
 
@@ -42,7 +42,7 @@ async def record_message(session: AsyncSession, *, channel_id: int, message_id: 
     await repository.add_test_message(session, channel_id=channel_id, message_id=message_id, kind=kind)
 
 
-async def delete_test_messages(bot: WaypointBot) -> int:
+async def delete_test_messages(bot: ParleyBot) -> int:
     """Delete every message the Test Center posted. Returns how many were removed."""
     async with bot.db.session() as session:
         rows = await repository.test_messages(session)
@@ -80,7 +80,7 @@ async def keep_test_listings(session: AsyncSession) -> list[int]:
     return kept
 
 
-async def go_live(bot: WaypointBot, *, keep_listings: bool, actor_id: int) -> str:
+async def go_live(bot: ParleyBot, *, keep_listings: bool, actor_id: int) -> str:
     """Switch to LIVE. Test listings are removed unless ``keep_listings``."""
     from bot.services import configuration
 
@@ -102,7 +102,7 @@ async def go_live(bot: WaypointBot, *, keep_listings: bool, actor_id: int) -> st
         await bot.panels.update_listing_message(guild_id)
     deleted = await delete_test_messages(bot)
     log.info("mode.live actor_id=%s kept=%s removed=%s test_messages=%s", actor_id, len(refresh), len(removed), deleted)
-    parts = ["🟢 **Waypoint is LIVE.**"]
+    parts = ["🟢 **Parley is LIVE.**"]
     if removed:
         parts.append(f"Removed {len(removed)} test listing(s).")
     if refresh:
@@ -147,7 +147,7 @@ async def reset_test_cooldowns(session: AsyncSession, *, actor_id: int) -> tuple
     return len(guild_ids), result.rowcount or 0
 
 
-async def clear_test_listings(bot: WaypointBot, *, actor_id: int) -> int:
+async def clear_test_listings(bot: ParleyBot, *, actor_id: int) -> int:
     """Hard-delete every TEST listing and its Discord-owned helper messages.
 
     This exists so staff can repeat the first-time listing flow without waiting
@@ -155,7 +155,7 @@ async def clear_test_listings(bot: WaypointBot, *, actor_id: int) -> int:
     LIVE mode and never removes a non-test listing.
     """
     if bot.runtime.hub.mode != "test":
-        raise ValidationError("Clear Test Listings is only available while Waypoint is in TEST mode.")
+        raise ValidationError("Clear Test Listings is only available while Parley is in TEST mode.")
 
     # Close any temporary self-post permission windows first so a hard reset can
     # never leave a member with Send Messages in the locked directory.
@@ -180,6 +180,16 @@ async def clear_test_listings(bot: WaypointBot, *, actor_id: int) -> int:
             (listing.review_channel_id, listing.review_message_id)
             for listing in rows
             if listing.review_channel_id and listing.review_message_id
+        ]
+        refs += [
+            (listing.partner_channel_id, listing.partner_message_id)
+            for listing in rows
+            if listing.partner_channel_id and listing.partner_message_id
+        ]
+        refs += [
+            (listing.partner_channel_id, listing.partner_controls_message_id)
+            for listing in rows
+            if listing.partner_channel_id and listing.partner_controls_message_id
         ]
         if guild_ids:
             cooldown_conditions = []

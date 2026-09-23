@@ -1,4 +1,4 @@
-"""The Waypoint bot: wiring between Discord, the database and the services."""
+"""The Parley bot: wiring between Discord, the database and the services."""
 
 from __future__ import annotations
 
@@ -27,18 +27,18 @@ from bot.utils.mentions import safe_allowed_mentions
 log = logging.getLogger(__name__)
 
 JOIN_CHANNEL_NAMES = ("general", "start-here", "welcome", "bot-commands", "bots", "commands", "chat")
-VIEW_MODULES = ("bot.views.network", "bot.views.admin.settings", "bot.views.admin.setup", "bot.views.admin.test_center")
+VIEW_MODULES = ("bot.views.network","bot.views.partner_posts",  "bot.views.admin.settings", "bot.views.admin.setup", "bot.views.admin.test_center")
 
 
 def build_intents(message_content: bool = True) -> discord.Intents:
-    """Only what Waypoint needs. ``members`` and ``message_content`` are privileged.
+    """Only what Parley needs. ``members`` and ``message_content`` are privileged.
 
     * guilds          – servers, channels, roles
     * members         – (privileged) knowing which servers a user can manage
     * guild_messages  – notice new top-level posts in #find-partners and deleted panels
     * dm_messages     – a DM opens the control panel
     Message *content* is needed for the controlled "Paste My Own Ad" flow so
-    Waypoint can moderate the one message the owner posts in #server-directory.
+    Parley can moderate the one message the owner posts in #server-directory.
     """
     intents = discord.Intents.none()
     intents.guilds = True
@@ -69,7 +69,7 @@ def persistent_items() -> list[type[discord.ui.DynamicItem]]:
     ]
 
 
-class WaypointTree(app_commands.CommandTree):
+class ParleyTree(app_commands.CommandTree):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         from bot.views.base import guard
 
@@ -81,7 +81,7 @@ class WaypointTree(app_commands.CommandTree):
         await handle_error(interaction, error)
 
 
-class WaypointBot(commands.Bot):
+class ParleyBot(commands.Bot):
     def __init__(self, settings: Settings, db: Database) -> None:
         self.settings = settings
         self.db = db
@@ -94,8 +94,8 @@ class WaypointBot(commands.Bot):
             command_prefix=commands.when_mentioned,
             intents=build_intents(settings.message_content_intent),
             help_command=None,
-            tree_cls=WaypointTree,
-            allowed_mentions=safe_allowed_mentions(),  # second safety net: nothing Waypoint sends pings
+            tree_cls=ParleyTree,
+            allowed_mentions=safe_allowed_mentions(),  # second safety net: nothing Parley sends pings
             status=discord.Status.online,
         )
         moderation = self.runtime.moderation
@@ -141,7 +141,7 @@ class WaypointBot(commands.Bot):
             log.info("Synced %d staff commands to the main server", len(synced))
         except discord.Forbidden:
             log.error(
-                "Could not register staff commands in the main server (%s). Re-invite Waypoint with the "
+                "Could not register staff commands in the main server (%s). Re-invite Parley with the "
                 "applications.commands scope.", guild_id,
             )
         except discord.HTTPException as exc:
@@ -182,7 +182,7 @@ class WaypointBot(commands.Bot):
         recovered = await self_post.restore_abandoned_sessions(self)
         if recovered:
             log.info("Recovered %d abandoned direct-post window(s)", recovered)
-        # #server-directory is always read-only except for Waypoint's controlled
+        # #server-directory is always read-only except for Parley's controlled
         # three-minute, one-message posting window.
         await self.panels.ensure_directory_locked()
         try:
@@ -195,7 +195,7 @@ class WaypointBot(commands.Bot):
     async def _rename_legacy_hub_channels(self) -> None:
         """Rename only untouched legacy default hub channel names to the clearer v1 names.
 
-        Custom names are never changed. If Waypoint lacks Manage Channels, the old names
+        Custom names are never changed. If Parley lacks Manage Channels, the old names
         keep working and no setup breaks.
         """
         if not self.hub.configured:
@@ -216,7 +216,7 @@ class WaypointBot(commands.Bot):
                 continue
             old_name = channel.name
             try:
-                await channel.edit(name=slot.name, reason="Waypoint clearer default channel names")
+                await channel.edit(name=slot.name, reason="Parley clearer default channel names")
             except discord.HTTPException as exc:
                 log.info("Could not rename legacy channel #%s to #%s: %s", old_name, slot.name, exc)
                 continue
@@ -229,7 +229,7 @@ class WaypointBot(commands.Bot):
         from bot.services import health
 
         if not self.hub.configured:
-            log.warning("Waypoint isn't set up yet. In Discord, run /setup in your main server.")
+            log.warning("Parley isn't set up yet. In Discord, run /setup in your main server.")
             await self._send_owner_onboarding()
             return
         try:
@@ -261,7 +261,7 @@ class WaypointBot(commands.Bot):
         try:
             await owner.send(
                 f"👋 **{self.runtime.bot.name} is running!**\n"
-                "1. Add me to the server that should be your Waypoint hub.\n"
+                "1. Add me to the server that should be your Parley hub.\n"
                 "2. In that server, type **/setup** and press **Automatic Setup**.\n"
                 "Everything else is done with buttons.",
                 view=view,
@@ -346,10 +346,14 @@ class WaypointBot(commands.Bot):
             await self._dm_control_panel(message)
             return
 
-        # #server-directory is not a chat channel. Even if an Administrator or
-        # unusual role overwrite bypasses the normal deny, Waypoint removes any
-        # message that is not the one active controlled ad submission.
-        if self.hub.listings_channel_id and message.channel.id == self.hub.listings_channel_id:
+        # Server Directory and Find a Partner are controlled feeds. A manager gets
+        # a short one-message window; everything else is removed.
+        protected = {
+            cid
+            for cid in (self.hub.listings_channel_id, self.hub.looking_channel_id)
+            if cid
+        }
+        if message.channel.id in protected:
             from bot.views import self_post
 
             if self_post.is_active_submission(message.channel.id, message.author.id, message.id):
@@ -357,30 +361,28 @@ class WaypointBot(commands.Bot):
             try:
                 await message.delete()
             except discord.HTTPException as exc:
-                log.warning("Could not remove unauthorized directory message %s: %s", message.id, exc)
+                log.warning("Could not remove unauthorized feed message %s: %s", message.id, exc)
             return
-
-        looking = self.hub.looking_channel_id
-        if (
-            looking
-            and message.channel.id == looking
-            and message.type == discord.MessageType.default  # replies are MessageType.reply
-            and message.reference is None
-        ):
-            self.panels.schedule_looking_panel_move()
 
     async def on_message_edit(self, before: discord.Message, after: discord.Message) -> None:
         """Owner-authored ads cannot be silently changed after moderation.
 
         Discord lets authors edit their own message even when Send Messages is later
-        denied. Waypoint therefore removes a direct edit and tells the owner to use
+        denied. Parley therefore removes a direct edit and tells the owner to use
         the controlled Edit Ad flow. One successful edit is available per Relist cycle.
         """
         if after.author.bot or after.guild is None:
             return
-        if not self.hub.listings_channel_id or after.channel.id != self.hub.listings_channel_id:
-            return
         if before.content == after.content:
+            return
+
+        if self.hub.looking_channel_id and after.channel.id == self.hub.looking_channel_id:
+            from bot.views import partner_posts
+
+            await partner_posts.handle_direct_edit(self, before, after)
+            return
+
+        if not self.hub.listings_channel_id or after.channel.id != self.hub.listings_channel_id:
             return
 
         from bot.services import listings as listing_service
@@ -404,11 +406,11 @@ class WaypointBot(commands.Bot):
         available = listing_service.ad_edit_available(listing)
         await self.panels.self_post_message_removed(listing.guild_id)
         text = (
-            "Your ad was edited directly, so Waypoint removed it so changes can't bypass moderation.\n\n"
+            "Your ad was edited directly, so Parley removed it so changes can't bypass moderation.\n\n"
             "You still have **one ad edit** this Relist. Open **My Listing → Edit Ad** to post the replacement."
             if available
             else
-            "Your ad was edited again after this Relist's edit was already used, so Waypoint removed it.\n\n"
+            "Your ad was edited again after this Relist's edit was already used, so Parley removed it.\n\n"
             "Relist when the cooldown ends to unlock another ad edit."
         )
         try:
@@ -448,14 +450,17 @@ class WaypointBot(commands.Bot):
             return
         await self.panels.handle_message_deleted(payload.channel_id, payload.message_id)
 
-        # If an owner deletes their own direct-post ad, keep the directory card
-        # valid (without a dead View Ad button) until they replace it.
+        # Keep owner-authored public-post state valid after manual deletion.
         if payload.channel_id == self.hub.listings_channel_id:
             async with self.db.session() as session:
                 listing = await repository.get_listing_by_message(session, payload.message_id)
             if listing is not None:
                 await self.panels.self_post_message_removed(listing.guild_id)
                 log.info("listing.self_post_deleted guild_id=%s message_id=%s", listing.guild_id, payload.message_id)
+        elif payload.channel_id == self.hub.looking_channel_id:
+            from bot.views import partner_posts
+
+            await partner_posts.handle_raw_delete(self, payload.channel_id, payload.message_id)
 
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel) -> None:
         if channel.guild.id != self.hub.main_guild_id:
@@ -492,7 +497,7 @@ class WaypointBot(commands.Bot):
                     return candidate
 
         # If there is no familiar channel, use the first channel everyone can see where
-        # Waypoint can speak. This avoids silently doing nothing without posting in a
+        # Parley can speak. This avoids silently doing nothing without posting in a
         # private staff channel.
         everyone = guild.default_role
         for candidate in guild.text_channels:
@@ -501,7 +506,7 @@ class WaypointBot(commands.Bot):
         return None
 
     async def _dm_join_fallback(self, guild: discord.Guild) -> None:
-        """Explain the next step when Waypoint cannot speak in any server channel."""
+        """Explain the next step when Parley cannot speak in any server channel."""
         owner = guild.owner
         if owner is None:
             try:
@@ -513,10 +518,10 @@ class WaypointBot(commands.Bot):
             return
 
         embed = discord.Embed(
-            title="Waypoint needs a channel",
+            title="Parley needs a channel",
             description=(
-                f"Waypoint was added to **{guild.name}**, but I can't send messages in any public channel yet.\n\n"
-                "Give Waypoint **View Channel**, **Send Messages**, and **Read Message History** in a channel "
+                f"Parley was added to **{guild.name}**, but I can't send messages in any public channel yet.\n\n"
+                "Give Parley **View Channel**, **Send Messages**, and **Read Message History** in a channel "
                 "that **@everyone can view**, then run `/connect` there. Members can stay read-only.\n\n"
                 "Private staff/bot-only channels do not count. Nothing has been posted automatically."
             ),
@@ -551,13 +556,13 @@ class WaypointBot(commands.Bot):
         log.info("Removed from server %s (%s)", guild.name, guild.id)
         listing = None
         async with self.db.session() as session:
-            await network.disable(session, guild_id=guild.id, reason="Waypoint was removed from the server")
+            await network.disable(session, guild_id=guild.id, reason="Parley was removed from the server")
             listing = await repository.get_listing(session, guild.id)
             if listing is not None and listing.status in ListingStatus.LIVE:
                 listing.status = ListingStatus.EXPIRED
         if listing is not None and listing.status == ListingStatus.EXPIRED:
             await self.panels.take_down_listing(listing)
-        await self.log_event(f"➖ Removed from **{guild.name}** (`{guild.id}`). Listing hidden until Waypoint is added back.")
+        await self.log_event(f"➖ Removed from **{guild.name}** (`{guild.id}`). Listing hidden until Parley is added back.")
 
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild) -> None:
         if before.name == after.name and before.icon == after.icon:

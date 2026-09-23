@@ -1,7 +1,7 @@
 """Panel state: the bottom panel always follows the newest listing and survives restarts.
 
 The Discord channel is an in-memory stand-in that records sends/deletes, so
-these tests verify Waypoint's ordering and persistence logic. Real Discord
+these tests verify Parley's ordering and persistence logic. Real Discord
 delivery is covered by tests/integration.
 """
 
@@ -270,7 +270,7 @@ async def test_changed_panel_text_is_applied_live(db, bot):
 
 
 async def test_owner_posted_listing_keeps_controls_and_panel_underneath(db, config, bot):
-    """Post It Myself: owner's message, Waypoint's buttons, then the moving panel."""
+    """Post It Myself: owner's message, Parley's buttons, then the moving panel."""
     service = service_for(bot)
     channel = bot.channels[LISTINGS]
     async with db.session() as session:
@@ -284,7 +284,7 @@ async def test_owner_posted_listing_keeps_controls_and_panel_underneath(db, conf
         listing = await repository.get_listing(session, 1)
     assert listing.message_id == owner_message.id and listing.self_posted is True
     assert listing.controls_message_id is not None
-    # owner's message, Waypoint's controls, then the panel at the bottom
+    # owner's message, Parley's controls, then the panel at the bottom
     assert channel.ids() == [owner_message.id, listing.controls_message_id, panel.message_id]
 
 

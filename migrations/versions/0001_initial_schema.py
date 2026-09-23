@@ -1,4 +1,4 @@
-"""Initial Waypoint schema.
+"""Initial Parley schema.
 
 Migrations are frozen snapshots: they use plain SQLAlchemy types rather than
 importing the application's models, so later model changes never break them.

@@ -1,7 +1,7 @@
 """Mention safety.
 
-Advertisements may *show* @everyone, @here, role or user mentions, but Waypoint
-must never actually ping anyone with them. Every message Waypoint sends uses
+Advertisements may *show* @everyone, @here, role or user mentions, but Parley
+must never actually ping anyone with them. Every message Parley sends uses
 ``AllowedMentions.none()``; the client-wide default is also set to none as a
 second safety net (see ``bot.core``).
 """

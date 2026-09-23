@@ -14,14 +14,14 @@ from bot.services import permissions
 from bot.views.management import show_management, show_my_servers
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 
 class ManageCommands(commands.Cog):
-    def __init__(self, bot: WaypointBot) -> None:
+    def __init__(self, bot: ParleyBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="manage", description="Edit, Relist or remove your Waypoint listing.")
+    @app_commands.command(name="manage", description="Edit, Relist or remove your Parley listing.")
     async def manage(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild
         member = interaction.user
@@ -34,5 +34,5 @@ class ManageCommands(commands.Cog):
         await show_my_servers(interaction)
 
 
-async def setup(bot: WaypointBot) -> None:
+async def setup(bot: ParleyBot) -> None:
     await bot.add_cog(ManageCommands(bot))

@@ -23,7 +23,7 @@ from bot.views.base import OwnedView, get_bot, reply
 from bot.views.welcome import ActionButton, add_bot_button, persistent_view, register_action
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
@@ -38,19 +38,19 @@ def sample_listing(invite_url: str | None = None) -> Listing:
     )
 
 
-async def main_invite(bot: WaypointBot) -> str | None:
+async def main_invite(bot: ParleyBot) -> str | None:
     from bot.views.listings import create_invite
 
     guild = bot.get_guild(bot.runtime.hub.main_guild_id) if bot.runtime.hub.main_guild_id else None
     return await create_invite(guild) if guild else None
 
 
-async def record(bot: WaypointBot, message: discord.Message, kind: str) -> None:
+async def record(bot: ParleyBot, message: discord.Message, kind: str) -> None:
     async with bot.db.session() as session:
         await testmode.record_message(session, channel_id=message.channel.id, message_id=message.id, kind=kind)
 
 
-def test_listing_view(bot: WaypointBot, invite: str | None) -> discord.ui.View:
+def test_listing_view(bot: ParleyBot, invite: str | None) -> discord.ui.View:
     """Looks exactly like a real listing's buttons; Request Partnership runs the simulation."""
     items: list[discord.ui.Item] = []
     if invite:
@@ -61,7 +61,7 @@ def test_listing_view(bot: WaypointBot, invite: str | None) -> discord.ui.View:
     return persistent_view(*items)
 
 
-async def post_test_listing(bot: WaypointBot, actor_id: int) -> str:
+async def post_test_listing(bot: ParleyBot, actor_id: int) -> str:
     channel = bot.panels.listings_channel()
     if channel is None:
         return "⚠️ Choose a listings channel first (Settings → Channels)."
@@ -70,7 +70,7 @@ async def post_test_listing(bot: WaypointBot, actor_id: int) -> str:
     try:
         message = await bot.panels.post_above_panel(channel, LISTINGS_PANEL, view=test_listing_view(bot, invite), **kwargs)
     except discord.Forbidden:
-        return f"❌ Waypoint can't post in {channel.mention}. Check its permissions there."
+        return f"❌ Parley can't post in {channel.mention}. Check its permissions there."
     await record(bot, message, "listing")
     note = f"✅ Test listing posted: {message.jump_url} (the panel moved under it)."
     if not invite:
@@ -78,7 +78,7 @@ async def post_test_listing(bot: WaypointBot, actor_id: int) -> str:
     return note
 
 
-async def simulate_partnership(bot: WaypointBot, user: discord.abc.User) -> str:
+async def simulate_partnership(bot: ParleyBot, user: discord.abc.User) -> str:
     """Send the admin the exact request DM, with working Accept/Decline that only simulate."""
     embed = discord.Embed(
         title="New Partnership Request",
@@ -99,7 +99,7 @@ async def simulate_partnership(bot: WaypointBot, user: discord.abc.User) -> str:
 
 
 class SimulatedRequestView(OwnedView):
-    def __init__(self, bot: WaypointBot, owner_id: int) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int) -> None:
         super().__init__(owner_id, timeout=900)
         self.bot = bot
 
@@ -129,7 +129,7 @@ class SimulatedRequestView(OwnedView):
 async def test_request_button(interaction: discord.Interaction) -> None:
     bot = get_bot(interaction)
     if not await permissions.is_staff(bot, interaction.user.id):
-        raise PermissionDenied("This is a Waypoint test listing. It's only for staff testing.")
+        raise PermissionDenied("This is a Parley test listing. It's only for staff testing.")
     await reply(interaction, await simulate_partnership(bot, interaction.user))
 
 
@@ -138,7 +138,7 @@ class TestCenterPage(Page):
 
     def content(self) -> str:
         return (
-            "## Test Waypoint\n"
+            "## Test Parley\n"
             "Run realistic tests without waiting on normal user timing. Test-only cleanup lives under **Test Utilities**."
         )
 
@@ -274,7 +274,7 @@ class NetworkTestPage(Page):
                 kwargs["view"] = view
                 message = await channel.send(**kwargs)
             except discord.HTTPException:
-                await self.show(interaction, f"❌ Waypoint can't post in {channel.mention}. Check its permissions.")
+                await self.show(interaction, f"❌ Parley can't post in {channel.mention}. Check its permissions.")
                 return
             await record(self.bot, message, "network")
             await self.show(interaction, f"✅ Posted: {message.jump_url}")

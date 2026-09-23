@@ -1,5 +1,5 @@
 """Permission rules. Discord objects are replaced by minimal stand-ins: these
-tests check Waypoint's *decisions*, not Discord's permission calculation."""
+tests check Parley's *decisions*, not Discord's permission calculation."""
 
 from __future__ import annotations
 

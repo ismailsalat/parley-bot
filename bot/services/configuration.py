@@ -1,4 +1,4 @@
-"""Changing Waypoint's settings from Discord.
+"""Changing Parley's settings from Discord.
 
 All ordinary configuration is stored in the ``runtime_settings`` table (dotted
 keys, see bot.config.runtime). This module validates changes before they are
@@ -257,7 +257,7 @@ def parse_import(raw: str, *, include_hub: bool = False) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise ValidationError("That file isn't valid JSON.") from exc
     if not isinstance(payload, dict) or payload.get("waypoint_settings_version") != EXPORT_VERSION:
-        raise ValidationError("That isn't a Waypoint settings export.")
+        raise ValidationError("That isn't a Parley settings export.")
     overrides = payload.get("overrides")
     if not isinstance(overrides, dict):
         raise ValidationError("The export has no settings in it.")

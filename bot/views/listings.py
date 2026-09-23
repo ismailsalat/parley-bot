@@ -13,7 +13,7 @@ from bot.database.models import Listing, ListingStatus
 from bot.modals.advertisement import AdvertisementModal, InviteModal
 from bot.services import listings as listing_service
 from bot.services import moderation, permissions
-from bot.services.errors import MANAGE_SERVER_REQUIRED, PermissionDenied, ValidationError, WaypointError
+from bot.services.errors import MANAGE_SERVER_REQUIRED, PermissionDenied, ValidationError, ParleyError
 from bot.utils.helpers import truncate, utcnow
 from bot.config import templates
 from bot.utils.mentions import safe_allowed_mentions
@@ -33,7 +33,7 @@ from bot.views.base import (
 from bot.views.welcome import action_button, add_bot_button, persistent_view, register_action
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ async def create_invite(guild: discord.Guild) -> str | None:
         ):
             continue
         try:
-            invite = await channel.create_invite(max_age=0, max_uses=0, unique=False, reason="Waypoint listing invite")
+            invite = await channel.create_invite(max_age=0, max_uses=0, unique=False, reason="Parley listing invite")
         except discord.HTTPException as exc:
             log.info("Could not create invite in guild %s channel %s: %s", guild.id, channel.id, exc)
             continue
@@ -79,7 +79,7 @@ async def create_invite(guild: discord.Guild) -> str | None:
     return None
 
 
-async def resolve_invite(bot: WaypointBot, guild: discord.Guild, raw: str | None) -> str | None:
+async def resolve_invite(bot: ParleyBot, guild: discord.Guild, raw: str | None) -> str | None:
     """Validate a typed invite (must point at *this* guild) or create one."""
     raw = (raw or "").strip()
     if raw:
@@ -101,7 +101,7 @@ async def resolve_invite(bot: WaypointBot, guild: discord.Guild, raw: str | None
         if created:
             return created
     if rules.invite_required:
-        raise InviteMissing("Waypoint couldn't create an invite. Choose a channel for it or paste one.")
+        raise InviteMissing("Parley couldn't create an invite. Choose a channel for it or paste one.")
     return None
 
 
@@ -122,7 +122,7 @@ async def validate_contacts(guild: discord.Guild, contact_ids: list[int]) -> lis
 
 def _picker_status(listing: Listing | None, *, public_channel_ok: bool) -> str:
     if not public_channel_ok:
-        return "Needs a member-visible Waypoint channel"
+        return "Needs a member-visible Parley channel"
     if listing is None or listing.status == ListingStatus.REMOVED:
         return "Ready to list"
     if listing.status == ListingStatus.ACTIVE:
@@ -140,8 +140,8 @@ class PostServerPickerView(OwnedView):
     """Clean server picker for Post My Server.
 
     The old flow skipped the picker when only one *unlisted* server remained,
-    which made users think Waypoint only knew about one of their servers. This
-    view always shows every server the user can currently manage where Waypoint
+    which made users think Parley only knew about one of their servers. This
+    view always shows every server the user can currently manage where Parley
     is installed, and clearly marks the listing state of each one.
     """
 
@@ -149,7 +149,7 @@ class PostServerPickerView(OwnedView):
 
     def __init__(
         self,
-        bot: WaypointBot,
+        bot: ParleyBot,
         owner_id: int,
         guilds: list[discord.Guild],
         listings: dict[int, Listing],
@@ -232,7 +232,7 @@ class PostServerPickerView(OwnedView):
         embed = discord.Embed(
             title="Post a Server",
             description=(
-                f"Waypoint is connected to **{len(self.guilds):,}** server"
+                f"Parley is connected to **{len(self.guilds):,}** server"
                 f"{'s' if len(self.guilds) != 1 else ''} you can manage.\n"
                 "Pick any server below. Live listings open their management page; "
                 "unlisted or expired servers continue to setup."
@@ -263,7 +263,7 @@ class PostServerPickerView(OwnedView):
         guild_id = int(self._select.values[0])
         guild = self.bot.get_guild(guild_id)
         if guild is None:
-            raise ValidationError("Waypoint is no longer in that server.")
+            raise ValidationError("Parley is no longer in that server.")
 
         listing = self.listings.get(guild_id)
         if listing is not None and listing.status in ListingStatus.LIVE:
@@ -298,7 +298,7 @@ async def start_post_flow(interaction: discord.Interaction) -> None:
         await open_listing_form(interaction, guild)
         return
 
-    # In DMs / the Waypoint hub, always show every connected server the user can
+    # In DMs / the Parley hub, always show every connected server the user can
     # manage. Do not silently skip live servers or auto-open the only unlisted one.
     candidates = [
         g for g in permissions.cached_manageable_guilds(bot, user.id)
@@ -309,8 +309,8 @@ async def start_post_flow(interaction: discord.Interaction) -> None:
         embed = discord.Embed(
             title="No connected servers yet",
             description=(
-                "I couldn't find a server where you have **Manage Server** and Waypoint is installed.\n\n"
-                "Add Waypoint to a server you manage, then come back to **Post My Server**."
+                "I couldn't find a server where you have **Manage Server** and Parley is installed.\n\n"
+                "Add Parley to a server you manage, then come back to **Post My Server**."
             ),
             color=bot.runtime.bot.color_primary,
         )
@@ -363,7 +363,7 @@ class ListingFormView(OwnedView):
 
     def __init__(
         self,
-        bot: WaypointBot,
+        bot: ParleyBot,
         owner_id: int,
         guild_id: int,
         guild_name: str,
@@ -531,12 +531,12 @@ class ListingFormView(OwnedView):
         """Check the ad, make sure there is an invite, then show the preview."""
         try:
             listing_service.clean_advertisement(self.draft.ad_text, self.bot.runtime)
-        except WaypointError as exc:
+        except ParleyError as exc:
             await AdModeView(self).show(interaction, exc.user_message)
             return
         guild = self.bot.get_guild(self.guild_id)
         if guild is None:
-            await self._rerender(interaction, "Waypoint is no longer in that server.")
+            await self._rerender(interaction, "Parley is no longer in that server.")
             return
         if not interaction.response.is_done():
             await interaction.response.defer()
@@ -547,7 +547,7 @@ class ListingFormView(OwnedView):
                 view = InviteHelpView(self, guild)
                 await interaction.edit_original_response(content=view.render(), view=view)
                 return
-            except WaypointError as exc:
+            except ParleyError as exc:
                 await AdModeView(self).show(interaction, exc.user_message)
                 return
         await show_preview(interaction, self, edit_original=True)
@@ -556,7 +556,7 @@ class ListingFormView(OwnedView):
         """Let the owner post the real advertisement message in #server-directory."""
         guild = self.bot.get_guild(self.guild_id)
         if guild is None:
-            await self._rerender(interaction, "Waypoint is no longer in that server.")
+            await self._rerender(interaction, "Parley is no longer in that server.")
             return
 
         if not interaction.response.is_done():
@@ -569,7 +569,7 @@ class ListingFormView(OwnedView):
                 view = InviteHelpView(self, guild, next_step="self_post")
                 await interaction.edit_original_response(content=view.render(), view=view)
                 return
-            except WaypointError as exc:
+            except ParleyError as exc:
                 await interaction.edit_original_response(
                     content=f"## Can't open posting window\n{exc.user_message}",
                     view=persistent_view(home_button(self.bot)),
@@ -600,7 +600,7 @@ class ListingFormView(OwnedView):
                 on_accept=accepted,
                 on_review=held_for_review,
             )
-        except WaypointError as exc:
+        except ParleyError as exc:
             await interaction.edit_original_response(
                 content=f"## Can't open posting window\n{exc.user_message}",
                 view=persistent_view(home_button(self.bot)),
@@ -626,7 +626,7 @@ class ListingFormView(OwnedView):
         await interaction.response.edit_message(content="Publishing your listing…", view=None)
         try:
             result = await self._create_and_publish(interaction)
-        except WaypointError as exc:
+        except ParleyError as exc:
             self._build()
             await interaction.edit_original_response(content=self.render(exc.user_message), view=self)
             return
@@ -693,10 +693,10 @@ class ListingFormView(OwnedView):
     async def _submit_invite(self, interaction: discord.Interaction, raw: str) -> None:
         guild = self.bot.get_guild(self.guild_id)
         if guild is None:
-            raise ValidationError("Waypoint is no longer in that server.")
+            raise ValidationError("Parley is no longer in that server.")
         try:
             self.draft.invite_url = await resolve_invite(self.bot, guild, raw)
-        except WaypointError as exc:
+        except ParleyError as exc:
             await self._rerender(interaction, exc.user_message)
             return
         self.invite_changed = True
@@ -721,7 +721,7 @@ class ListingFormView(OwnedView):
                     actor_id=interaction.user.id,
                     now=utcnow(),
                 )
-        except WaypointError as exc:
+        except ParleyError as exc:
             self._build()
             await interaction.edit_original_response(content=self.render(exc.user_message), view=self)
             return
@@ -733,13 +733,13 @@ class ListingFormView(OwnedView):
         )
 
 
-def manage_button_for(bot: WaypointBot, guild_id: int, name: str):
+def manage_button_for(bot: ParleyBot, guild_id: int, name: str):
     from bot.views.management import manage_button  # local import: management imports this module
 
     return manage_button(bot, guild_id, name)
 
 
-async def after_edit(bot: WaypointBot, listing: Listing, guild_name: str) -> str | None:
+async def after_edit(bot: ParleyBot, listing: Listing, guild_name: str) -> str | None:
     """Route an edited listing: new review if it waits for staff, otherwise update the live message."""
     if listing.awaiting_review:
         await send_for_review(bot, listing, guild_name)
@@ -759,7 +759,7 @@ class InviteMissing(ValidationError):
 
 
 class InviteHelpView(OwnedView):
-    """Shown when Waypoint couldn't make an invite by itself: pick a channel or paste one."""
+    """Shown when Parley couldn't make an invite by itself: pick a channel or paste one."""
 
     def __init__(self, form: ListingFormView, guild: discord.Guild, *, next_step: str = "preview") -> None:
         super().__init__(form.owner_id)
@@ -786,7 +786,7 @@ class InviteHelpView(OwnedView):
     def render(self, notice: str | None = None) -> str:
         text = (
             f"## Invite for {self.guild.name}\n"
-            "Waypoint couldn't create an invite automatically.\n"
+            "Parley couldn't create an invite automatically.\n"
             "**Choose a channel** people should land in, or **paste** an invite link."
         )
         return f"⚠️ {notice}\n\n{text}" if notice else text
@@ -798,12 +798,12 @@ class InviteHelpView(OwnedView):
             return
         if not channel.permissions_for(self.guild.me).create_instant_invite:
             await interaction.response.edit_message(
-                content=self.render(f"Waypoint needs **Create Invite** in #{channel.name}. Give it that permission or paste an invite."),
+                content=self.render(f"Parley needs **Create Invite** in #{channel.name}. Give it that permission or paste an invite."),
                 view=self,
             )
             return
         try:
-            invite = await channel.create_invite(max_age=0, max_uses=0, unique=False, reason="Waypoint listing invite")
+            invite = await channel.create_invite(max_age=0, max_uses=0, unique=False, reason="Parley listing invite")
         except discord.HTTPException as exc:
             log.info("Invite creation failed guild_id=%s channel=%s: %s", self.guild.id, channel.id, exc)
             await interaction.response.edit_message(content=self.render("Discord didn't allow that invite. Try another channel."), view=self)
@@ -818,7 +818,7 @@ class InviteHelpView(OwnedView):
                 if not raw.strip():
                     raise ValidationError("Please paste an invite link.")
                 self.form.draft.invite_url = await resolve_invite(self.form.bot, self.guild, raw)
-            except WaypointError as exc:
+            except ParleyError as exc:
                 await inter.response.edit_message(content=self.render(exc.user_message), view=self)
                 return
             self.stop()
@@ -848,7 +848,7 @@ def preview_content(ad_text: str) -> str:
 
 
 class AdModeView(OwnedView):
-    """Step 2: paste your own ad, or let Waypoint build one."""
+    """Step 2: paste your own ad, or let Parley build one."""
 
     def __init__(self, form: ListingFormView) -> None:
         super().__init__(form.owner_id)
@@ -885,7 +885,7 @@ class AdModeView(OwnedView):
 
 
 class BuilderModal(discord.ui.Modal):
-    """Only asks for what Waypoint doesn't already know."""
+    """Only asks for what Parley doesn't already know."""
 
     def __init__(self, form: ListingFormView) -> None:
         super().__init__(title="Simple Ad Builder", timeout=900)
@@ -964,13 +964,13 @@ class PreviewView(OwnedView):
         await AdModeView(self.form).show(interaction)
 
 
-def unusable_custom_emoji(bot: WaypointBot, text: str) -> list[int]:
-    """Custom emoji from other servers that Waypoint can't render when it reposts the ad."""
+def unusable_custom_emoji(bot: ParleyBot, text: str) -> list[int]:
+    """Custom emoji from other servers that Parley can't render when it reposts the ad."""
     return [eid for eid in listing_service.custom_emoji_ids(text) if bot.get_emoji(eid) is None]
 
 
 class EmojiWarningView(OwnedView):
-    """Rare builder edge case: warn only when Waypoint itself cannot render an emoji."""
+    """Rare builder edge case: warn only when Parley itself cannot render an emoji."""
 
     def __init__(self, form: ListingFormView, missing: list[int]) -> None:
         super().__init__(form.owner_id)
@@ -984,7 +984,7 @@ class EmojiWarningView(OwnedView):
         self.add_item(edit)
 
     def render(self) -> str:
-        return "## Some emoji may not show\nA custom emoji in this generated ad may not work when Waypoint posts it."
+        return "## Some emoji may not show\nA custom emoji in this generated ad may not work when Parley posts it."
 
     async def show(self, interaction: discord.Interaction) -> None:
         if interaction.response.is_done():
@@ -1063,7 +1063,7 @@ def _info_changes(listing: Listing) -> list[str]:
     return lines
 
 
-def review_payload(bot: WaypointBot, listing: Listing, guild_name: str, member_count: int | None) -> dict:
+def review_payload(bot: ParleyBot, listing: Listing, guild_name: str, member_count: int | None) -> dict:
     """The review message: the ad exactly as it would be posted, plus a staff summary."""
     edit = listing.status != ListingStatus.PENDING
     pending = listing.pending_changes or {}
@@ -1101,7 +1101,7 @@ def review_payload(bot: WaypointBot, listing: Listing, guild_name: str, member_c
     return {"content": ad_text[:2000], "embeds": embeds, "view": view, "allowed_mentions": safe_allowed_mentions()}
 
 
-async def send_for_review(bot: WaypointBot, listing: Listing, guild_name: str) -> bool:
+async def send_for_review(bot: ParleyBot, listing: Listing, guild_name: str) -> bool:
     """Post a review in the staff log. A newer submission replaces (outdates) the previous review."""
     channel = bot.log_channel()
     if channel is None:
@@ -1119,7 +1119,7 @@ async def send_for_review(bot: WaypointBot, listing: Listing, guild_name: str) -
     return True
 
 
-async def mark_review_closed(bot: WaypointBot, channel_id: int | None, message_id: int | None, status: str) -> None:
+async def mark_review_closed(bot: ParleyBot, channel_id: int | None, message_id: int | None, status: str) -> None:
     channel = bot.get_channel(channel_id) if channel_id else None
     if channel is None or not message_id or not hasattr(channel, "get_partial_message"):
         return
@@ -1135,7 +1135,7 @@ async def mark_review_closed(bot: WaypointBot, channel_id: int | None, message_i
 async def review(interaction: discord.Interaction, guild_id: int, approve: bool, revision: int | None) -> None:
     bot = get_bot(interaction)
     if not await permissions.is_staff(bot, interaction.user.id):
-        raise PermissionDenied("Only Waypoint staff can review listings.")
+        raise PermissionDenied("Only Parley staff can review listings.")
     await interaction.response.defer(ephemeral=True, thinking=True)
     async with bot.db.session() as session:
         listing, kind = await listing_service.review_listing(
@@ -1163,11 +1163,11 @@ async def review(interaction: discord.Interaction, guild_id: int, approve: bool,
 async def ban_from_review(interaction: discord.Interaction, guild_id: int) -> None:
     bot = get_bot(interaction)
     if not await permissions.is_staff(bot, interaction.user.id):
-        raise PermissionDenied("Only Waypoint staff can do that.")
+        raise PermissionDenied("Only Parley staff can do that.")
     if guild_id == bot.runtime.hub.main_guild_id:
-        raise ValidationError("You can't ban the main Waypoint server.")
+        raise ValidationError("You can't ban the main Parley server.")
     confirm = ConfirmView(interaction.user.id, confirm_label="Ban Server")
-    await reply(interaction, "Ban this server from Waypoint? Its listing is removed and it can't list again.", view=confirm)
+    await reply(interaction, "Ban this server from Parley? Its listing is removed and it can't list again.", view=confirm)
     await confirm.wait()
     if not confirm.confirmed or confirm.interaction is None:
         return

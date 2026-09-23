@@ -168,7 +168,7 @@ async def test_exhausted_screen_offers_past_partners_only_when_there_are_some(db
     labels = lambda view: [getattr(c, "item", c).label for c in view.children]  # noqa: E731
     assert labels(with_past)[0] == "Show Past Partners"
     assert "Show Past Partners" not in labels(without)
-    assert labels(without) == ["Try Another Category", "Show Again"]
+    assert labels(without) == ["Show Again"]
 
 
 async def test_past_only_mode_does_not_mix_new_servers_back_in(db, network, config):

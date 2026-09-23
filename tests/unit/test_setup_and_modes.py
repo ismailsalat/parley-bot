@@ -58,7 +58,7 @@ async def test_automatic_setup_creates_only_the_five_channels():
     guild = SetupGuild()
     result = await setup_service.automatic_setup(guild, staff_roles=[])
     assert [name for name, _ in guild.created] == [
-        "start-here", "server-directory", "find-partners", "support", "waypoint-logs"
+        "start-here", "server-directory", "find-partners", "support", "parley-logs"
     ]
     assert result.ok and not result.failed
     assert "general" not in [name for name, _ in guild.created]
@@ -91,7 +91,8 @@ def test_channel_permissions():
     logs = setup_service.overwrites_for(slot["log_channel_id"], guild, [staff])
     assert logs[guild.default_role].view_channel is False and logs[staff].view_channel is True
     looking = setup_service.overwrites_for(slot["looking_channel_id"], guild, [])
-    assert guild.default_role not in looking  # people talk freely there
+    assert looking[guild.default_role].send_messages is False
+    assert looking[guild.me].send_messages is True
     for overwrites in (listings, logs, looking):
         assert not any(o.administrator for o in overwrites.values() if hasattr(o, "administrator"))
 

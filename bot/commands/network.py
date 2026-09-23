@@ -11,11 +11,11 @@ from discord.ext import commands
 from bot.views.network import start_network_flow
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 
 class NetworkCommands(commands.Cog):
-    def __init__(self, bot: WaypointBot) -> None:
+    def __init__(self, bot: ParleyBot) -> None:
         self.bot = bot
 
     @app_commands.command(name="network", description="Receive partner ads in a channel of your choice (optional).")
@@ -25,5 +25,5 @@ class NetworkCommands(commands.Cog):
         await start_network_flow(interaction)
 
 
-async def setup(bot: WaypointBot) -> None:
+async def setup(bot: ParleyBot) -> None:
     await bot.add_cog(NetworkCommands(bot))

@@ -44,16 +44,20 @@ def test_permissions_are_minimal():
 async def test_dm_home_is_simple_for_users_and_has_settings_for_staff():
     bot = UIBot()
     _content, view = control_panel(bot)
-    assert labels(view) == ["Post My Server", "Find Partners", "My Listing", "Requests", "Add Waypoint"]
+    assert labels(view) == ["Post Server Ad", "Browse Partners", "My Server Listings", "My Partner Posts", "Requests"]
     _content, staff_view = control_panel(bot, staff=True)
     assert "Settings" in labels(staff_view)
 
 
 async def test_start_here_panel_stays_simple_and_optional_links_still_work_elsewhere():
     runtime = default_config()
-    runtime = replace(runtime, bot=replace(runtime.bot, support_url="https://discord.gg/help", website_url="https://example.com"))
+    runtime = replace(
+        runtime,
+        bot=replace(runtime.bot, support_url="https://discord.gg/help", website_url="https://example.com"),
+        hub=HubConfig(main_guild_id=1, welcome_channel_id=1, listings_channel_id=2, looking_channel_id=3),
+    )
     _content, view = welcome_panel(UIBot(runtime))
-    assert labels(view) == ["Find Partners", "Post My Server", "Directory Overview", "Add Waypoint"]
+    assert labels(view) == ["Server Directory", "Find a Partner", "Post Server Ad", "Post Partner Ad"]
 
     links = optional_links(UIBot(runtime))
     assert {item.url for item in links} == {"https://discord.gg/help", "https://example.com"}
@@ -63,13 +67,13 @@ async def test_start_here_panel_stays_simple_and_optional_links_still_work_elsew
 async def test_join_message_is_a_simple_connected_card():
     bot = UIBot(replace(default_config(), hub=HubConfig(main_guild_id=1)))
     embed, view = join_message(bot)
-    assert embed.title == "Waypoint is connected"
-    assert "connected to Waypoint" in (embed.description or "")
+    assert embed.title == "Parley is connected"
+    assert "connected to Parley" in (embed.description or "")
     assert "Nothing is posted automatically" in (embed.description or "")
     assert labels(view) == ["List This Server"]
 
     _embed, fresh = join_message(UIBot())  # fresh owner can set up the main hub here
-    assert labels(fresh) == ["List This Server", "Set Up Waypoint"]
+    assert labels(fresh) == ["List This Server", "Set Up Parley"]
     assert "setup" in [getattr(c, "item", c).custom_id.split(":")[-1] for c in fresh.children]
 
 
@@ -95,9 +99,9 @@ async def test_network_ad_is_plain_message_with_footer_and_buttons():
 
     listing = Listing(guild_id=1, advertisement_text="## Ad @everyone", accepting_partnerships=True, invite_url="https://discord.gg/x")
     kwargs = network_ad_kwargs(UIBot(), listing)
-    assert kwargs["content"].startswith("## Ad @everyone\n-# 🌐 Shared by the Waypoint network")
+    assert kwargs["content"].startswith("## Ad @everyone\n-# 🌐 Shared by the Parley network")
     assert "embed" not in kwargs and kwargs["allowed_mentions"].to_dict()["parse"] == []
-    assert labels(kwargs["view"]) == ["Join Server", "Request Partnership", "Add Waypoint"]
+    assert labels(kwargs["view"]) == ["Join Server", "Request Partnership", "Add Parley"]
 
 
 async def test_test_listing_is_labelled():

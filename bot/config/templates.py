@@ -36,7 +36,7 @@ TEMPLATES: dict[str, TemplateSpec] = {
     for spec in (
         _spec("welcome", "panels.welcome_panel_text", "Welcome panel", (), "Shown in #start-here."),
         _spec("dm_home", "messages.dm_home", "DM home", (), "Top of the DM control panel."),
-        _spec("join_message", "messages.join_message", "Bot added to a server", ("server_name",), "Sent once when Waypoint joins a server."),
+        _spec("join_message", "messages.join_message", "Bot added to a server", ("server_name",), "Sent once when Parley joins a server."),
         _spec("listings_panel", "panels.listings_panel_text", "Listings panel", (), "Panel under the newest listing."),
         _spec("looking_panel", "panels.looking_panel_text", "Looking panel", (), "Panel in #find-partners."),
         _spec("listing_created", "messages.listing_created", "Listing published", ("server_name", "jump_url"), "After a server is connected and its ad is posted."),
@@ -53,8 +53,8 @@ TEMPLATES: dict[str, TemplateSpec] = {
         _spec("request_accepted", "messages.request_accepted", "Partnership accepted", ("requester_server", "target_server"), "DM to both sides; contacts are listed below it."),
         _spec("request_declined", "messages.request_declined", "Partnership declined", ("requester_server", "target_server"), "DM to the requester."),
         _spec("network_footer", "messages.network_footer", "Network ad footer", (), "Line under network ads. Leave empty for none."),
-        _spec("maintenance", "messages.maintenance", "Off-mode message", (), "What users see when Waypoint is OFF."),
-        _spec("test_mode", "messages.test_mode", "Test-mode message", (), "What users see while Waypoint is in TEST mode."),
+        _spec("maintenance", "messages.maintenance", "Off-mode message", (), "What users see when Parley is OFF."),
+        _spec("test_mode", "messages.test_mode", "Test-mode message", (), "What users see while Parley is in TEST mode."),
         _spec("support", "messages.support", "Support message", (), "Shown with the Support button."),
         _spec("help", "messages.help", "How it works / help", (), "/help and the How It Works button."),
     )

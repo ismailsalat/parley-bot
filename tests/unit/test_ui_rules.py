@@ -170,4 +170,4 @@ async def test_user_screens_use_valid_emoji_and_colours(db):
             if item.emoji is not None:
                 assert is_valid_emoji(str(item.emoji))
             if item.style is discord.ButtonStyle.success:
-                assert item.label == "Find Partners"  # the single highlighted public CTA
+                assert item.label == "Browse Partners"  # the single highlighted public CTA

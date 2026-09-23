@@ -10,11 +10,11 @@ from discord import app_commands
 
 from bot.config import templates
 from bot.services import moderation, permissions
-from bot.services.errors import WaypointError
+from bot.services.errors import ParleyError
 from bot.utils.mentions import safe_allowed_mentions
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ GENERIC_ERROR = "Something went wrong on our side. Please try again in a moment.
 MENU_TIMEOUT_SECONDS = 600  # transient menus; interaction tokens last 15 minutes
 
 
-def get_bot(interaction: discord.Interaction) -> WaypointBot:
+def get_bot(interaction: discord.Interaction) -> ParleyBot:
     return interaction.client  # type: ignore[return-value]
 
 
@@ -59,7 +59,7 @@ async def handle_error(interaction: discord.Interaction, error: BaseException) -
     original = getattr(error, "original", error)
     if isinstance(original, app_commands.CheckFailure) and interaction.response.is_done():
         return  # the check already told the user why
-    if isinstance(original, WaypointError):
+    if isinstance(original, ParleyError):
         message = original.user_message
     elif isinstance(original, app_commands.NoPrivateMessage):
         message = "Please use this command inside a server."
@@ -67,7 +67,7 @@ async def handle_error(interaction: discord.Interaction, error: BaseException) -
         message = "You need Manage Server permission."
     elif isinstance(original, discord.Forbidden):
         log.warning("Discord refused an action (missing permission): %s", original)
-        message = "Waypoint is missing a permission it needs for that. Please check its role and channel permissions."
+        message = "Parley is missing a permission it needs for that. Please check its role and channel permissions."
     else:
         log.error("Unhandled interaction error", exc_info=original)
         message = GENERIC_ERROR
@@ -86,11 +86,11 @@ async def guard(interaction: discord.Interaction) -> bool:
     async with bot.db.session() as session:
         blocked = await moderation.is_user_blocked(session, bot.runtime, interaction.user.id)
     if blocked:
-        await reply(interaction, "You can't use Waypoint.")
+        await reply(interaction, "You can't use Parley.")
         return False
     mode = bot.runtime.hub.mode
     if mode != "live" and not await permissions.is_staff_cached(bot, interaction.user.id):
-        # TEST: only staff may try things. OFF: Waypoint is unavailable to users.
+        # TEST: only staff may try things. OFF: Parley is unavailable to users.
         await reply(interaction, templates.render(bot.runtime, "maintenance" if mode == "off" else "test_mode"))
         return False
     return True
@@ -151,7 +151,7 @@ def guild_info(guild: discord.Guild):
     )
 
 
-async def send_dm(bot: WaypointBot, user_id: int, **kwargs: Any) -> bool:
+async def send_dm(bot: ParleyBot, user_id: int, **kwargs: Any) -> bool:
     """Best-effort DM. Returns False (and logs) when the user can't be reached."""
     kwargs.setdefault("allowed_mentions", safe_allowed_mentions())
     try:
@@ -166,14 +166,14 @@ async def send_dm(bot: WaypointBot, user_id: int, **kwargs: Any) -> bool:
     return True
 
 
-def user_label(bot: WaypointBot, user_id: int) -> str:
+def user_label(bot: ParleyBot, user_id: int) -> str:
     """A mention plus a readable name, since mentions in DMs may not resolve."""
     user = bot.get_user(user_id)
     return f"<@{user_id}> ({user.name})" if user else f"<@{user_id}>"
 
 
 async def deliver_dms(
-    bot: WaypointBot, user_ids: list[int], *, actor_id: int | None, **kwargs: Any
+    bot: ParleyBot, user_ids: list[int], *, actor_id: int | None, **kwargs: Any
 ) -> tuple[int, int]:
     """DM several users, respecting TEST/OFF mode. Returns (delivered, held_back).
 
@@ -203,7 +203,7 @@ async def deliver_dms(
     return delivered, held
 
 
-def home_button(bot: WaypointBot, row: int | None = None) -> discord.ui.Item:
+def home_button(bot: ParleyBot, row: int | None = None) -> discord.ui.Item:
     """Grey navigation. Always place it on its own final row, never between actions."""
     from bot.views.welcome import action_button
 

@@ -1,7 +1,7 @@
 """Controlled owner-authored advertisements for #server-directory.
 
 "Paste My Own Ad" means exactly that: the verified server manager posts one
-real Discord message in #server-directory. Waypoint opens a short one-message
+real Discord message in #server-directory. Parley opens a short one-message
 window, closes it immediately after the first message, moderates the content,
 and keeps the channel locked for everyone else.
 """
@@ -25,7 +25,7 @@ from bot.utils.helpers import format_members, utcnow
 from bot.utils.mentions import safe_allowed_mentions
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
@@ -65,42 +65,47 @@ def is_active_submission(channel_id: int, user_id: int, message_id: int | None =
     return window.first_message_id == message_id
 
 
-def availability(bot: WaypointBot, guild_id: int) -> Availability:
+def availability(bot: ParleyBot, guild_id: int, *, channel: discord.TextChannel | None = None) -> Availability:
     """Whether direct posting can be offered safely right now."""
     rules = bot.runtime.listings
     if not rules.allow_self_post:
-        return Availability(False, "Posting your own ad is switched off by Waypoint staff.")
+        return Availability(False, "Posting your own ad is switched off by Parley staff.")
     if not bot.intents.message_content:
         return Availability(
             False,
-            "Waypoint can't read the ad to check it. Enable the **Message Content** intent for the bot first.",
+            "Parley can't read the ad to check it. Enable the **Message Content** intent for the bot first.",
         )
-    channel = bot.panels.listings_channel()
+    channel = channel or bot.panels.listings_channel()
     if channel is None:
-        return Availability(False, "The server directory isn't set up yet.")
+        return Availability(False, "The destination channel isn't set up yet.")
     me = channel.guild.me
     perms = channel.permissions_for(me)
     if not (perms.manage_roles and perms.manage_messages):
         return Availability(
             False,
-            f"Waypoint needs **Manage Permissions** and **Manage Messages** in #{channel.name} to open a "
+            f"Parley needs **Manage Permissions** and **Manage Messages** in #{channel.name} to open a "
             "one-message posting window safely.",
         )
     return Availability(True)
 
 
-def _instructions(channel: discord.TextChannel, seconds: int, user: discord.abc.User) -> str:
+def _instructions(
+    channel: discord.TextChannel,
+    seconds: int,
+    user: discord.abc.User,
+    *,
+    post_title: str = "ad",
+) -> str:
     minutes = max(1, seconds // 60)
     url = f"https://discord.com/channels/{channel.guild.id}/{channel.id}"
     return (
         "## Your posting window is open\n"
         f"**Go to:** [#{channel.name}]({url})\n"
         f"**Time limit:** {minutes} minute{'s' if minutes != 1 else ''}\n\n"
-        "Send your advertisement as **one message**. As soon as you post, Waypoint locks your "
+        f"Send your {post_title.lower()} as **one message**. As soon as you post, Parley locks your "
         "posting permission again automatically.\n"
-        "-# I also pinged you in the directory so the channel is easy to find."
+        "-# I also pinged only you in the channel so it is easy to find."
     )
-
 
 def _previous_overwrite(channel: discord.TextChannel, member: discord.Member) -> discord.PermissionOverwrite | None:
     """Return the exact member overwrite if one already exists."""
@@ -127,7 +132,7 @@ async def _grant(
     elif hasattr(temporary, "external_emojis"):
         temporary.external_emojis = True
     await channel.set_permissions(
-        member, overwrite=temporary, reason="Waypoint: one-message advertisement window"
+        member, overwrite=temporary, reason="Parley: one-message advertisement window"
     )
 
 
@@ -136,7 +141,7 @@ async def _restore(
 ) -> bool:
     """Restore exactly what the member had before the temporary posting window."""
     try:
-        await channel.set_permissions(member, overwrite=previous, reason="Waypoint: advertisement window closed")
+        await channel.set_permissions(member, overwrite=previous, reason="Parley: advertisement window closed")
         return True
     except discord.HTTPException as exc:
         log.warning("self_post.restore_failed guild=%s member=%s: %s", channel.guild.id, member.id, exc)
@@ -158,10 +163,10 @@ def _overwrite_from_bits(had_overwrite: bool, allow_value: int, deny_value: int)
     return discord.PermissionOverwrite.from_pair(allow, deny)
 
 
-async def restore_abandoned_sessions(bot: WaypointBot) -> int:
+async def restore_abandoned_sessions(bot: ParleyBot) -> int:
     """Close any posting window left behind by a crash/redeploy.
 
-    A persisted row exists before Waypoint grants Send Messages. On a clean close
+    A persisted row exists before Parley grants Send Messages. On a clean close
     the row is removed. Therefore every row found at startup is abandoned and can
     be restored immediately, even if its original three-minute timer has not ended.
     """
@@ -221,7 +226,7 @@ async def _delete(message: discord.Message) -> None:
 async def _ghost_ping(channel: discord.TextChannel, member: discord.Member) -> None:
     """Ping only the posting member, then immediately remove the ping message.
 
-    Waypoint normally suppresses every mention. This is the one intentional
+    Parley normally suppresses every mention. This is the one intentional
     exception: the user explicitly opened a short posting window, and the ping
     is scoped to that exact member (never roles, @here or @everyone).
     """
@@ -243,6 +248,12 @@ async def run_submission(
     guild_id: int,
     guild_name: str,
     *,
+    channel: discord.TextChannel | None = None,
+    post_title: str = "Ad",
+    retry_hint: str = "Post Server Ad or My Server Listings",
+    allow_review: bool = True,
+    respect_approval_required: bool = True,
+    success_text: str | None = None,
     draft_contacts=None,
     on_created=None,
     on_accept: Callable[[str, discord.Message], Awaitable[None]] | None = None,
@@ -253,19 +264,19 @@ async def run_submission(
     Different servers can post concurrently. We only block a second window from
     the same member or another admin trying to post the same server at once.
     """
-    bot: WaypointBot = interaction.client  # type: ignore[assignment]
-    state = availability(bot, guild_id)
+    bot: ParleyBot = interaction.client  # type: ignore[assignment]
+    channel = channel or bot.panels.listings_channel()
+    state = availability(bot, guild_id, channel=channel)
     if not state.ok:
         raise ValidationError(state.reason)
-    channel = bot.panels.listings_channel()
     assert channel is not None
     member = channel.guild.get_member(interaction.user.id)
     if member is None:
-        raise ValidationError("Join the Waypoint server first, then try again.")
+        raise ValidationError("Join the Parley server first, then try again.")
     await permissions.require_manager(bot, guild_id, interaction.user.id)
     if not channel.permissions_for(member).view_channel:
         raise ValidationError(
-            f"You need permission to view #{channel.name} before Waypoint can open a posting window for you."
+            f"You need permission to view #{channel.name} before Parley can open a posting window for you."
         )
 
     key = (channel.id, member.id)
@@ -305,7 +316,9 @@ async def run_submission(
         await _grant(channel, member, previous)
         granted = True
         await _ghost_ping(channel, member)
-        await interaction.edit_original_response(content=_instructions(channel, seconds, interaction.user), view=None)
+        await interaction.edit_original_response(
+            content=_instructions(channel, seconds, interaction.user, post_title=post_title), view=None
+        )
 
         def check(message: discord.Message) -> bool:
             if message.channel.id != channel.id or message.author.id != member.id:
@@ -327,31 +340,38 @@ async def run_submission(
         if not restored:
             await _delete(message)
             raise ValidationError(
-                "Waypoint couldn't close your posting window safely. Your ad was removed; try again after staff checks the channel."
+                "Parley couldn't close your posting window safely. Your ad was removed; try again after staff checks the channel."
             )
 
         if getattr(message, "attachments", None) or getattr(message, "stickers", None):
             await _delete(message)
-            return "## Ad not posted\nListings are text-only right now."
+            return f"## {post_title} not posted\nPosts are text-only right now."
 
         text = (message.content or "").strip()
         try:
             cleaned = listing_service.clean_advertisement(text, bot.runtime)
-            needs_review = listing_service.check_links(cleaned, bot.runtime) or bot.runtime.listings.approval_required
+            needs_review = listing_service.check_links(cleaned, bot.runtime) or (
+                respect_approval_required and bot.runtime.listings.approval_required
+            )
         except ValidationError as exc:
             await _delete(message)
             log.info("self_post.rejected guild=%s user=%s: %s", guild_id, member.id, exc.user_message)
-            return f"## Ad not posted\n{exc.user_message}\n\nYou can try again from **Post My Server** or **My Listing**."
+            return f"## {post_title} not posted\n{exc.user_message}\n\nYou can try again from **{retry_hint}**."
 
         if needs_review:
             await _delete(message)
+            if not allow_review:
+                return (
+                    f"## {post_title} not posted\n"
+                    "This post contains a link that requires staff review. Remove that link and try again."
+                )
             if on_review is not None:
                 await on_review(cleaned)
             else:
                 await _store_text(bot, guild_id, cleaned, interaction.user.id)
             if on_created is not None:
                 await on_created(cleaned, None)
-            return "## Ad sent for review\nStaff will review it before it goes live."
+            return f"## {post_title} sent for review\nStaff will review it before it goes live."
 
         try:
             if on_accept is not None:
@@ -365,7 +385,7 @@ async def run_submission(
         if on_created is not None:
             await on_created(cleaned, message)
         log.info("self_post.published guild=%s message=%s", guild_id, message.id)
-        return "## Ad posted\nYour server is live in the directory."
+        return success_text or "## Ad posted\nYour server is live in the directory."
     finally:
         async with _ACTIVE_LOCK:
             _ACTIVE.pop(key, None)
@@ -377,15 +397,15 @@ async def run_submission(
                 await repository.delete_self_post_session(session, channel.id, member.id)
 
 
-async def _store_text(bot: WaypointBot, guild_id: int, text: str, actor_id: int) -> None:
+async def _store_text(bot: ParleyBot, guild_id: int, text: str, actor_id: int) -> None:
     async with bot.db.session() as session:
         await listing_service.update_advertisement(
             session, bot.runtime, guild_id=guild_id, text=text, actor_id=actor_id, now=utcnow()
         )
 
 
-async def _publish(bot: WaypointBot, guild_id: int, text: str, message: discord.Message, actor_id: int) -> None:
-    """Adopt the owner's message, then place Waypoint's clean directory card under it."""
+async def _publish(bot: ParleyBot, guild_id: int, text: str, message: discord.Message, actor_id: int) -> None:
+    """Adopt the owner's message, then place Parley's clean directory card under it."""
     async with bot.db.session() as session:
         listing = await repository.get_listing(session, guild_id)
         if listing is not None:
@@ -395,7 +415,7 @@ async def _publish(bot: WaypointBot, guild_id: int, text: str, message: discord.
 
 
 def directory_card_view(
-    bot: WaypointBot,
+    bot: ParleyBot,
     listing: Listing,
     *,
     ad_jump_url: str | None,
@@ -416,7 +436,7 @@ def directory_card_view(
 
 
 def directory_card_kwargs(
-    bot: WaypointBot,
+    bot: ParleyBot,
     listing: Listing,
     *,
     guild_name: str,
@@ -439,7 +459,7 @@ def directory_card_kwargs(
 
 # Backwards-compatible names used by older tests/callers. New code uses the
 # directory-card helpers above.
-def controls_view(bot: WaypointBot, guild_id: int, invite_url: str | None, accepting: bool) -> discord.ui.View:
+def controls_view(bot: ParleyBot, guild_id: int, invite_url: str | None, accepting: bool) -> discord.ui.View:
     from bot.views.partnership import request_button
     from bot.views.welcome import persistent_view
 
@@ -451,7 +471,7 @@ def controls_view(bot: WaypointBot, guild_id: int, invite_url: str | None, accep
     return persistent_view(*items)
 
 
-def controls_kwargs(bot: WaypointBot, guild_id: int, invite_url: str | None, accepting: bool) -> dict:
+def controls_kwargs(bot: ParleyBot, guild_id: int, invite_url: str | None, accepting: bool) -> dict:
     view = controls_view(bot, guild_id, invite_url, accepting)
     kwargs: dict = {"content": "-# Server listing", "allowed_mentions": safe_allowed_mentions()}
     if view.children:

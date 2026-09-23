@@ -1,4 +1,4 @@
-# Waypoint - production image (used by Railway, works with any Docker host)
+# Parley - production image (used by Railway, works with any Docker host)
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \

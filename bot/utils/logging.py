@@ -46,7 +46,7 @@ class JsonFormatter(logging.Formatter):
 
 
 class _DropVoiceWarnings(logging.Filter):
-    """Waypoint never uses voice, so discord.py's 'voice will NOT be supported' notice is noise."""
+    """Parley never uses voice, so discord.py's 'voice will NOT be supported' notice is noise."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         return "voice will NOT be supported" not in record.getMessage()
@@ -56,7 +56,7 @@ DETAILS_LOGGER = "waypoint.details"
 
 
 def details_logger() -> logging.Logger:
-    """Tracebacks for startup failures: written to logs/waypoint.log (and the console only with LOG_LEVEL=DEBUG)."""
+    """Tracebacks for startup failures: written to logs/parley.log (and the console only with LOG_LEVEL=DEBUG)."""
     return logging.getLogger(DETAILS_LOGGER)
 
 
@@ -78,7 +78,7 @@ def configure_logging(settings: Settings) -> None:
         log_dir: Path = PROJECT_ROOT / "logs"
         log_dir.mkdir(exist_ok=True)
         file_handler = logging.handlers.RotatingFileHandler(
-            log_dir / "waypoint.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8"
+            log_dir / "parley.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8"
         )
         file_handler.setFormatter(logging.Formatter(TEXT_FORMAT))
         file_handler.addFilter(redactor)

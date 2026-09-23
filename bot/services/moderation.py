@@ -34,10 +34,10 @@ async def ensure_allowed(
     session: AsyncSession, config: RuntimeConfig, *, guild_ids: Iterable[int] = (), user_id: int | None = None
 ) -> None:
     if user_id is not None and await is_user_blocked(session, config, user_id):
-        raise Banned("You can't use Waypoint.")
+        raise Banned("You can't use Parley.")
     for guild_id in guild_ids:
         if await is_guild_banned(session, config, guild_id):
-            raise Banned("This server can't use the Waypoint network.")
+            raise Banned("This server can't use the Parley network.")
 
 
 def find_blocked_word(text: str, blocked_words: Iterable[str]) -> str | None:
@@ -52,7 +52,7 @@ def find_blocked_word(text: str, blocked_words: Iterable[str]) -> str | None:
 
 def ensure_clean(text: str, config: RuntimeConfig) -> None:
     if find_blocked_word(text, config.moderation.blocked_words):
-        raise ValidationError("Your text contains a word that isn't allowed on Waypoint. Please edit it and try again.")
+        raise ValidationError("Your text contains a word that isn't allowed on Parley. Please edit it and try again.")
 
 
 async def _take_down_listing(session: AsyncSession, guild_id: int, status: str) -> Listing | None:

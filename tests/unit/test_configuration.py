@@ -85,7 +85,7 @@ async def test_export_contains_no_secrets_and_imports_back(db):
     ("raw", "message"),
     [
         ("not json", "valid JSON"),
-        ('{"hello": 1}', "Waypoint settings export"),
+        ('{"hello": 1}', "Parley settings export"),
         ('{"waypoint_settings_version": 1, "overrides": {"evil.key": 1}}', "Unknown setting"),
         ('{"waypoint_settings_version": 1, "overrides": {"listings.max_contacts": "x"}}', "invalid value"),
         ('{"waypoint_settings_version": 1, "overrides": {"messages.dm_home": "Hi {password}"}}', "Unknown placeholder"),
@@ -111,7 +111,7 @@ async def test_button_customization_keeps_routing(db):
     async with db.session() as session:
         await configuration.reset_button(session, "post", actor_id=ACTOR)
     config, _ = apply_overrides(default_config(), await overrides(db))
-    assert config.button("post") == ("Post My Server", None) and config.button("find")[0] == "Search"
+    assert config.button("post") == ("Post Server Ad", None) and config.button("find")[0] == "Search"
 
 
 @pytest.mark.parametrize("label, emoji", [("", "📢"), ("x" * 41, ""), ("Ok", "not-an-emoji"), ("Ok", "<:bad:1>")])
@@ -150,9 +150,9 @@ def test_legacy_env_values_are_used_until_saved():
 
 async def test_settings_hot_reload_without_restart(db):
     """A running bot picks up a change as soon as the Settings UI saves it."""
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
-    bot = WaypointBot(make_settings(db.url), db)
+    bot = ParleyBot(make_settings(db.url), db)
     try:
         await bot.reload_runtime_config()
         assert bot.runtime.hub.mode == "live"
@@ -166,15 +166,15 @@ async def test_settings_hot_reload_without_restart(db):
         assert bot.runtime.listings.categories == ("Art",)
         from bot.config import templates
 
-        assert templates.render(bot.runtime, "dm_home") == "Hi from Waypoint"
+        assert templates.render(bot.runtime, "dm_home") == "Hi from Parley"
     finally:
         await bot.close()
 
 
 async def test_old_env_deployments_keep_working(db):
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
-    bot = WaypointBot(make_settings(db.url, main_guild_id=5, looking_channel_id=8), db)
+    bot = ParleyBot(make_settings(db.url, main_guild_id=5, looking_channel_id=8), db)
     try:
         await bot.reload_runtime_config()
         assert bot.hub.main_guild_id == 5 and bot.hub.looking_channel_id == 8

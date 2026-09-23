@@ -44,10 +44,10 @@ def test_every_customizable_button_has_a_default():
 
 
 async def test_no_duplicate_slash_commands(db):
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
     from tests.conftest import make_settings
 
-    bot = WaypointBot(make_settings(db.url, main_guild_id=5, sync_commands=False), db)
+    bot = ParleyBot(make_settings(db.url, main_guild_id=5, sync_commands=False), db)
     try:
         await bot.setup_hook()
         global_names = [c.name for c in bot.tree.get_commands()]

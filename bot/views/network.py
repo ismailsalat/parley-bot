@@ -9,14 +9,14 @@ import discord
 
 from bot.database import repository
 from bot.services import network, permissions
-from bot.services.errors import MANAGE_SERVER_REQUIRED, PermissionDenied, ValidationError, WaypointError
+from bot.services.errors import MANAGE_SERVER_REQUIRED, PermissionDenied, ValidationError, ParleyError
 from bot.utils.helpers import format_duration, utcnow
 from bot.views.base import OwnedView, get_bot, home_button, reply
 from bot.views.partnership import GuildPickerView
 from bot.views.welcome import add_bot_button, persistent_view, register_action
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ async def start_network_flow(interaction: discord.Interaction) -> None:
         add = add_bot_button(bot)
         await reply(
             interaction,
-            "Add Waypoint to a server where you have **Manage Server**, then press **Join Network** "
+            "Add Parley to a server where you have **Manage Server**, then press **Join Network** "
             "(or use `/network`) inside it.",
             view=persistent_view(add) if add else None,
         )
@@ -56,7 +56,7 @@ async def start_network_flow(interaction: discord.Interaction) -> None:
     async def picked(inter: discord.Interaction, guild_id: int) -> None:
         chosen = bot.get_guild(guild_id)
         if chosen is None:
-            raise ValidationError("Waypoint is no longer in that server.")
+            raise ValidationError("Parley is no longer in that server.")
         await open_network_setup(inter, chosen, edit_message=True)
 
     await reply(
@@ -89,7 +89,7 @@ async def open_network_setup(interaction: discord.Interaction, guild: discord.Gu
 class NetworkSetupView(OwnedView):
     def __init__(
         self,
-        bot: WaypointBot,
+        bot: ParleyBot,
         owner_id: int,
         guild: discord.Guild,
         *,
@@ -112,7 +112,7 @@ class NetworkSetupView(OwnedView):
         channel = f"<#{self.channel_id}>" if self.channel_id else "choose below"
         lines = [
             f"## Network ads · {self.guild.name}",
-            "Waypoint will post one partner advertisement at a time in the channel you pick. "
+            "Parley will post one partner advertisement at a time in the channel you pick. "
             "Ads never ping anyone.",
             "",
             f"**Status:** {'🟢 Enabled' if self.enabled else '⚪ Off'}",
@@ -204,7 +204,7 @@ class NetworkSetupView(OwnedView):
             raise ValidationError("Please choose a text channel in this server.")
         missing = permissions.missing_channel_permissions(channel, self.guild.me)
         if missing:
-            raise ValidationError(f"Waypoint needs {', '.join(missing)} in {channel.mention}.")
+            raise ValidationError(f"Parley needs {', '.join(missing)} in {channel.mention}.")
 
     async def _save(self, interaction: discord.Interaction, enabled: bool) -> None:
         bot = self.bot
@@ -224,14 +224,14 @@ class NetworkSetupView(OwnedView):
                     actor_id=interaction.user.id,
                     now=utcnow(),
                 )
-        except WaypointError as exc:
+        except ParleyError as exc:
             await self._rerender(interaction, f"⚠️ {exc.user_message}")
             return
         self.enabled = enabled
         if enabled:
             notice = "✅ Network ads are on. The first ad will arrive shortly."
             if bot.runtime.hub.mode != "live":
-                notice += "\n-# 🧪 Waypoint is in TEST mode: real network ads start when it goes LIVE."
+                notice += "\n-# 🧪 Parley is in TEST mode: real network ads start when it goes LIVE."
         elif self.channel_id is None:
             notice = "You left the network. No more ads will be posted here."
         else:

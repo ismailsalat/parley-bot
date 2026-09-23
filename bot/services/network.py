@@ -97,7 +97,7 @@ async def configure(
     rules = config.network
     await moderation.ensure_allowed(session, config, guild_ids=[guild_id], user_id=actor_id)
     if enabled and not rules.enabled:
-        raise ValidationError("The Waypoint network is paused right now. Please try again later.")
+        raise ValidationError("The Parley network is paused right now. Please try again later.")
     if enabled and channel_id is None:
         raise ValidationError("Please choose a channel first.")
     if interval_minutes < rules.min_interval_minutes:

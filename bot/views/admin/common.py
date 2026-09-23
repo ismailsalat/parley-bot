@@ -15,12 +15,12 @@ from typing import TYPE_CHECKING, Any
 import discord
 
 from bot.services import permissions
-from bot.services.errors import WaypointError
+from bot.services.errors import ParleyError
 from bot.utils.mentions import safe_allowed_mentions
 from bot.views.base import OwnedView, handle_error, reply
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class Page(OwnedView):
 
     title = "Settings"
 
-    def __init__(self, bot: WaypointBot, owner_id: int, *, back: PageFactory | None = None) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, *, back: PageFactory | None = None) -> None:
         super().__init__(owner_id, timeout=900)
         self.bot = bot
         self.back = back
@@ -53,7 +53,7 @@ class Page(OwnedView):
         if not await super().interaction_check(interaction):
             return False
         if not await permissions.is_staff_cached(self.bot, interaction.user.id):
-            await reply(interaction, "Only Waypoint staff can use this.")
+            await reply(interaction, "Only Parley staff can use this.")
             return False
         return True
 
@@ -72,7 +72,7 @@ class Page(OwnedView):
         async def run(interaction: discord.Interaction) -> None:
             try:
                 await callback(interaction)
-            except WaypointError as exc:
+            except ParleyError as exc:
                 await self.refresh(interaction, f"⚠️ {exc.user_message}")
 
         item.callback = run  # type: ignore[method-assign]
@@ -177,7 +177,7 @@ class ConfirmPage(Page):
 
     def __init__(
         self,
-        bot: WaypointBot,
+        bot: ParleyBot,
         owner_id: int,
         *,
         question: str,

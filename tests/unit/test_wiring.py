@@ -8,14 +8,14 @@ import discord
 import pytest
 
 from bot.config.settings import Settings
-from bot.core import WaypointBot, build_intents, persistent_items
+from bot.core import ParleyBot, build_intents, persistent_items
 from bot.database.session import Database
 from bot.views.welcome import registered_actions
 
 
 @pytest.fixture
 async def bot(db):
-    instance = WaypointBot(
+    instance = ParleyBot(
         Settings(discord_token="", database_url=db.url, main_guild_id=123456789012345678, sync_commands=False), db
     )
     await instance.setup_hook()

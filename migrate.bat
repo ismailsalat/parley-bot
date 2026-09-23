@@ -1,10 +1,10 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
-title Waypoint - Database migrations
+title Parley - Database migrations
 
 if not exist ".venv\Scripts\python.exe" (
-    echo [ERROR] Waypoint is not set up yet. Double-click setup.bat first.
+    echo [ERROR] Parley is not set up yet. Double-click setup.bat first.
     pause
     exit /b 1
 )

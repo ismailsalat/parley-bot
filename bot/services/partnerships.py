@@ -55,7 +55,7 @@ async def create_request(
 
     source = await repository.get_listing(session, source_guild_id)
     if source is None or source.status != ListingStatus.ACTIVE:
-        raise ValidationError("Your server needs an active Waypoint listing before it can request partnerships.")
+        raise ValidationError("Your server needs an active Parley listing before it can request partnerships.")
 
     if rules.enforce_minimum_members and source_member_count < target.minimum_members:
         raise ValidationError(f"This server asks for partners with at least {target.minimum_members:,} members.")
@@ -198,7 +198,7 @@ async def claim_looking_post(
     await moderation.ensure_allowed(session, config, guild_ids=[source_guild_id], user_id=actor_id)
     source = await repository.get_listing(session, source_guild_id)
     if source is None or source.status != ListingStatus.ACTIVE:
-        raise ValidationError("Your server needs an active Waypoint listing to use structured posts.")
+        raise ValidationError("Your server needs an active Parley listing to use structured posts.")
 
     text = (message or "").strip() or None
     if text is not None:

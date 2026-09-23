@@ -103,7 +103,7 @@ async def remove(
     if name not in current:
         raise ValidationError(f"**{name}** isn't a category.")
     if len(current) <= 1:
-        raise ValidationError("Waypoint needs at least one category.")
+        raise ValidationError("Parley needs at least one category.")
     in_use = await usage(session, name)
     if in_use and (move_to is None or move_to == name or move_to not in current):
         raise ValidationError(f"{in_use} listing(s) use **{name}**. Choose where to move them first.")

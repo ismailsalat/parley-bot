@@ -1,6 +1,6 @@
 """Paste My Own Ad: authorisation, a single message, moderation, and cleanup every time.
 
-The Discord channel and member are stand-ins, so these check Waypoint's own
+The Discord channel and member are stand-ins, so these check Parley's own
 rules (who may post, what is granted/revoked, what is stored). Real posting is
 covered by ``python -m bot.tools.live_check``.
 """
@@ -86,7 +86,7 @@ def _recorder(bot):
 
 
 def queue_message(bot: FakeBot, message, *, delay: float = 0) -> None:
-    """The owner's message arrives while Waypoint waits."""
+    """The owner's message arrives while Parley waits."""
 
     async def wait_for(_event, *, check, timeout):
         await asyncio.sleep(delay)
@@ -149,7 +149,7 @@ async def test_only_the_listing_manager_may_post(db, listed):
     interaction.edit_original_response = _noop
     queue_message(bot, FakeMessage(bot.channel, USER_ID, "Sneaky ad"))
     with pytest.raises(Exception) as caught:
-        await self_post.run_submission(interaction, MAIN, "Waypoint HQ")
+        await self_post.run_submission(interaction, MAIN, "Parley HQ")
     assert "Manage Server" in getattr(caught.value, "user_message", str(caught.value))
     assert bot.channel.permission_calls == []  # nothing was ever granted
 
@@ -159,7 +159,7 @@ async def test_refused_before_granting_when_unavailable(db, listed):
     interaction = FakeInteraction(bot, ADMIN_ID)
     interaction.edit_original_response = _noop
     with pytest.raises(ValidationError):
-        await self_post.run_submission(interaction, MAIN, "Waypoint HQ")
+        await self_post.run_submission(interaction, MAIN, "Parley HQ")
     assert bot.channel.permission_calls == []
 
 
@@ -174,7 +174,7 @@ async def run(bot, message, guild_id=MAIN):
     interaction = FakeInteraction(bot, ADMIN_ID)
     interaction.edit_original_response = _noop
     queue_message(bot, message)
-    return await self_post.run_submission(interaction, guild_id, "Waypoint HQ")
+    return await self_post.run_submission(interaction, guild_id, "Parley HQ")
 
 
 async def test_accepted_message_becomes_the_listing(db, listed):
@@ -182,7 +182,7 @@ async def test_accepted_message_becomes_the_listing(db, listed):
     message = FakeMessage(bot.channel, ADMIN_ID, "## Rivals HQ <:crown:123456789012345678>\nJoin us!")
     note = await run(bot, message)
     assert "live" in note.lower() or message.jump_url in note
-    assert bot.adopted == [(MAIN, message.id)]  # Waypoint adopted the owner's own message
+    assert bot.adopted == [(MAIN, message.id)]  # Parley adopted the owner's own message
     assert not message.deleted
     async with db.session() as session:
         listing = await repository.get_listing(session, MAIN)
@@ -245,7 +245,7 @@ async def test_timeout_closes_the_window_and_changes_nothing(db, listed):
     interaction = FakeInteraction(bot, ADMIN_ID)
     interaction.edit_original_response = _noop
     queue_message(bot, None)  # nobody posts
-    note = await self_post.run_submission(interaction, MAIN, "Waypoint HQ")
+    note = await self_post.run_submission(interaction, MAIN, "Parley HQ")
     assert "expired" in note.lower()
     assert bot.adopted == []
     assert bot.channel.permission_calls[-1][1] is None  # revoked anyway

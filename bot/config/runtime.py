@@ -2,7 +2,7 @@
 
 Defaults live here. Any value can be overridden by a row in the
 ``runtime_settings`` table using a dotted key such as
-``listings.refresh_cooldown_minutes``. Waypoint reloads these rows
+``listings.refresh_cooldown_minutes``. Parley reloads these rows
 periodically, so a future dashboard only has to write to that table.
 
 Use ``python -m bot.config.cli`` to list or change values from a terminal.
@@ -22,20 +22,19 @@ DISCORD_SELECT_OPTION_LIMIT = 25
 HARD_MIN_NETWORK_INTERVAL_MINUTES = 15
 
 DEFAULT_BUTTONS: dict[str, dict[str, str | None]] = {
-    # Label, emoji and colour of every user-facing button. One colour system:
-    # primary = main action, success = highlighted action, danger = destructive,
-    # secondary = low-priority/navigation. Emoji must be real Discord emoji (bot.utils.emoji).
-    "post": {"label": "Post My Server", "emoji": None, "style": "primary"},
+    # Label, emoji and colour of every user-facing button.
+    "post": {"label": "Post Server Ad", "emoji": None, "style": "primary"},
     "connect": {"label": "Connect This Server", "emoji": None, "style": "primary"},
-    "find": {"label": "Find Partners", "emoji": None, "style": "success"},
-    "servers": {"label": "My Listing", "emoji": None, "style": "primary"},
+    "find": {"label": "Browse Partners", "emoji": None, "style": "success"},
+    "servers": {"label": "My Server Listings", "emoji": None, "style": "primary"},
     "requests": {"label": "Requests", "emoji": None, "style": "primary"},
-    "looking": {"label": "Post Looking For Partner", "emoji": "\U0001F4DD", "style": "primary"},
+    "looking": {"label": "Post Partner Ad", "emoji": None, "style": "primary"},
+    "partner_posts": {"label": "My Partner Posts", "emoji": None, "style": "primary"},
     "network": {"label": "Join Network", "emoji": "\U0001F310", "style": "primary"},
     "join": {"label": "Join Server", "emoji": None, "style": "primary"},
     "request": {"label": "Request Partnership", "emoji": "🤝", "style": "primary"},
-    "view_ad": {"label": "View Ad", "emoji": None, "style": "primary"},
-    "next": {"label": "Next Server", "emoji": None, "style": "primary"},
+    "view_ad": {"label": "View Server Ad", "emoji": None, "style": "primary"},
+    "next": {"label": "Next Match", "emoji": None, "style": "primary"},
     "edit": {"label": "Edit", "emoji": None, "style": "primary"},
     "edit_ad": {"label": "Edit Ad", "emoji": None, "style": "primary"},
     "edit_info": {"label": "Edit Server Info", "emoji": None, "style": "primary"},
@@ -48,7 +47,7 @@ DEFAULT_BUTTONS: dict[str, dict[str, str | None]] = {
     "remove": {"label": "Remove Listing", "emoji": None, "style": "danger"},
     "accept": {"label": "Accept", "emoji": "\u2705", "style": "success"},
     "decline": {"label": "Decline", "emoji": "\u274C", "style": "danger"},
-    "add_bot": {"label": "Add Waypoint", "emoji": None, "style": "primary"},
+    "add_bot": {"label": "Add Parley", "emoji": None, "style": "primary"},
     "support": {"label": "Support", "emoji": "\U0001F6DF", "style": "primary"},
     "rules": {"label": "Rules", "emoji": None, "style": "primary"},
     "website": {"label": "Website", "emoji": None, "style": "primary"},
@@ -63,8 +62,9 @@ BUTTON_STYLES = ("primary", "success", "danger", "secondary")
 
 # Buttons an administrator may relabel in Settings -> Appearance (custom_ids never change).
 CUSTOMIZABLE_BUTTONS = (
-    "post", "connect", "find", "servers", "requests", "looking", "network", "join", "request",
-    "view_ad", "next", "edit", "edit_ad", "edit_info", "partnerships", "preview", "self_post", "refresh", "relist", "publish", "remove",
+    "post", "connect", "find", "servers", "requests", "looking", "partner_posts",
+    "network", "join", "request", "view_ad", "next", "edit", "edit_ad", "edit_info",
+    "partnerships", "preview", "self_post", "refresh", "relist", "publish", "remove",
     "accept", "decline", "add_bot", "support", "rules", "website", "directory",
 )
 
@@ -73,7 +73,7 @@ MODES = ("test", "live", "off")
 
 @dataclass(frozen=True)
 class BotConfig:
-    name: str = "Waypoint"
+    name: str = "Parley"
     status: str = "online"  # online | idle | dnd
     activity_text: str = "DM me to find partners"
     support_url: str = ""
@@ -137,18 +137,20 @@ class NetworkConfig:
 class PanelConfig:
     listings_panel_enabled: bool = True
     listings_panel_text: str = (
-        "## Waypoint Directory\n"
-        "Browse partnership listings or publish a server you manage.\n"
-        "-# Waypoint controls start here — these buttons do not belong to the ad above."
+        "## Server Directory\n"
+        "Post or manage a server ad."
     )
     looking_panel_enabled: bool = True
-    looking_panel_text: str = "**Looking for a server to partner with?**"
+    looking_panel_text: str = (
+        "## Find a Partner\n"
+        "Post what your server is looking for or browse matches."
+    )
     welcome_panel_enabled: bool = True
     welcome_panel_text: str = (
-        "## Welcome to Waypoint\n"
-        "A cleaner way to list your server and find partnership opportunities.\n\n"
-        "**Find Partners** to browse the directory, or **Post My Server** to publish a server you manage."
+        "## Welcome to Parley\n"
+        "Choose where you want to go."
     )
+
     send_join_message: bool = True
     buttons: dict[str, dict[str, str]] = field(default_factory=lambda: {k: dict(v) for k, v in DEFAULT_BUTTONS.items()})
 
@@ -171,7 +173,7 @@ class ModerationConfig:
 
 @dataclass(frozen=True)
 class HubConfig:
-    """The main Waypoint server. Set with /setup and /settings (0 = not set)."""
+    """The main Parley server. Set with /setup and /settings (0 = not set)."""
 
     main_guild_id: int = 0
     welcome_channel_id: int = 0
@@ -218,10 +220,11 @@ class MessagesConfig:
     help: str = (
         "## {bot_name}\n"
         "Connect once. Post once. Find partners. Talk to people.\n\n"
-        "**Post My Server** – list your server (needs Manage Server).\n"
-        "**Find Partners** – browse servers and request a partnership.\n"
-        "**My Listing** – Relist, edit, view or remove your listing.\n"
-        "**Requests** – accept or decline partnership requests.\n\n"
+        "**Post Server Ad** - publish a server ad (needs Manage Server).\n"
+        "**Browse Partners** - quickly browse partnership matches.\n"
+        "**My Server Listings** - edit, view, Relist or remove server ads.\n"
+        "**My Partner Posts** - post, edit or delete what each server is looking for.\n"
+        "**Requests** - accept or decline partnership requests.\n\n"
         "Just DM me anytime to get these buttons."
     )
 
@@ -414,7 +417,7 @@ def sanitize(config: RuntimeConfig) -> tuple[RuntimeConfig, list[str]]:
             notes.append(f"bot.{url_field} must start with https://; ignored")
             value = ""
         bot = replace(bot, **{url_field: value})
-    bot = replace(bot, name=(bot.name.strip() or "Waypoint")[:32], activity_text=bot.activity_text[:128])
+    bot = replace(bot, name=(bot.name.strip() or "Parley")[:32], activity_text=bot.activity_text[:128])
 
     clean_buttons: dict[str, dict[str, str | None]] = {}
     for key, spec in config.panels.buttons.items():

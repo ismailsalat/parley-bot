@@ -23,7 +23,7 @@ from bot.utils.helpers import listing_jump_url
 from bot.utils.mentions import safe_allowed_mentions
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
@@ -31,11 +31,11 @@ LISTINGS_PANEL = "listings"
 LOOKING_PANEL = "looking"
 WELCOME_PANEL = "welcome"
 
-PanelBuilder = Callable[["WaypointBot"], tuple[str, discord.ui.View]]
+PanelBuilder = Callable[["ParleyBot"], tuple[str, discord.ui.View]]
 
 
 class PanelService:
-    def __init__(self, bot: WaypointBot) -> None:
+    def __init__(self, bot: ParleyBot) -> None:
         self.bot = bot
         # One lock per channel: listing posts and panel moves must never interleave.
         self._listings_lock = asyncio.Lock()
@@ -67,34 +67,34 @@ class PanelService:
         return {cid for cid in (h.listings_channel_id, h.looking_channel_id, h.welcome_channel_id) if cid}
 
     async def ensure_directory_locked(self) -> bool:
-        """Keep #server-directory read-only except for Waypoint's short posting windows.
-
-        The @everyone overwrite is the normal lock. The global on_message guard is
-        a second safety net for administrators or unusual role overwrites that Discord
-        may allow to bypass that deny.
-        """
-        channel = self.listings_channel()
-        if channel is None or channel.guild.me is None:
-            return False
-        me = channel.guild.me
-        perms = channel.permissions_for(me)
-        if not perms.manage_roles:
-            return False
-        everyone = channel.guild.default_role
-        current = channel.overwrites_for(everyone)
-        allow, deny = current.pair()
-        updated = discord.PermissionOverwrite.from_pair(allow, deny)
-        updated.send_messages = False
-        if hasattr(updated, "create_public_threads"):
-            updated.create_public_threads = False
-        if hasattr(updated, "send_messages_in_threads"):
-            updated.send_messages_in_threads = False
-        try:
-            await channel.set_permissions(everyone, overwrite=updated, reason="Waypoint: lock server directory")
-        except discord.HTTPException as exc:
-            log.warning("Could not lock #%s: %s", channel.name, exc)
-            return False
-        return True
+        """Keep both public feeds read-only except for Parley's short posting windows."""
+        channels = [self.listings_channel(), self.looking_channel()]
+        found = False
+        all_ok = True
+        for channel in channels:
+            if channel is None or channel.guild.me is None:
+                continue
+            found = True
+            me = channel.guild.me
+            perms = channel.permissions_for(me)
+            if not perms.manage_roles:
+                all_ok = False
+                continue
+            everyone = channel.guild.default_role
+            current = channel.overwrites_for(everyone)
+            allow, deny = current.pair()
+            updated = discord.PermissionOverwrite.from_pair(allow, deny)
+            updated.send_messages = False
+            if hasattr(updated, "create_public_threads"):
+                updated.create_public_threads = False
+            if hasattr(updated, "send_messages_in_threads"):
+                updated.send_messages_in_threads = False
+            try:
+                await channel.set_permissions(everyone, overwrite=updated, reason="Parley: lock managed feed")
+            except discord.HTTPException as exc:
+                log.warning("Could not lock #%s: %s", channel.name, exc)
+                all_ok = False
+        return found and all_ok
 
     # ------------------------------------------------------------ low-level message helpers
 
@@ -115,13 +115,22 @@ class PanelService:
         await self._delete(channel_id, message_id)
 
     async def take_down_listing(self, listing) -> None:
-        """Delete a listing's public message (and its controls) after removal/suspension/ban."""
-        if listing is None or not listing.message_id:
+        """Delete every public post owned by a listing after removal/suspension/ban."""
+        if listing is None:
             return
         await self._delete(listing.channel_id, listing.controls_message_id)
         await self._delete(listing.channel_id, listing.message_id)
+        await self._delete(listing.partner_channel_id, listing.partner_controls_message_id)
+        await self._delete(listing.partner_channel_id, listing.partner_message_id)
         async with self.bot.db.session() as session:
             await listing_service.record_message(session, guild_id=listing.guild_id, channel_id=None, message_id=None)
+            current = await repository.get_listing(session, listing.guild_id)
+            if current is not None:
+                current.partner_ad_text = None
+                current.partner_channel_id = None
+                current.partner_message_id = None
+                current.partner_controls_message_id = None
+                current.partner_posted_at = None
 
     async def _is_newest(self, channel: discord.TextChannel, message_id: int) -> bool:
         async for newest in channel.history(limit=1):
@@ -297,7 +306,7 @@ class PanelService:
                 log.error("listing.publish_failed guild_id=%s: %s", guild_id, exc)
                 if isinstance(exc, discord.Forbidden):
                     raise ValidationError(
-                        f"Waypoint needs **Send Messages** in #{channel.name}. Ask a Waypoint admin to run the Health Check."
+                        f"Parley needs **Send Messages** in #{channel.name}. Ask a Parley admin to run the Health Check."
                     ) from exc
                 raise
 
@@ -358,7 +367,7 @@ class PanelService:
         log.info("listing.self_posted guild_id=%s message_id=%s", guild_id, message.id)
 
     async def relist_self_post(self, guild_id: int) -> discord.Message | None:
-        """Move only Waypoint's directory card; never impersonate/repost the owner's ad."""
+        """Move only Parley's directory card; never impersonate/repost the owner's ad."""
         from bot.views.self_post import directory_card_kwargs
 
         channel = self.listings_channel()
@@ -466,7 +475,7 @@ class PanelService:
             return
         if listing.self_posted:
             # Never convert an owner-authored ad into a bot-authored message. Public
-            # info changes only update Waypoint's small directory card in place.
+            # info changes only update Parley's small directory card in place.
             await self.update_self_post_card(guild_id)
             return
         channel = self.bot.get_channel(listing.channel_id) if listing.channel_id else None

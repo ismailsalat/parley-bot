@@ -1,4 +1,4 @@
-"""/settings: the Waypoint control center (staff only)."""
+"""/settings: the Parley control center (staff only)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from bot.views.base import get_bot, home_button, reply
 from bot.views.welcome import register_action
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ async def open_settings(interaction: discord.Interaction) -> None:
 
 
 class SettingsHome(_HomeMarker, Page):
-    title = "Waypoint Settings"
+    title = "Parley Settings"
 
     def content(self) -> str:
         bot = self.bot
@@ -46,7 +46,7 @@ class SettingsHome(_HomeMarker, Page):
         network = "Enabled" if bot.runtime.network.enabled else "Off"
         return "\n".join(
             [
-                "## WAYPOINT SETTINGS",
+                "## PARLEY SETTINGS",
                 f"**Mode:** {MODE_LABELS[hub.mode]}",
                 f"**Main Server:** {guild.name if guild else 'not set up — run /setup'}",
                 f"**Listings:** {channel_mention(hub.listings_channel_id)}",
@@ -84,7 +84,7 @@ class SettingsHome(_HomeMarker, Page):
 
 
 class ServerMenu(Page):
-    """Where Waypoint lives: its channels and who its staff are."""
+    """Where Parley lives: its channels and who its staff are."""
 
     title = "Server"
 
@@ -151,8 +151,8 @@ class ModePage(Page):
     def content(self) -> str:
         mode = self.bot.runtime.hub.mode
         explain = {
-            "test": "Only staff can use Waypoint. Network ads are paused.",
-            "live": "Everyone can use Waypoint.",
+            "test": "Only staff can use Parley. Network ads are paused.",
+            "live": "Everyone can use Parley.",
             "off": "Users see a maintenance message. Staff still have Settings.",
         }[mode]
         return f"## Mode\n**{MODE_LABELS[mode]}** — {explain}"
@@ -263,7 +263,7 @@ class StaffPage(Page):
         return (
             "## Staff\n"
             f"**Staff roles:** {listed}\n"
-            "Staff can use /settings, /admin, review listings and use Waypoint in TEST/OFF mode.\n"
+            "Staff can use /settings, /admin, review listings and use Parley in TEST/OFF mode.\n"
             "-# Server administrators and the bot owner always have access."
         )
 
@@ -313,7 +313,7 @@ class StaffPage(Page):
 class HealthPage(Page):
     title = "Health Check"
 
-    def __init__(self, bot: WaypointBot, owner_id: int, *, back=None) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, *, back=None) -> None:
         super().__init__(bot, owner_id, back=back)
         self.checks: list[health.Check] = []
         self.details = False
@@ -353,7 +353,7 @@ class HealthPage(Page):
     async def _channels(self, interaction: discord.Interaction) -> None:
         await ChannelsPage(self.bot, self.owner_id, back=lambda: HealthPage(self.bot, self.owner_id, back=self.back)).show(interaction)
 
-def reset_page(bot: WaypointBot, owner_id: int, section: str, label: str, *, back) -> Page:
+def reset_page(bot: ParleyBot, owner_id: int, section: str, label: str, *, back) -> Page:
     """Reset one section (with confirmation). Never resets everything at once."""
 
     async def apply(interaction: discord.Interaction) -> None:
@@ -369,18 +369,18 @@ def reset_page(bot: WaypointBot, owner_id: int, section: str, label: str, *, bac
     )
 
 
-def fix_permissions_page(bot: WaypointBot, owner_id: int, *, back) -> Page:
-    """Repair only the channel overwrites Waypoint needs. Never asks for Administrator."""
+def fix_permissions_page(bot: ParleyBot, owner_id: int, *, back) -> Page:
+    """Repair only the channel overwrites Parley needs. Never asks for Administrator."""
 
     async def apply(interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         guild = bot.get_guild(bot.runtime.hub.main_guild_id) if bot.runtime.hub.main_guild_id else None
         if guild is None:
-            await back().show(interaction, "⚠️ Waypoint isn't in the main server.")
+            await back().show(interaction, "⚠️ Parley isn't in the main server.")
             return
         fixed, failed = await repair_channel_permissions(bot, guild)
         if failed:
-            note = f"⚠️ Fixed {len(fixed)} channel(s). Waypoint needs **Manage Roles** (or channel permissions) for: {', '.join(failed)}."
+            note = f"⚠️ Fixed {len(fixed)} channel(s). Parley needs **Manage Roles** (or channel permissions) for: {', '.join(failed)}."
         elif fixed:
             note = f"🛡️ Fixed permissions in {', '.join(fixed)}."
         else:
@@ -389,13 +389,13 @@ def fix_permissions_page(bot: WaypointBot, owner_id: int, *, back) -> Page:
 
     return ConfirmPage(
         bot, owner_id,
-        question="Give Waypoint the permissions it needs in its own channels? Nothing else is changed.",
+        question="Give Parley the permissions it needs in its own channels? Nothing else is changed.",
         confirm_label="Fix Permissions", on_confirm=apply, back=back, danger=False,
     )
 
 
-async def repair_channel_permissions(bot: WaypointBot, guild: discord.Guild) -> tuple[list[str], list[str]]:
-    """Add Waypoint's own overwrite to each configured channel. Returns (fixed, failed)."""
+async def repair_channel_permissions(bot: ParleyBot, guild: discord.Guild) -> tuple[list[str], list[str]]:
+    """Add Parley's own overwrite to each configured channel. Returns (fixed, failed)."""
     from bot.services.setup import bot_channel_permissions, listings_channel_permissions
 
     fixed, failed = [], []
@@ -407,7 +407,7 @@ async def repair_channel_permissions(bot: WaypointBot, guild: discord.Guild) -> 
             continue
         try:
             wanted = listings_channel_permissions() if slot.key == "listings_channel_id" else bot_channel_permissions()
-            await channel.set_permissions(guild.me, overwrite=wanted, reason="Waypoint: fix permissions")
+            await channel.set_permissions(guild.me, overwrite=wanted, reason="Parley: fix permissions")
         except discord.HTTPException:
             failed.append(f"#{channel.name}")
         else:

@@ -70,7 +70,7 @@ async def _run(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m bot.config.cli", description="Waypoint runtime settings")
+    parser = argparse.ArgumentParser(prog="python -m bot.config.cli", description="Parley runtime settings")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list", help="show every setting and its current value")
     set_cmd = sub.add_parser("set", help="change a setting")

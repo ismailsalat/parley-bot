@@ -1,9 +1,9 @@
-"""Live Discord checks. Skipped unless WAYPOINT_LIVE_TOKEN is set.
+"""Live Discord checks. Skipped unless PARLEY_LIVE_TOKEN is set.
 
 Use a *test* bot application, never the production token:
 
-    set WAYPOINT_LIVE_TOKEN=...            (Windows)
-    export WAYPOINT_LIVE_TOKEN=...         (macOS/Linux)
+    set PARLEY_LIVE_TOKEN=...            (Windows)
+    export PARLEY_LIVE_TOKEN=...         (macOS/Linux)
     python -m pytest tests/integration -m integration
 """
 
@@ -16,11 +16,11 @@ import pytest
 
 from bot.core import build_intents
 
-TOKEN = os.getenv("WAYPOINT_LIVE_TOKEN", "").strip()
+TOKEN = os.getenv("PARLEY_LIVE_TOKEN", "").strip()
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(not TOKEN, reason="WAYPOINT_LIVE_TOKEN not set; live Discord tests skipped"),
+    pytest.mark.skipif(not TOKEN, reason="PARLEY_LIVE_TOKEN not set; live Discord tests skipped"),
 ]
 
 

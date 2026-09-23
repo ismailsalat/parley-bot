@@ -14,7 +14,7 @@ from bot.services.panels import LISTINGS_PANEL, LOOKING_PANEL, WELCOME_PANEL
 from bot.services.setup import SLOTS
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ def _worst(statuses: list[str]) -> str:
 def render(checks: list[Check]) -> str:
     """Short, readable summary. One line per area, then what to do about problems."""
     by_name = {c.name: c for c in checks}
-    lines = ["## Waypoint Health"]
+    lines = ["## Parley Health"]
     covered: set[str] = set()
     for group, names in GROUPS.items():
         items = [by_name[n] for n in names if n in by_name]
@@ -86,7 +86,7 @@ def render(checks: list[Check]) -> str:
 
 def render_details(checks: list[Check]) -> str:
     """Every check, for when an admin presses Details."""
-    lines = ["## Waypoint Health · details", summarize(checks), ""]
+    lines = ["## Parley Health · details", summarize(checks), ""]
     for check in checks:
         line = f"{ICONS[check.status]} **{check.name}**"
         if check.detail:
@@ -95,7 +95,7 @@ def render_details(checks: list[Check]) -> str:
     return "\n".join(lines)[:1990]
 
 
-async def _database_checks(bot: WaypointBot) -> list[Check]:
+async def _database_checks(bot: ParleyBot) -> list[Check]:
     backend = "SQLite" if bot.settings.uses_sqlite else "PostgreSQL"
     try:
         await bot.db.ping()
@@ -113,12 +113,12 @@ async def _database_checks(bot: WaypointBot) -> list[Check]:
         checks.append(
             Check(OK, "Database schema", f"version {current}")
             if current == head
-            else Check(FAIL, "Database schema", f"at {current}, needs {head} — restart Waypoint to update")
+            else Check(FAIL, "Database schema", f"at {current}, needs {head} — restart Parley to update")
         )
     return checks
 
 
-def _channel_checks(bot: WaypointBot, guild: discord.Guild) -> list[Check]:
+def _channel_checks(bot: ParleyBot, guild: discord.Guild) -> list[Check]:
     checks: list[Check] = []
     hub = bot.runtime.hub
     for slot in SLOTS:
@@ -151,7 +151,7 @@ def _channel_checks(bot: WaypointBot, guild: discord.Guild) -> list[Check]:
     return checks
 
 
-async def _panel_checks(bot: WaypointBot) -> list[Check]:
+async def _panel_checks(bot: ParleyBot) -> list[Check]:
     checks = []
     for panel_type, label in PANEL_LABELS.items():
         state = await bot.panels.panel_status(panel_type)
@@ -165,7 +165,7 @@ async def _panel_checks(bot: WaypointBot) -> list[Check]:
     return checks
 
 
-async def run(bot: WaypointBot) -> list[Check]:
+async def run(bot: ParleyBot) -> list[Check]:
     """Run every check. Never raises: problems become failed checks."""
     from bot.core import persistent_items
 
@@ -185,7 +185,7 @@ async def run(bot: WaypointBot) -> list[Check]:
     if not hub.main_guild_id:
         checks.append(Check(FAIL, "Main server", "not set up — run /setup in your main server", "setup"))
     elif guild is None:
-        checks.append(Check(FAIL, "Main server", "Waypoint isn't in the main server anymore", "setup"))
+        checks.append(Check(FAIL, "Main server", "Parley isn't in the main server anymore", "setup"))
     else:
         checks.append(Check(OK, "Main server", guild.name))
         checks.extend(_channel_checks(bot, guild))
@@ -196,12 +196,12 @@ async def run(bot: WaypointBot) -> list[Check]:
     checks.append(
         Check(OK, "Persistent buttons", f"{len(expected)} types")
         if expected <= registered
-        else Check(FAIL, "Persistent buttons", "some old buttons won't respond — restart Waypoint")
+        else Check(FAIL, "Persistent buttons", "some old buttons won't respond — restart Parley")
     )
 
     status = bot.background.status()
     if not status["running"]:
-        checks.append(Check(FAIL, "Background tasks", "stopped — restart Waypoint"))
+        checks.append(Check(FAIL, "Background tasks", "stopped — restart Parley"))
     else:
         checks.append(Check(OK, "Background tasks"))
     net = bot.runtime.network

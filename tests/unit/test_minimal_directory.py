@@ -13,7 +13,7 @@ def _labels(view):
 def test_public_directory_footer_is_small(db):
     bot = FakeBot(db)
     _content, view = listings_panel(bot)
-    assert _labels(view) == ["Find Partners", "Post My Server", "Directory Overview", "Relist"]
+    assert _labels(view) == ["Post Server Ad", "My Server Listings", "Relist"]
 
 
 def test_self_post_strip_is_not_a_second_embed(db):

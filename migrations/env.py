@@ -49,7 +49,7 @@ def run_migrations_offline() -> None:
 
 
 def render_item(type_: str, obj, autogen_context):
-    """Render Waypoint's UTCDateTime as a plain DateTime so migrations stay import-free."""
+    """Render Parley's UTCDateTime as a plain DateTime so migrations stay import-free."""
     if type_ == "type" and isinstance(obj, UTCDateTime):
         return "sa.DateTime(timezone=True)"
     return False

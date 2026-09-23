@@ -25,7 +25,7 @@ from bot.views.partnership import view_ad_button
 from bot.views.welcome import persistent_view
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
@@ -41,14 +41,14 @@ def parse_id(raw: str, what: str = "server") -> int:
 
 
 class StaffCommands(commands.Cog):
-    admin = app_commands.Group(name="admin", description="Waypoint staff tools")
+    admin = app_commands.Group(name="admin", description="Parley staff tools")
 
-    def __init__(self, bot: WaypointBot) -> None:
+    def __init__(self, bot: ParleyBot) -> None:
         self.bot = bot
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:  # type: ignore[override]
         if not await permissions.is_staff(self.bot, interaction.user.id):
-            await reply(interaction, "⚠️ Only Waypoint staff can use this.")
+            await reply(interaction, "⚠️ Only Parley staff can use this.")
             return False
         return True
 
@@ -57,7 +57,7 @@ class StaffCommands(commands.Cog):
         await self.bot.log_event(f"🛡️ {text} ({interaction.user.mention})")
         await reply(interaction, f"✅ {text}")
 
-    @app_commands.command(name="settings", description="Waypoint settings (staff).")
+    @app_commands.command(name="settings", description="Parley settings (staff).")
     async def settings(self, interaction: discord.Interaction) -> None:
         await open_settings(interaction)
 
@@ -76,7 +76,7 @@ class StaffCommands(commands.Cog):
         await apply_staff_action(self.bot, "restore" if restore else "suspend", gid, interaction.user.id)
         await reply(interaction, f"✅ {'Restored' if restore else 'Suspended'} the listing for `{gid}`.")
 
-    @admin.command(name="ban-server", description="Ban a server by ID from Waypoint.")
+    @admin.command(name="ban-server", description="Ban a server by ID from Parley.")
     @app_commands.describe(guild_id="Server ID")
     async def ban_server(self, interaction: discord.Interaction, guild_id: str) -> None:
         gid = parse_id(guild_id)
@@ -90,7 +90,7 @@ class StaffCommands(commands.Cog):
         await apply_staff_action(self.bot, "unban", gid, interaction.user.id)
         await reply(interaction, f"✅ Unbanned `{gid}`. They can post a new listing.")
 
-    @admin.command(name="block-user", description="Stop a user from using Waypoint.")
+    @admin.command(name="block-user", description="Stop a user from using Parley.")
     @app_commands.describe(user="The user to block", reason=REASON)
     async def block_user(self, interaction: discord.Interaction, user: discord.User, reason: str | None = None) -> None:
         if user.id == interaction.user.id:
@@ -99,7 +99,7 @@ class StaffCommands(commands.Cog):
             await moderation.block_user(session, user_id=user.id, reason=reason, moderator_id=interaction.user.id)
         await self._done(interaction, f"Blocked {user.mention} (`{user.id}`).")
 
-    @admin.command(name="unblock-user", description="Allow a blocked user to use Waypoint again.")
+    @admin.command(name="unblock-user", description="Allow a blocked user to use Parley again.")
     @app_commands.describe(user="The user to unblock")
     async def unblock_user(self, interaction: discord.Interaction, user: discord.User) -> None:
         async with self.bot.db.session() as session:
@@ -114,7 +114,7 @@ class StaffCommands(commands.Cog):
         view = persistent_view(view_ad_button(self.bot, gid)) if listing is not None else None
         await reply(interaction, embed=embed, view=view)
 
-    @admin.command(name="stats", description="Waypoint network statistics.")
+    @admin.command(name="stats", description="Parley network statistics.")
     async def stats(self, interaction: discord.Interaction) -> None:
         async with self.bot.db.session() as session:
             numbers = await repository.stats(session, utcnow() - timedelta(hours=24))
@@ -125,10 +125,10 @@ class StaffCommands(commands.Cog):
             "network_posts_24h": "Network posts (24h)", "banned_guilds": "Banned servers", "blocked_users": "Blocked users",
         }
         lines = [f"**{labels.get(key, key)}:** {value:,}" for key, value in numbers.items()]
-        lines.append(f"**Servers Waypoint is in:** {len(self.bot.guilds):,}")
-        await reply(interaction, "## Waypoint stats\n" + "\n".join(lines))
+        lines.append(f"**Servers Parley is in:** {len(self.bot.guilds):,}")
+        await reply(interaction, "## Parley stats\n" + "\n".join(lines))
 
-    @admin.command(name="health", description="Run the Waypoint health check.")
+    @admin.command(name="health", description="Run the Parley health check.")
     async def health_check(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         await reply(interaction, health.render(await health.run(self.bot)))
@@ -137,7 +137,7 @@ class StaffCommands(commands.Cog):
     @app_commands.describe(file="waypoint-settings.json from Export Settings", include_channels="Also restore main-server channels (same server only)")
     async def import_settings(self, interaction: discord.Interaction, file: discord.Attachment, include_channels: bool = False) -> None:
         if file.size > MAX_IMPORT_BYTES:
-            raise ValidationError("That file is too big to be a Waypoint settings export.")
+            raise ValidationError("That file is too big to be a Parley settings export.")
         raw = (await file.read()).decode("utf-8", errors="replace")
         chosen = configuration.parse_import(raw, include_hub=include_channels)
         async with self.bot.db.session() as session:
@@ -149,7 +149,7 @@ class StaffCommands(commands.Cog):
 STAFF_COMMAND_NAMES = ("settings", "admin")
 
 
-async def setup(bot: WaypointBot) -> None:
+async def setup(bot: ParleyBot) -> None:
     cog = StaffCommands(bot)
     await bot.add_cog(cog)
     # add_cog registers commands globally; staff commands live only in the main server.

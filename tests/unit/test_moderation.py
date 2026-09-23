@@ -75,7 +75,7 @@ async def test_config_blocklist_also_bans(db, config):
 async def test_blocked_user_cannot_create_or_request(db, config):
     async with db.session() as session:
         await moderation.block_user(session, user_id=1000, reason="abuse", moderator_id=STAFF)
-    with pytest.raises(Banned, match="You can't use Waypoint."):
+    with pytest.raises(Banned, match="You can't use Parley."):
         async with db.session() as session:
             await make_listing(session, config, GID, actor_id=1000)
     async with db.session() as session:

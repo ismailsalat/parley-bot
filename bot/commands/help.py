@@ -13,10 +13,10 @@ from bot.views.base import reply
 from bot.views.welcome import control_panel
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 
-def help_text(bot: WaypointBot) -> str:
+def help_text(bot: ParleyBot) -> str:
     text = templates.render(bot.runtime, "help")
     if bot.runtime.bot.support_url:
         text += "\n" + templates.render(bot.runtime, "support")
@@ -24,15 +24,15 @@ def help_text(bot: WaypointBot) -> str:
 
 
 class HelpCommands(commands.Cog):
-    def __init__(self, bot: WaypointBot) -> None:
+    def __init__(self, bot: ParleyBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="help", description="How Waypoint works.")
+    @app_commands.command(name="help", description="How Parley works.")
     async def help(self, interaction: discord.Interaction) -> None:
         _content, view = control_panel(self.bot)
 
         await reply(interaction, help_text(self.bot), view=view)
 
 
-async def setup(bot: WaypointBot) -> None:
+async def setup(bot: ParleyBot) -> None:
     await bot.add_cog(HelpCommands(bot))

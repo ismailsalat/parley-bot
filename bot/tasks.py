@@ -21,11 +21,11 @@ from bot.utils.helpers import utcnow
 from bot.utils.mentions import advertisement_kwargs
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
-def network_ad_kwargs(bot: WaypointBot, listing) -> dict:
+def network_ad_kwargs(bot: ParleyBot, listing) -> dict:
     """A network ad: the owner's normal message + optional footer + buttons (never an embed)."""
     from bot.config import templates
     from bot.views.partnership import listing_components
@@ -45,7 +45,7 @@ def network_ad_kwargs(bot: WaypointBot, listing) -> dict:
 
 
 class BackgroundTasks:
-    def __init__(self, bot: WaypointBot) -> None:
+    def __init__(self, bot: ParleyBot) -> None:
         self.bot = bot
         self._tasks: list[asyncio.Task] = []
         self.last_run: dict[str, object] = {}
@@ -121,7 +121,7 @@ class BackgroundTasks:
         guild = bot.get_guild(destination.guild_id)
         channel = bot.get_channel(destination.channel_id) if destination.channel_id else None
         if guild is None:
-            await self._disable(destination.guild_id, "Waypoint is no longer in this server")
+            await self._disable(destination.guild_id, "Parley is no longer in this server")
             return
         if not isinstance(channel, discord.TextChannel) or channel.guild.id != guild.id:
             await self._disable(destination.guild_id, "network channel no longer exists")
@@ -207,7 +207,7 @@ class BackgroundTasks:
                     contacts,
                     actor_id=None,
                     content=(
-                        f"⏰ The Waypoint listing for **{name}** expired after "
+                        f"⏰ The Parley listing for **{name}** expired after "
                         f"{config.listings.expiration_days} days. Press **Manage** → **Relist** to bring it back."
                     ),
                     view=persistent_view(manage_button(bot, guild_id, name)),

@@ -4,7 +4,7 @@ Revision ID: 0004
 Revises: 0003
 Create Date: 2026-09-22
 
-Adds one nullable timestamp so Waypoint can allow one ad edit per Relist cycle,
+Adds one nullable timestamp so Parley can allow one ad edit per Relist cycle,
 and a tiny crash-recovery table for temporary direct-post permission windows.
 Existing listings start with no edit used.
 """

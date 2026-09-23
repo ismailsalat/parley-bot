@@ -85,6 +85,16 @@ async def get_listing_by_message(session: AsyncSession, message_id: int) -> List
     )
 
 
+async def get_listing_by_partner_message(session: AsyncSession, message_id: int) -> Listing | None:
+    """Find the active listing whose owner-authored partner post uses this message."""
+    return await session.scalar(
+        select(Listing).where(
+            Listing.partner_message_id == message_id,
+            Listing.status == ListingStatus.ACTIVE,
+        )
+    )
+
+
 async def get_listings(session: AsyncSession, guild_ids: Iterable[int]) -> list[Listing]:
     ids = list(set(guild_ids))
     if not ids:

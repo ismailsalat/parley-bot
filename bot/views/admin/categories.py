@@ -7,17 +7,17 @@ from typing import TYPE_CHECKING
 import discord
 
 from bot.services import categories as category_service
-from bot.services.errors import WaypointError
+from bot.services.errors import ParleyError
 from bot.views.admin.common import ConfirmPage, Field, FieldsModal, Page
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 
 class CategoriesPage(Page):
     title = "Categories"
 
-    def __init__(self, bot: WaypointBot, owner_id: int, *, back, selected: str | None = None) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, *, back, selected: str | None = None) -> None:
         super().__init__(bot, owner_id, back=back)
         self.selected = selected
 
@@ -63,7 +63,7 @@ class CategoriesPage(Page):
             try:
                 async with self.bot.db.session() as session:
                     name = await category_service.add(session, self.bot.runtime, values["name"], actor_id=inter.user.id)
-            except WaypointError as exc:
+            except ParleyError as exc:
                 await self.show(inter, f"⚠️ {exc.user_message}")
                 return
             await self._saved(inter, f"✅ Added **{name}**.", name)
@@ -80,7 +80,7 @@ class CategoriesPage(Page):
             try:
                 async with self.bot.db.session() as session:
                     new = await category_service.rename(session, self.bot.runtime, old, values["name"], actor_id=inter.user.id)
-            except WaypointError as exc:
+            except ParleyError as exc:
                 await self.show(inter, f"⚠️ {exc.user_message}")
                 return
             await self._saved(inter, f"✅ Renamed **{old}** to **{new}**. Existing listings were updated.", new)
@@ -110,7 +110,7 @@ class CategoriesPage(Page):
             try:
                 async with self.bot.db.session() as session:
                     await category_service.reset_defaults(session, self.bot.runtime, actor_id=inter.user.id)
-            except WaypointError as exc:
+            except ParleyError as exc:
                 await self._again().show(inter, f"⚠️ {exc.user_message}")
                 return
             await self._saved(inter, "↩️ Default categories restored.")
@@ -124,7 +124,7 @@ class CategoriesPage(Page):
 class RemoveCategoryPage(Page):
     """Removing a category in use: ask where its listings should go."""
 
-    def __init__(self, bot: WaypointBot, owner_id: int, name: str, used: int, *, back) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, name: str, used: int, *, back) -> None:
         super().__init__(bot, owner_id, back=back)
         self.name = name
         self.used = used

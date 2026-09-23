@@ -1,4 +1,4 @@
-# Waypoint audit: setup & settings pass
+# Parley audit: setup & settings pass
 
 Checklist made before this pass, and what was done about each item.
 
@@ -14,7 +14,7 @@ Checklist made before this pass, and what was done about each item.
 - **Stale reviews:** review buttons carry a revision number. A newer edit outdates the old review,
   which can no longer approve content staff didn't see.
 - **Startup tracebacks:** database, token, intent, schema and config failures print one
-  `[Waypoint] …` line. Details go to `logs/waypoint.log`, or the console with `LOG_LEVEL=DEBUG`.
+  `[Parley] …` line. Details go to `logs/parley.log`, or the console with `LOG_LEVEL=DEBUG`.
   No credentials are printed.
 - **Unpinned dependencies:** added `requirements.lock`, used by Docker/Railway, `setup.bat` and CI.
 - **Whitespace-only messages:** accepted as templates before; now rejected (found by the new tests).
@@ -76,14 +76,14 @@ a static button/handler audit, and rendering of every admin screen.
 
 - **Foreign custom emoji solved, not just warned about:** the warning screen now offers
   **Post Ad In Channel / Continue Anyway / Edit Ad**. The owner gets a one-off, per-member posting
-  window in the listings channel (granted and revoked by Waypoint, one message, moderated,
-  auto-timeout), their message becomes the listing, Waypoint posts the action buttons underneath
+  window in the listings channel (granted and revoked by Parley, one message, moderated,
+  auto-timeout), their message becomes the listing, Parley posts the action buttons underneath
   and the bottom panel stays below. Migration `0003` adds `listings.self_posted` and
   `listings.controls_message_id`.
 - **Honest limits:** needs Manage Messages + Manage Permissions in the listings channel and the
-  Message Content intent (otherwise Waypoint cannot read, so cannot moderate, so the button is
+  Message Content intent (otherwise Parley cannot read, so cannot moderate, so the button is
   hidden with the reason). Held-for-review ads are taken down while staff decide; editing an
-  owner-posted ad republishes it as a Waypoint message.
+  owner-posted ad republishes it as a Parley message.
 - **Grey audit:** every `ButtonStyle.secondary` is now Back / Home / Cancel. Export Settings and
   Check Again became blue, Ban Server red, Pause Network Ads blue, How It Works blue, View Ad blue.
   A test fails the build if any non-navigation button is grey.
@@ -106,11 +106,11 @@ a static button/handler audit, and rendering of every admin screen.
 
 # Patch: direct ad posting + calmer user flow
 
-- **Paste My Own Ad is now literal:** it opens a 3-minute, one-message window in `#server-directory`; the member's original Discord message becomes the listing instead of Waypoint reposting it.
+- **Paste My Own Ad is now literal:** it opens a 3-minute, one-message window in `#server-directory`; the member's original Discord message becomes the listing instead of Parley reposting it.
 - **Simpler screens:** the ad-choice screen is one question with two choices, basics labels are plain language (`Any server size`, `Requests go to`), and decorative emoji were removed from this flow.
-- **Self-post edits stay self-posted:** one controlled replacement is allowed per Relist cycle; Relist itself only moves Waypoint's directory card and never converts the owner's ad into a bot-authored message.
+- **Self-post edits stay self-posted:** one controlled replacement is allowed per Relist cycle; Relist itself only moves Parley's directory card and never converts the owner's ad into a bot-authored message.
 - **Safer posting window:** posting permission is removed immediately after the first message and the previous member overwrite is restored.
-- **Message Content:** Waypoint requests it automatically; admins only need to enable the privileged intent once in the Discord Developer Portal.
+- **Message Content:** Parley requests it automatically; admins only need to enable the privileged intent once in the Discord Developer Portal.
 - **Finder empty state:** kept as a small error embed with only `Try Another Category` and `Show Again`.
 - **Live crash fixes included:** `show_screen` no longer sends `embed` and `embeds` together, and startup Health Check runs after background tasks start.
 
@@ -121,8 +121,8 @@ a static button/handler audit, and rendering of every admin screen.
 
 - **Finder result:** replaced the plain text block with a compact embed showing Category, Members and an explicitly named **Partner requirement**. Finder buttons no longer use decorative emoji.
 - **Channel names:** new Automatic Setup uses `#start-here`, `#server-directory`, `#find-partners`, `#support`, `#waypoint-logs`. Legacy names are reused rather than duplicated on upgrades.
-- **Server invite onboarding:** when Waypoint joins a server it sends one clean **Waypoint is connected** embed with a single **List This Server** action. It does not claim network enrollment or post anything automatically.
-- **No sendable channel:** Waypoint falls back to DMing the guild owner with the exact View Channel / Send Messages fix and `/connect` next step.
+- **Server invite onboarding:** when Parley joins a server it sends one clean **Parley is connected** embed with a single **List This Server** action. It does not claim network enrollment or post anything automatically.
+- **No sendable channel:** Parley falls back to DMing the guild owner with the exact View Channel / Send Messages fix and `/connect` next step.
 
 
 ---
@@ -130,14 +130,14 @@ a static button/handler audit, and rendering of every admin screen.
 # Patch: Relist, locked directory, one-edit cycles
 
 - **Relist:** added a branded one-click Relist action with a 30-minute default cooldown per server. It is available from My Listing and the main server-directory panel; the cooldown is shared by every admin of that server.
-- **Direct ads stay direct:** Relisting a user-authored ad moves only Waypoint's clean directory card. The owner's real ad message is never impersonated or reposted by the bot.
+- **Direct ads stay direct:** Relisting a user-authored ad moves only Parley's clean directory card. The owner's real ad message is never impersonated or reposted by the bot.
 - **One edit per cycle:** migration `0004` adds `listings.last_ad_edit_at`. A successful Relist unlocks one controlled ad replacement; another edit waits for the next Relist cycle.
-- **Crash-safe posting windows:** `0004` also persists the temporary directory permission state. On restart Waypoint restores the member's exact previous overwrite before allowing another direct-post session.
+- **Crash-safe posting windows:** `0004` also persists the temporary directory permission state. On restart Parley restores the member's exact previous overwrite before allowing another direct-post session.
 - **Directory lock:** `#server-directory` is forced read-only for normal use, and the message listener deletes unauthorized posts even if an unusual role overwrite or Administrator bypasses the normal deny.
 - **One-message window:** the active poster gets three minutes and one message. Extra rapid messages are removed; the original member overwrite is restored after the window.
-- **Direct edit bypass blocked:** editing a live owner-authored ad directly causes Waypoint to remove that edited message and direct the owner to My Listing → Edit Ad, where moderation runs normally.
+- **Direct edit bypass blocked:** editing a live owner-authored ad directly causes Parley to remove that edited message and direct the owner to My Listing → Edit Ad, where moderation runs normally.
 - **Cleaner directory card:** owner-authored ads get a small bot-owned card with server name, category/member count, partnership status and at most View Ad / Join Server / Request Partnership.
-- **Lower stimulation:** normal workflow buttons now default to little or no decorative emoji; the main listing panel uses Post My Server / Find Partners / My Listing / Relist / Add Waypoint.
+- **Lower stimulation:** normal workflow buttons now default to little or no decorative emoji; the main listing panel uses Post My Server / Find Partners / My Listing / Relist / Add Parley.
 
 
 ---
@@ -157,7 +157,7 @@ a static button/handler audit, and rendering of every admin screen.
 
 - **Public directory stays about the ads:** removed the large duplicate server embed under owner-posted ads. The first post gets only a tiny one-line action strip with **Join Server / Request Partnership**.
 - **Relist stays one-click without reposting the owner:** a Relist moves a compact one-line pointer with **View Ad / Join Server / Request Partnership** to the newest position.
-- **Public footer trimmed:** `#server-directory` now shows only **Post My Server / Find Partners / Relist**. My Listing and Add Waypoint live in the places that need them instead of repeating under every ad.
+- **Public footer trimmed:** `#server-directory` now shows only **Post My Server / Find Partners / Relist**. My Listing and Add Parley live in the places that need them instead of repeating under every ad.
 - **Multiple servers:** one listed server opens My Listing immediately; multiple listings use one server dropdown instead of a grid of management buttons. DM home labels the action **My Servers** only when the user actually has multiple listed servers.
 - **Cleaner onboarding:** the join message says exactly what List This Server does, and the directory topic explains that posting is locked and Relist moves a listing back up.
 - **Quieter Health Check:** optional Support / Staff logs channels no longer produce warning noise when intentionally unconfigured.
@@ -182,10 +182,10 @@ A second pass reviewed the normal-user flow across listings, management, discove
 
 # Full product polish pass: latest-ad links, calmer inbox, fair discovery
 
-- **My Listing:** now uses a compact embed where structured status is easier to scan. **View Ad** points to the listing's current real Discord advertisement message (`message_id`), never the channel and never Waypoint's helper/Relist card.
+- **My Listing:** now uses a compact embed where structured status is easier to scan. **View Ad** points to the listing's current real Discord advertisement message (`message_id`), never the channel and never Parley's helper/Relist card.
 - **Server pickers:** My Servers, Post My Server, Find Partners and Relist use one clean select inside a small embed only when more than one server makes a choice necessary.
-- **Directory restraint:** a fresh self-posted ad gets only the two useful actions underneath it; Waypoint's one-line server summary is reserved for a later Relist pointer so the bot does not visually compete with the advertisement.
+- **Directory restraint:** a fresh self-posted ad gets only the two useful actions underneath it; Parley's one-line server summary is reserved for a later Relist pointer so the bot does not visually compete with the advertisement.
 - **Requests inbox:** multiple incoming partnership requests no longer create three buttons per request. The inbox shows one request picker; choosing one reveals Accept / Decline / View Ad for that request only.
-- **Discovery fairness:** removed the old newest-200 candidate ceiling. Finder pages through the eligible database set and uses reservoir sampling, so older eligible listings do not become invisible as Waypoint grows.
+- **Discovery fairness:** removed the old newest-200 candidate ceiling. Finder pages through the eligible database set and uses reservoir sampling, so older eligible listings do not become invisible as Parley grows.
 - **Past partners:** Show Past Partners is now truly past-only instead of resetting into a mixed pool that could repeat fresh results.
 - **Copy:** default management wording is **View Ad**, not the ambiguous **View Listing**.

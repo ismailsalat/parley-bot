@@ -23,7 +23,7 @@ from bot.utils.mentions import safe_allowed_mentions
 from bot.views.base import OwnedView, get_bot, guard, handle_error, reply
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
@@ -87,12 +87,12 @@ BUTTON_STYLE_MAP = {
 }
 
 
-def button_style(bot: WaypointBot, key: str) -> discord.ButtonStyle:
+def button_style(bot: ParleyBot, key: str) -> discord.ButtonStyle:
     return BUTTON_STYLE_MAP[bot.runtime.button_style(key)]
 
 
 def action_button(
-    bot: WaypointBot,
+    bot: ParleyBot,
     action: str,
     *,
     style: discord.ButtonStyle | None = None,
@@ -120,7 +120,7 @@ SETUP_PERMISSIONS = PUBLIC_PERMISSIONS | discord.Permissions(
 )
 
 
-def invite_url(bot: WaypointBot, *, setup: bool = False) -> str | None:
+def invite_url(bot: ParleyBot, *, setup: bool = False) -> str | None:
     """The real OAuth install link, built from the application ID (never typed by hand)."""
     if bot.application_id is None:
         return None
@@ -128,22 +128,22 @@ def invite_url(bot: WaypointBot, *, setup: bool = False) -> str | None:
     return discord.utils.oauth_url(bot.application_id, permissions=permissions, scopes=("bot", "applications.commands"))
 
 
-def setup_invite_url(bot: WaypointBot) -> str | None:
+def setup_invite_url(bot: ParleyBot) -> str | None:
     return invite_url(bot, setup=True)
 
 
-def link_button(bot: WaypointBot, key: str, url: str | None, row: int | None = None) -> discord.ui.Button | None:
+def link_button(bot: ParleyBot, key: str, url: str | None, row: int | None = None) -> discord.ui.Button | None:
     if not url:
         return None
     label, emoji = bot.runtime.button(key)
     return discord.ui.Button(label=label, emoji=emoji, url=url, row=row)
 
 
-def add_bot_button(bot: WaypointBot, row: int | None = None) -> discord.ui.Button | None:
+def add_bot_button(bot: ParleyBot, row: int | None = None) -> discord.ui.Button | None:
     return link_button(bot, "add_bot", invite_url(bot), row=row)
 
 
-def optional_links(bot: WaypointBot, row: int | None = None) -> list[discord.ui.Button]:
+def optional_links(bot: ParleyBot, row: int | None = None) -> list[discord.ui.Button]:
     """Support / Rules / Website buttons for the links set in Settings -> Appearance."""
     links = bot.runtime.bot
     items = [
@@ -165,8 +165,8 @@ def persistent_view(*items: discord.ui.Item | None) -> discord.ui.View:
 # ---------------------------------------------------------------- panel builders
 
 
-def control_panel(bot: WaypointBot, *, staff: bool = False) -> tuple[str, discord.ui.View]:
-    """The DM home: the primary Waypoint interface."""
+def control_panel(bot: ParleyBot, *, staff: bool = False) -> tuple[str, discord.ui.View]:
+    """The DM home: five clear user actions, plus Settings for staff."""
     content = templates.render(bot.runtime, "dm_home")
     if staff and bot.runtime.hub.mode != "live":
         content += f"\n-# Mode: {'🧪 TEST' if bot.runtime.hub.mode == 'test' else '🔴 OFF'}"
@@ -174,24 +174,23 @@ def control_panel(bot: WaypointBot, *, staff: bool = False) -> tuple[str, discor
         action_button(bot, "post", row=0),
         action_button(bot, "find", row=0),
         action_button(bot, "servers", row=1),
-        action_button(bot, "requests", row=1),
-        add_bot_button(bot, row=2),
+        action_button(bot, "partner_posts", row=1),
+        action_button(bot, "requests", row=2),
         action_button(bot, "settings", row=3) if staff else None,
     )
     return content, view
-
 
 def set_listing_button_label(view: discord.ui.View, *, multiple: bool) -> None:
     """Use My Listing for one server and My Servers when a picker is actually needed."""
     for child in view.children:
         item = getattr(child, "item", child)
         if getattr(item, "custom_id", None) == "wp:act:servers":
-            item.label = "My Servers" if multiple else "My Listing"
+            item.label = "My Server Listings" if multiple else "My Server Listing"
             item.emoji = None
             return
 
 
-async def personalize_control_panel(bot: WaypointBot, user_id: int, *, staff: bool = False) -> tuple[str, discord.ui.View]:
+async def personalize_control_panel(bot: ParleyBot, user_id: int, *, staff: bool = False) -> tuple[str, discord.ui.View]:
     content, view = control_panel(bot, staff=staff)
     managed_ids = [g.id for g in permissions.cached_manageable_guilds(bot, user_id)]
     if managed_ids:
@@ -206,44 +205,52 @@ async def personalize_control_panel(bot: WaypointBot, user_id: int, *, staff: bo
     return content, view
 
 
-def listings_panel(bot: WaypointBot) -> tuple[str, discord.ui.View]:
-    """A visually distinct directory control card below ads."""
+def listings_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
+    """Server Directory controls: only server-ad actions."""
     view = persistent_view(
-        action_button(bot, "find", row=0),
         action_button(bot, "post", row=0),
-        action_button(bot, "directory", row=1),
+        action_button(bot, "servers", row=0),
         action_button(bot, "relist", row=1),
     )
     return templates.render(bot.runtime, "listings_panel"), view
 
 
-def looking_panel(bot: WaypointBot) -> tuple[str, discord.ui.View]:
+def looking_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
+    """Find-a-Partner controls: deliberately different from Server Directory."""
     view = persistent_view(
-        action_button(bot, "find"),
-        action_button(bot, "looking"),
-        action_button(bot, "post"),
+        action_button(bot, "find", row=0),
+        action_button(bot, "looking", row=0),
+        action_button(bot, "partner_posts", row=1),
     )
     return templates.render(bot.runtime, "looking_panel"), view
 
 
-def welcome_panel(bot: WaypointBot) -> tuple[str, discord.ui.View]:
-    # Keep discovery visually strongest; secondary tools sit beside it, not in an action wall.
+def _hub_channel_url(bot: ParleyBot, channel_id: int | None) -> str | None:
+    guild_id = bot.runtime.hub.main_guild_id
+    if not guild_id or not channel_id:
+        return None
+    return f"https://discord.com/channels/{guild_id}/{channel_id}"
+
+
+def welcome_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
+    """Start Here is a tiny router, not another management dashboard."""
+    directory_url = _hub_channel_url(bot, bot.runtime.hub.listings_channel_id)
+    partner_url = _hub_channel_url(bot, bot.runtime.hub.looking_channel_id)
     view = persistent_view(
-        action_button(bot, "find", row=0),
-        action_button(bot, "post", row=0),
-        action_button(bot, "directory", row=1),
-        add_bot_button(bot, row=1),
+        discord.ui.Button(label="Server Directory", url=directory_url, row=0) if directory_url else None,
+        discord.ui.Button(label="Find a Partner", url=partner_url, row=0) if partner_url else None,
+        action_button(bot, "post", row=1),
+        action_button(bot, "looking", row=1),
     )
     return templates.render(bot.runtime, "welcome"), view
 
-
-def join_message(bot: WaypointBot, guild: discord.Guild | None = None) -> tuple[discord.Embed, discord.ui.View]:
-    """Clean first-run message sent once when Waypoint is added to a server."""
+def join_message(bot: ParleyBot, guild: discord.Guild | None = None) -> tuple[discord.Embed, discord.ui.View]:
+    """Clean first-run message sent once when Parley is added to a server."""
     description = templates.render(
         bot.runtime, "join_message", server_name=guild.name if guild else "This server"
     )
     embed = discord.Embed(
-        title="Waypoint is connected",
+        title="Parley is connected",
         description=description,
         color=bot.runtime.bot.color_primary,
     )
@@ -256,13 +263,13 @@ def join_message(bot: WaypointBot, guild: discord.Guild | None = None) -> tuple[
     view.add_item(connect)
     if not bot.runtime.hub.configured:
         setup = action_button(bot, "setup", style=discord.ButtonStyle.success, row=0)
-        setup.item.label = "Set Up Waypoint"
+        setup.item.label = "Set Up Parley"
         setup.item.emoji = None
         view.add_item(setup)
     return embed, view
 
 
-async def send_control_panel(interaction: discord.Interaction, bot: WaypointBot) -> None:
+async def send_control_panel(interaction: discord.Interaction, bot: ParleyBot) -> None:
     content, view = await personalize_control_panel(
         bot, interaction.user.id, staff=await permissions.is_staff_cached(bot, interaction.user.id)
     )
@@ -308,7 +315,7 @@ class DirectoryOverviewView(OwnedView):
 
     def __init__(
         self,
-        bot: WaypointBot,
+        bot: ParleyBot,
         owner_id: int,
         guilds: list[discord.Guild],
         listings: dict[int, object],

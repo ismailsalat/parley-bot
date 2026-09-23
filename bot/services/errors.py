@@ -1,6 +1,6 @@
 """Errors whose message is safe and friendly enough to show to users.
 
-Anything that is *not* a WaypointError is treated as a bug: it is logged with a
+Anything that is *not* a ParleyError is treated as a bug: it is logged with a
 traceback and the user gets a generic message.
 """
 
@@ -9,33 +9,33 @@ from __future__ import annotations
 from datetime import timedelta
 
 
-class WaypointError(Exception):
+class ParleyError(Exception):
     def __init__(self, user_message: str) -> None:
         super().__init__(user_message)
         self.user_message = user_message
 
 
-class ValidationError(WaypointError):
+class ValidationError(ParleyError):
     pass
 
 
-class PermissionDenied(WaypointError):
+class PermissionDenied(ParleyError):
     pass
 
 
-class NotFound(WaypointError):
+class NotFound(ParleyError):
     pass
 
 
-class Conflict(WaypointError):
+class Conflict(ParleyError):
     pass
 
 
-class Banned(WaypointError):
+class Banned(ParleyError):
     pass
 
 
-class CooldownActive(WaypointError):
+class CooldownActive(ParleyError):
     def __init__(self, user_message: str, remaining: timedelta) -> None:
         super().__init__(user_message)
         self.remaining = remaining

@@ -76,7 +76,7 @@ def _matches_domain(host: str, domain: str) -> bool:
 def check_links(text: str, config: RuntimeConfig) -> bool:
     """Validate the links in an ad. Returns True when staff should look at it.
 
-    Blocked domains and too many links are refused outright. Links Waypoint
+    Blocked domains and too many links are refused outright. Links Parley
     can't judge (shorteners, bare IP addresses) are held for review or blocked,
     depending on ``moderation.link_action``. This is not malware detection.
     """
@@ -113,7 +113,7 @@ def build_simple_ad(
     description: str,
     extra: str = "",
 ) -> str:
-    """The Simple Ad Builder: a clean normal message from what Waypoint already knows."""
+    """The Simple Ad Builder: a clean normal message from what Parley already knows."""
     lines = [f"## {name.strip()}", "", description.strip()]
     if extra.strip():
         lines += ["", extra.strip()]
@@ -413,7 +413,7 @@ async def claim_refresh(
     await moderation.ensure_allowed(session, config, guild_ids=[guild_id], user_id=actor_id)
     listing = await get_editable_listing(session, guild_id)
     if listing.status == ListingStatus.SUSPENDED:
-        raise ValidationError("This listing is suspended by Waypoint staff.")
+        raise ValidationError("This listing is suspended by Parley staff.")
     if listing.status == ListingStatus.PENDING:
         raise ValidationError("This listing is still waiting for staff approval.")
 
@@ -432,7 +432,7 @@ async def claim_refresh(
 async def record_message(
     session: AsyncSession, *, guild_id: int, channel_id: int | None, message_id: int | None
 ) -> None:
-    """Remember where a listing is published (a Waypoint-posted message)."""
+    """Remember where a listing is published (a Parley-posted message)."""
     listing = await repository.get_listing(session, guild_id)
     if listing is None:
         return

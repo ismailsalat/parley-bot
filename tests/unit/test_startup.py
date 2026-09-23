@@ -55,7 +55,7 @@ def test_unreachable_database_gives_one_clean_line(tmp_path):
     result = run_main(tmp_path, DISCORD_TOKEN="x.y.z", DATABASE_URL="postgresql://u:supersecretpw@127.0.0.1:9/db")
     output = result.stdout + result.stderr
     assert result.returncode == 1
-    assert "[Waypoint] Database connection failed." in output
+    assert "[Parley] Database connection failed." in output
     assert "Traceback" not in output
     assert "supersecretpw" not in output and "x.y.z" not in output
 
@@ -68,7 +68,7 @@ def test_missing_token_is_explained(tmp_path):
 
 def test_invalid_configuration_is_explained(tmp_path):
     result = run_main(tmp_path, DISCORD_TOKEN="x", MAIN_GUILD_ID="abc")
-    assert result.returncode == 2 and "[Waypoint] Configuration problem" in result.stderr
+    assert result.returncode == 2 and "[Parley] Configuration problem" in result.stderr
 
 
 def test_lock_file_pins_every_production_dependency():

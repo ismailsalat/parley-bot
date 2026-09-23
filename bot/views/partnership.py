@@ -35,7 +35,7 @@ from bot.views.base import (
 from bot.views.welcome import action_button, persistent_view, register_action
 
 if TYPE_CHECKING:
-    from bot.core import WaypointBot
+    from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------- shared lookups
 
 
-async def represented_listings(bot: WaypointBot, session: AsyncSession, user_id: int) -> list[Listing]:
+async def represented_listings(bot: ParleyBot, session: AsyncSession, user_id: int) -> list[Listing]:
     """Active listings the user may speak for: partnership contact or current manager."""
     contact_ids = set(await repository.guild_ids_where_contact(session, user_id))
     manager_ids = {guild.id for guild in permissions.cached_manageable_guilds(bot, user_id)}
@@ -51,7 +51,7 @@ async def represented_listings(bot: WaypointBot, session: AsyncSession, user_id:
     return [row for row in rows if row.status == ListingStatus.ACTIVE]
 
 
-async def can_represent(bot: WaypointBot, session: AsyncSession, guild_id: int, user_id: int) -> bool:
+async def can_represent(bot: ParleyBot, session: AsyncSession, guild_id: int, user_id: int) -> bool:
     if await repository.is_contact(session, guild_id, user_id):
         return True
     return await permissions.is_manager(bot, guild_id, user_id)
@@ -72,7 +72,7 @@ def describe(guilds: dict[int, Guild], listing: Listing | None, guild_id: int) -
 # ---------------------------------------------------------------- listing components
 
 
-def listing_components(bot: WaypointBot, listing: Listing) -> discord.ui.View | None:
+def listing_components(bot: ParleyBot, listing: Listing) -> discord.ui.View | None:
     """[Join Server] [Request Partnership] shown under an advertisement."""
     items: list[discord.ui.Item] = []
     if listing.invite_url:
@@ -83,7 +83,7 @@ def listing_components(bot: WaypointBot, listing: Listing) -> discord.ui.View | 
     return persistent_view(*items) if items else None
 
 
-def listing_message_kwargs(bot: WaypointBot, listing: Listing) -> dict:
+def listing_message_kwargs(bot: ParleyBot, listing: Listing) -> dict:
     from bot.services.testmode import TEST_LISTING_NOTE
 
     kwargs = advertisement_kwargs(listing.advertisement_text)
@@ -120,7 +120,7 @@ class RequestPartnershipButton(discord.ui.DynamicItem[discord.ui.Button], templa
 
     @classmethod
     async def from_custom_id(cls, interaction, item, match):  # type: ignore[override]
-        return cls(int(match["gid"]), label=item.label, emoji=item.emoji)
+        return cls(int(match["gid"]), label=item.label, emoji=item.emoji, style=item.style)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if not await guard(interaction):
@@ -186,12 +186,12 @@ class RequestResponseButton(
             await handle_error(interaction, exc)
 
 
-def request_button(bot: WaypointBot, guild_id: int, row: int | None = None) -> RequestPartnershipButton:
+def request_button(bot: ParleyBot, guild_id: int, row: int | None = None) -> RequestPartnershipButton:
     label, emoji = bot.runtime.button("request")
     return RequestPartnershipButton(guild_id, label=label, emoji=emoji, row=row)
 
 
-def view_ad_button(bot: WaypointBot, guild_id: int, *, label: str | None = None, row: int | None = None) -> ViewAdButton:
+def view_ad_button(bot: ParleyBot, guild_id: int, *, label: str | None = None, row: int | None = None) -> ViewAdButton:
     default_label, emoji = bot.runtime.button("view_ad")
     return ViewAdButton(guild_id, label=(label or default_label)[:80], emoji=emoji, row=row)
 
@@ -260,7 +260,7 @@ async def start_request_flow(interaction: discord.Interaction, target_id: int) -
     if not sources:
         await reply(
             interaction,
-            "To request a partnership, your server needs a Waypoint listing first, "
+            "To request a partnership, your server needs a Parley listing first, "
             "and you need **Manage Server** there or be one of its partnership contacts.",
             view=persistent_view(action_button(bot, "post")),
         )
@@ -294,7 +294,7 @@ async def start_request_flow(interaction: discord.Interaction, target_id: int) -
 
 
 def request_embed(
-    bot: WaypointBot,
+    bot: ParleyBot,
     request: PartnershipRequest,
     guilds: dict[int, Guild],
     source: Listing | None,
@@ -324,7 +324,7 @@ def request_embed(
     return embed
 
 
-def request_actions(bot: WaypointBot, request: PartnershipRequest) -> discord.ui.View:
+def request_actions(bot: ParleyBot, request: PartnershipRequest) -> discord.ui.View:
     _label, emoji = bot.runtime.button("view_ad")
     return persistent_view(
         RequestResponseButton(request.id, True),
@@ -342,7 +342,7 @@ async def submit_request(
     user_id = interaction.user.id
     source_guild = bot.get_guild(source_id)
     if source_guild is None:
-        raise ValidationError("Waypoint is no longer in your server. Add it back before sending partnership requests.")
+        raise ValidationError("Parley is no longer in your server. Add it back before sending partnership requests.")
     permissions.require_public_bot_channel(source_guild)
 
     async with bot.db.session() as session:
@@ -530,7 +530,7 @@ class RequestInboxView(OwnedView):
     """Select one incoming request, then reveal only the actions for that request."""
 
     def __init__(
-        self, bot: WaypointBot, owner_id: int, incoming: list[PartnershipRequest], guilds: dict[int, Guild]
+        self, bot: ParleyBot, owner_id: int, incoming: list[PartnershipRequest], guilds: dict[int, Guild]
     ) -> None:
         super().__init__(owner_id)
         self.bot = bot
@@ -586,36 +586,40 @@ class RequestInboxView(OwnedView):
 
 @register_action("find")
 async def start_find_flow(interaction: discord.Interaction) -> None:
-    """Find Partners: choose a category, then see one server at a time."""
+    """Browse matches immediately; ask for a source server only when the user has several."""
     bot = get_bot(interaction)
     async with bot.db.session() as session:
         sources = await represented_listings(bot, session, interaction.user.id)
         guilds = await repository.get_guilds(session, [s.guild_id for s in sources])
 
     if len(sources) > 1:
-        # Only ask when it's genuinely ambiguous.
         async def picked(inter: discord.Interaction, guild_id: int) -> None:
-            await CategoryView(bot, inter.user.id, source_id=guild_id).show(inter)
+            await FinderView(bot, inter.user.id, category=ANY, source_id=guild_id).show(inter)
 
         embed = discord.Embed(
-            title="Find Partners",
-            description="Choose which server you're finding partners for.",
+            title="Browse Partners",
+            description="Which server are you finding a partner for?",
             color=bot.runtime.bot.color_primary,
         )
         await reply(
             interaction,
             embed=embed,
-            view=GuildPickerView(interaction.user.id, [(s.guild_id, guild_name(guilds, s.guild_id)) for s in sources], picked),
+            view=GuildPickerView(
+                interaction.user.id,
+                [(s.guild_id, guild_name(guilds, s.guild_id)) for s in sources],
+                picked,
+                placeholder="Choose your server",
+            ),
         )
         return
-    source_id = sources[0].guild_id if sources else None
-    await CategoryView(bot, interaction.user.id, source_id=source_id).show(interaction)
 
+    source_id = sources[0].guild_id if sources else None
+    await FinderView(bot, interaction.user.id, category=ANY, source_id=source_id).show(interaction)
 
 class CategoryView(OwnedView):
     """One question: what kind of server are you looking for?"""
 
-    def __init__(self, bot: WaypointBot, owner_id: int, *, source_id: int | None) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, *, source_id: int | None) -> None:
         super().__init__(owner_id)
         self.bot = bot
         self.source_id = source_id
@@ -663,7 +667,7 @@ class FinderView(OwnedView):
 
     def __init__(
         self,
-        bot: WaypointBot,
+        bot: ParleyBot,
         owner_id: int,
         *,
         category: str,
@@ -811,6 +815,8 @@ class FinderView(OwnedView):
         category = ", ".join(listing.categories) or "Other"
         requirement = format_minimum(listing.minimum_members) if listing.minimum_members else "Any server size"
         lines = [f"{category} • {format_members(self.current_members)}", f"Partner size: {requirement}"]
+        if listing.partner_ad_text:
+            lines.extend(["", truncate(listing.partner_ad_text, 700)])
         if notice:
             lines.insert(0, notice)
             lines.insert(1, "")
@@ -832,20 +838,26 @@ class FinderView(OwnedView):
         self.clear_items()
         assert self.current is not None
         gid = self.current.guild_id
-        label, _emoji = self.bot.runtime.button("request")
-        request = discord.ui.Button(label=label, style=discord.ButtonStyle.primary, row=0)
+
+        request = discord.ui.Button(label="Send Partner Request", style=discord.ButtonStyle.success, row=0)
         request.callback = self._request  # type: ignore[method-assign]
         self.add_item(request)
-        nxt = discord.ui.Button(label="Next Server", style=discord.ButtonStyle.primary, row=0)
+
+        nxt = discord.ui.Button(label="Next Match", style=discord.ButtonStyle.primary, row=0)
         nxt.callback = self._next  # type: ignore[method-assign]
         self.add_item(nxt)
-        # Keep finder actions visually consistent. The dynamic View Ad button
-        # resolves the current message ID at click time, so it stays correct
-        # after an edit or Relist.
-        self.add_item(view_ad_button(self.bot, gid, label="View Ad", row=0))
-        back = discord.ui.Button(label="Back", style=discord.ButtonStyle.secondary, row=1)
-        back.callback = self._back  # type: ignore[method-assign]
-        self.add_item(back)
+
+        partner_url = listing_jump_url(
+            self.bot.runtime.hub.main_guild_id,
+            self.current.partner_channel_id,
+            self.current.partner_message_id,
+        )
+        if partner_url:
+            self.add_item(discord.ui.Button(label="View Partner Post", url=partner_url, row=0))
+        else:
+            self.add_item(view_ad_button(self.bot, gid, label="View Server Ad", row=0))
+
+        self.add_item(home_button(self.bot, row=1))
 
     async def show(self, interaction: discord.Interaction, notice: str | None = None) -> None:
         listing = await self.pick_next()
@@ -938,7 +950,7 @@ class ExhaustedView(OwnedView):
 
     def __init__(
         self,
-        bot: WaypointBot,
+        bot: ParleyBot,
         owner_id: int,
         *,
         category: str,
@@ -956,11 +968,12 @@ class ExhaustedView(OwnedView):
             past = discord.ui.Button(label="Show Past Partners", style=discord.ButtonStyle.primary, row=0)
             past.callback = self._past  # type: ignore[method-assign]
             self.add_item(past)
-        another = discord.ui.Button(label="Try Another Category", style=discord.ButtonStyle.primary, row=0)
+        if category != ANY:
+            another = discord.ui.Button(label="Try Another Category", style=discord.ButtonStyle.primary, row=0)
+            another.callback = self._another  # type: ignore[method-assign]
+            self.add_item(another)
         again = discord.ui.Button(label="Show Again", style=discord.ButtonStyle.primary, row=0)
-        another.callback = self._another  # type: ignore[method-assign]
         again.callback = self._again  # type: ignore[method-assign]
-        self.add_item(another)
         self.add_item(again)
 
     def embed(self, first: bool) -> discord.Embed:
@@ -983,7 +996,7 @@ class ExhaustedView(OwnedView):
                 description=description,
                 color=self.bot.runtime.bot.color_primary,
             )
-        embed.set_footer(text="Waypoint • Partner Finder")
+        embed.set_footer(text="Parley • Partner Finder")
         return embed
 
     def render(self, first: bool) -> str:
@@ -1036,142 +1049,13 @@ async def _edit_or_reply(
         await reply(interaction, content, embed=embed, view=view)
 
 
-# ---------------------------------------------------------------- looking for partners
+# ---------------------------------------------------------------- partner posting
 
 
 @register_action("looking")
 async def start_looking_post(interaction: discord.Interaction) -> None:
-    bot = get_bot(interaction)
-    channel = bot.panels.looking_channel()
-    if channel is None:
-        await reply(interaction, "The find-partners channel isn't set up yet.")
-        return
-    async with bot.db.session() as session:
-        sources = await represented_listings(bot, session, interaction.user.id)
-        guilds = await repository.get_guilds(session, [s.guild_id for s in sources])
+    """Old action ID kept so existing buttons open the new partner-post manager."""
+    from bot.views.partner_posts import start_partner_posts
 
-    if not sources:
-        await reply(
-            interaction,
-            f"You can simply write a message in {channel.mention} and people will reply.\n"
-            "To use the structured post, list your server first.",
-            view=persistent_view(action_button(bot, "post")),
-        )
-        return
+    await start_partner_posts(interaction)
 
-    options = [(s.guild_id, guild_name(guilds, s.guild_id)) for s in sources]
-    view = LookingPostView(interaction.user.id, bot, options)
-    await reply(interaction, view.render(), view=view)
-
-
-class LookingPostView(OwnedView):
-    def __init__(self, owner_id: int, bot: WaypointBot, sources: list[tuple[int, str]]) -> None:
-        super().__init__(owner_id)
-        self.bot = bot
-        self.sources = dict(sources)
-        self.source_id = sources[0][0]
-        self.category = ANY
-        self.minimum = 0
-        self._build()
-
-    def render(self) -> str:
-        return (
-            "## Post Looking For Partner\n"
-            f"**Your server:** {self.sources[self.source_id]}\n"
-            f"**Looking for:** {self.category} servers\n"
-            f"**Minimum:** {format_minimum(self.minimum)}\n\n"
-            "Press **Post** to add an optional short message."
-        )
-
-    def _build(self) -> None:
-        self.clear_items()
-        if len(self.sources) > 1:
-            source = discord.ui.Select(
-                placeholder="Your server",
-                options=[
-                    discord.SelectOption(label=truncate(name, 100), value=str(gid), default=gid == self.source_id)
-                    for gid, name in list(self.sources.items())[:25]
-                ],
-                row=0,
-            )
-            source.callback = self._make_setter(source, "source_id", int)  # type: ignore[method-assign]
-            self.add_item(source)
-        categories = [*self.bot.runtime.listings.categories, ANY]
-        category = discord.ui.Select(
-            placeholder="Category wanted",
-            options=[discord.SelectOption(label=c, value=c, default=c == self.category) for c in categories],
-            row=1,
-        )
-        category.callback = self._make_setter(category, "category", str)  # type: ignore[method-assign]
-        self.add_item(category)
-        minimum = discord.ui.Select(
-            placeholder="Minimum members",
-            options=[
-                discord.SelectOption(label=format_minimum(v), value=str(v), default=v == self.minimum)
-                for v in self.bot.runtime.listings.minimum_member_options
-            ],
-            row=2,
-        )
-        minimum.callback = self._make_setter(minimum, "minimum", int)  # type: ignore[method-assign]
-        self.add_item(minimum)
-        post = discord.ui.Button(label="Post", emoji="📝", style=discord.ButtonStyle.primary, row=3)
-        post.callback = self._open_modal  # type: ignore[method-assign]
-        self.add_item(post)
-
-    def _make_setter(self, select: discord.ui.Select, attribute: str, cast: type):
-        async def callback(interaction: discord.Interaction) -> None:
-            setattr(self, attribute, cast(select.values[0]))
-            self._build()
-            await interaction.response.edit_message(content=self.render(), view=self)
-
-        return callback
-
-    async def _open_modal(self, interaction: discord.Interaction) -> None:
-        limit = self.bot.runtime.partnerships.max_message_length
-        await interaction.response.send_modal(
-            ShortMessageModal(
-                title="Looking for partners",
-                label="Short message (optional)",
-                placeholder="e.g. New social server, happy to cross-promote!",
-                max_length=limit or 1,
-                on_submit=self._publish,
-            )
-        )
-
-    async def _publish(self, interaction: discord.Interaction, message: str) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        bot = self.bot
-        channel = bot.panels.looking_channel()
-        if channel is None:
-            raise ValidationError("The find-partners channel isn't set up yet.")
-
-        async with bot.db.session() as session:
-            if not await can_represent(bot, session, self.source_id, interaction.user.id):
-                raise PermissionDenied("You can only post for servers you manage or are a partnership contact for.")
-            text = await partnerships.claim_looking_post(
-                session,
-                bot.runtime,
-                source_guild_id=self.source_id,
-                actor_id=interaction.user.id,
-                message=message,
-                now=utcnow(),
-            )
-            listing = await repository.get_listing(session, self.source_id)
-            guilds = await repository.get_guilds(session, [self.source_id])
-
-        row = guilds.get(self.source_id)
-        name = guild_name(guilds, self.source_id)
-        lines = [
-            f"🔎 **{name}** is looking for partners",
-            f"**Wanted:** {self.category} servers · {format_minimum(self.minimum)}",
-            f"**About us:** {', '.join(listing.categories) if listing else '—'} · {format_members(row.member_count if row else 0)}",
-            f"Posted by {interaction.user.mention}",
-        ]
-        if text:
-            lines.append("\n".join(f"> {part}" for part in text.splitlines()))
-        view = persistent_view(view_ad_button(bot, self.source_id), request_button(bot, self.source_id))
-        posted = await channel.send(**advertisement_kwargs("\n".join(lines)), view=view)
-        await bot.panels.move_looking_panel_now()
-        log.info("looking.posted guild_id=%s user_id=%s", self.source_id, interaction.user.id)
-        self.stop()
-        await reply(interaction, f"✅ Posted! {posted.jump_url}")
