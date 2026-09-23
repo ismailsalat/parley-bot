@@ -89,6 +89,7 @@ class ParleyBot(commands.Bot):
         self.runtime_notes: list[str] = []
         self.hub_env_fields: tuple[str, ...] = ()
         self.staff_cache: dict[int, tuple[bool, float]] = {}
+        self.blocked_user_ids: set[int] = set()
         self.staff_guild_id: int | None = None
         super().__init__(
             command_prefix=commands.when_mentioned,
@@ -284,6 +285,7 @@ class ParleyBot(commands.Bot):
         """Apply settings stored in the database (changed from Discord). No restart needed."""
         async with self.db.session() as session:
             overrides = await repository.runtime_overrides(session)
+            user_bans = await repository.list_bans(session, "user", limit=100_000)
         config, notes = apply_overrides(default_config(), overrides)
         hub, env_fields = configuration.merge_env_hub(config.hub, self.settings)
         if hub != config.hub:
@@ -298,6 +300,9 @@ class ParleyBot(commands.Bot):
         changed = config != self.runtime
         previous_mode = self.runtime.hub.mode
         self.runtime = config
+        self.blocked_user_ids = set(config.moderation.blocked_user_ids) | {
+            ban.target_id for ban in user_bans
+        }
         self.staff_cache.clear()
         self.click_limiter.configure(config.moderation.button_rate_limit, config.moderation.button_rate_window_seconds)
         if hub.main_guild_id and self.staff_guild_id is not None and hub.main_guild_id != self.staff_guild_id:

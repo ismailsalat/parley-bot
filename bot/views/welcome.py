@@ -71,9 +71,17 @@ class ActionButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wp:act:
             log.warning("Unknown action button pressed: %s", self.action)
             await reply(interaction, "That button is no longer available.")
             return
-        if not await guard(interaction):
-            return
         try:
+            # Discord gives component interactions only a few seconds for the
+            # initial acknowledgement. Top-level actions often read Postgres
+            # before rendering, so acknowledge immediately and finish afterward.
+            if not interaction.response.is_done():
+                await interaction.response.defer(
+                    ephemeral=interaction.guild is not None,
+                    thinking=True,
+                )
+            if not await guard(interaction):
+                return
             await handler(interaction)
         except Exception as exc:  # noqa: BLE001 - reported to the user and logged by handle_error
             await handle_error(interaction, exc)

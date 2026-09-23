@@ -83,8 +83,14 @@ async def guard(interaction: discord.Interaction) -> bool:
     if not bot.click_limiter.hit(interaction.user.id):
         await reply(interaction, "You're clicking a little fast. Please wait a few seconds.")
         return False
-    async with bot.db.session() as session:
-        blocked = await moderation.is_user_blocked(session, bot.runtime, interaction.user.id)
+    # Production keeps database-backed user bans in memory so a slow/cold
+    # database connection cannot consume Discord's interaction response window.
+    # Test doubles without the cache retain the database-backed behavior.
+    if hasattr(bot, "blocked_user_ids"):
+        blocked = interaction.user.id in bot.blocked_user_ids
+    else:
+        async with bot.db.session() as session:
+            blocked = await moderation.is_user_blocked(session, bot.runtime, interaction.user.id)
     if blocked:
         await reply(interaction, "You can't use Parley.")
         return False

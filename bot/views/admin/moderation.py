@@ -291,6 +291,7 @@ class UserPage(Page):
         async def apply(inter: discord.Interaction) -> None:
             async with self.bot.db.session() as session:
                 await moderation.unblock_user(session, user_id=self.user_id, moderator_id=inter.user.id)
+            self.bot.blocked_user_ids.discard(self.user_id)
             await self.back().show(inter, "🔓 User unblocked.")
 
         await ConfirmPage(

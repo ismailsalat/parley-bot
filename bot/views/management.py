@@ -491,7 +491,8 @@ async def relist(interaction: discord.Interaction, guild_id: int) -> None:
     bot = get_bot(interaction)
     guild, listing, _contacts = await load_managed_listing(bot, guild_id, interaction.user.id)
     permissions.require_public_bot_channel(guild)
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True, thinking=True)
     async with bot.db.session() as session:
         await listing_service.claim_refresh(
             session, bot.runtime, guild_id=guild_id, actor_id=interaction.user.id, now=utcnow()

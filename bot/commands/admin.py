@@ -97,6 +97,7 @@ class StaffCommands(commands.Cog):
             raise ValidationError("You can't block yourself.")
         async with self.bot.db.session() as session:
             await moderation.block_user(session, user_id=user.id, reason=reason, moderator_id=interaction.user.id)
+        self.bot.blocked_user_ids.add(user.id)
         await self._done(interaction, f"Blocked {user.mention} (`{user.id}`).")
 
     @admin.command(name="unblock-user", description="Allow a blocked user to use Parley again.")
@@ -104,6 +105,7 @@ class StaffCommands(commands.Cog):
     async def unblock_user(self, interaction: discord.Interaction, user: discord.User) -> None:
         async with self.bot.db.session() as session:
             await moderation.unblock_user(session, user_id=user.id, moderator_id=interaction.user.id)
+        self.bot.blocked_user_ids.discard(user.id)
         await self._done(interaction, f"Unblocked {user.mention} (`{user.id}`).")
 
     @admin.command(name="listing", description="Inspect a server's listing.")
