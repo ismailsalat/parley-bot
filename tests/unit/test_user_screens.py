@@ -200,7 +200,6 @@ async def test_request_prompt_does_not_require_a_message(db):
 
 
 async def test_multiple_servers_use_one_picker_not_button_grid(db, config):
-    from types import SimpleNamespace
     from tests.fakes import member
 
     bot = FakeBot(db)
@@ -208,7 +207,6 @@ async def test_multiple_servers_use_one_picker_not_button_grid(db, config):
     second = type(bot.guild)(second_id, members={ADMIN_ID: member(ADMIN_ID, admin=True)})
     second.name = "Second Server"
     bot.guilds.append(second)
-    original_get_guild = bot.get_guild
     bot.get_guild = lambda gid: next((g for g in bot.guilds if g.id == gid), None)
     async with db.session() as session:
         await make_listing(session, config, MAIN, actor_id=ADMIN_ID)

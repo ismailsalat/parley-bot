@@ -14,7 +14,7 @@ from bot.modals.advertisement import AdvertisementModal, InviteModal
 from bot.services import listings as listing_service
 from bot.services import moderation, permissions
 from bot.services.errors import MANAGE_SERVER_REQUIRED, PermissionDenied, ValidationError, WaypointError
-from bot.utils.helpers import format_minimum, truncate, utcnow
+from bot.utils.helpers import truncate, utcnow
 from bot.config import templates
 from bot.utils.mentions import safe_allowed_mentions
 from bot.views import self_post
