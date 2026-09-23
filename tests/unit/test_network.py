@@ -28,6 +28,13 @@ async def listed(db, config):
         await make_listing(session, config, DEST, categories=["Gaming"])  # the destination's own listing
 
 
+async def set_auto_partner(db, enabled: bool, guild_id: int = None) -> None:
+    async with db.session() as session:
+        await network.set_auto_partner(
+            session, guild_id=guild_id or DEST, enabled=enabled, actor_id=1, now=NOW
+        )
+
+
 async def configure(db, config, **overrides):
     values = dict(
         guild_id=DEST, channel_id=CHANNEL, categories=[], interval_minutes=180, enabled=True, actor_id=1, now=NOW
@@ -111,7 +118,9 @@ async def test_global_network_switch(db, config):
 
 
 async def test_interval_is_respected(db, config, listed):
+    """The tick is the Auto Partner check, so only Auto Partner servers are due."""
     await configure(db, config, interval_minutes=180)
+    await set_auto_partner(db, True)
     async with db.session() as session:
         assert [s.guild_id for s in await network.due_destinations(session, config, NOW)] == [DEST]
         await network.record_post(

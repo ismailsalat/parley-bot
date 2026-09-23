@@ -29,7 +29,7 @@ def category_matches(listing_categories: Sequence[str], wanted: Sequence[str]) -
 
 
 def is_due(settings: NetworkSettings, now: datetime) -> bool:
-    if not settings.enabled or settings.channel_id is None:
+    if not settings.enabled or not settings.auto_partner or settings.channel_id is None:
         return False
     if settings.last_post_at is None:
         return True
@@ -112,6 +112,8 @@ async def configure(
         settings = NetworkSettings(guild_id=guild_id)
         session.add(settings)
     settings.enabled = enabled
+    if not enabled:
+        settings.auto_partner = False
     settings.channel_id = channel_id
     settings.categories = clean_categories
     settings.interval_minutes = interval_minutes
@@ -134,8 +136,24 @@ async def disable(session: AsyncSession, *, guild_id: int, reason: str) -> None:
     if settings is None or not settings.enabled:
         return
     settings.enabled = False
+    settings.auto_partner = False
     await repository.add_audit(session, "network.auto_disabled", guild_id=guild_id, details={"reason": reason})
     log.warning("network.auto_disabled guild_id=%s reason=%s", guild_id, reason)
+
+
+async def set_auto_partner(
+    session: AsyncSession, *, guild_id: int, enabled: bool, actor_id: int, now: datetime
+) -> NetworkSettings:
+    settings = await repository.get_network_settings(session, guild_id)
+    if settings is None or not settings.enabled or settings.channel_id is None:
+        raise ValidationError("Enable the Parley Network and choose a channel first.")
+    settings.auto_partner = enabled
+    settings.updated_at = now
+    await repository.add_audit(
+        session, "network.auto_partner_enabled" if enabled else "network.auto_partner_disabled",
+        actor_id=actor_id, guild_id=guild_id,
+    )
+    return settings
 
 
 async def due_destinations(session: AsyncSession, config: RuntimeConfig, now: datetime) -> list[NetworkSettings]:

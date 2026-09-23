@@ -42,6 +42,10 @@ SLOTS: tuple[ChannelSlot, ...] = (
         "Post a partner ad or browse matches with Parley.",
         ("looking-for-partners",),
     ),
+    ChannelSlot(
+        "perks_channel_id", "parley-perks", "Parley perks", False,
+        "See what Parley Connected unlocks for your server.",
+    ),
     ChannelSlot("support_channel_id", "support", "Support", False, "Questions about Parley."),
     ChannelSlot("log_channel_id", "parley-logs", "Staff logs", False, "Parley staff log and approvals.", ("waypoint-logs",)),
 )
@@ -74,7 +78,7 @@ def overwrites_for(
     everyone = guild.default_role
     own = listings_channel_permissions() if slot.key in ("listings_channel_id", "looking_channel_id") else bot_channel_permissions()
     result: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {guild.me: own}
-    if slot.key in ("welcome_channel_id", "listings_channel_id", "looking_channel_id"):
+    if slot.key in ("welcome_channel_id", "listings_channel_id", "looking_channel_id", "perks_channel_id"):
         result[everyone] = discord.PermissionOverwrite(send_messages=False, create_public_threads=False)
     elif slot.key == "log_channel_id":
         result[everyone] = discord.PermissionOverwrite(view_channel=False)
@@ -133,7 +137,7 @@ async def _repair_reused_channel(slot: ChannelSlot, channel: discord.TextChannel
                 use_external_emojis=True, manage_messages=True, manage_roles=True,
             )
             await channel.set_permissions(guild.me, overwrite=bot_ow, reason="Parley: directory permissions")
-        elif slot.key == "welcome_channel_id":
+        elif slot.key in ("welcome_channel_id", "perks_channel_id"):
             everyone = guild.default_role
             current = channel.overwrites_for(everyone)
             allow, deny = current.pair()

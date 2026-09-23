@@ -79,6 +79,7 @@ async def open_network_setup(interaction: discord.Interaction, guild: discord.Gu
         categories=list(current.categories or []) if current else [],
         interval=current.interval_minutes if current else bot.runtime.network.default_interval_minutes,
         enabled=bool(current and current.enabled),
+        auto_partner=bool(current and current.auto_partner),
     )
     if edit_message:
         await interaction.response.edit_message(content=view.render(), view=view)
@@ -97,6 +98,7 @@ class NetworkSetupView(OwnedView):
         categories: list[str],
         interval: int,
         enabled: bool,
+        auto_partner: bool,
     ) -> None:
         super().__init__(owner_id)
         self.bot = bot
@@ -106,18 +108,20 @@ class NetworkSetupView(OwnedView):
         options = bot.runtime.network.interval_options
         self.interval = interval if interval in options else min(options, key=lambda o: abs(o - interval))
         self.enabled = enabled
+        self.auto_partner = auto_partner
         self._build()
 
     def render(self, notice: str | None = None) -> str:
         channel = f"<#{self.channel_id}>" if self.channel_id else "choose below"
         lines = [
-            f"## Network ads · {self.guild.name}",
-            "Parley will post one partner advertisement at a time in the channel you pick. "
-            "Ads never ping anyone.",
+            f"## Parley Network · {self.guild.name}",
+            "Confirmed partner ads and partnership requests go here. "
+            "Parley never exchanges ads until both servers agree.",
             "",
-            f"**Status:** {'🟢 Enabled' if self.enabled else '⚪ Off'}",
+            f"**Network:** {'🟢 Enabled' if self.enabled else '⚪ Off'}",
             f"**Channel:** {channel}",
-            f"**How often:** {interval_label(self.interval)}",
+            f"**Auto Partner:** {'🟢 On' if self.auto_partner else '⚪ Off'}",
+            f"**Auto check:** {interval_label(self.interval)}",
         ]
         if self.bot.runtime.network.category_filtering:
             lines.append(f"**Categories:** {', '.join(self.categories) or 'All'}")
@@ -129,7 +133,7 @@ class NetworkSetupView(OwnedView):
         self.clear_items()
         config = self.bot.runtime
         channel = discord.ui.ChannelSelect(
-            placeholder="Which channel should receive network ads?",
+            placeholder="Which channel should receive partnerships?",
             channel_types=[discord.ChannelType.text],
             default_values=[discord.Object(id=self.channel_id)] if self.channel_id else [],
             row=0,
@@ -165,12 +169,20 @@ class NetworkSetupView(OwnedView):
         self.add_item(interval)
 
         enable = discord.ui.Button(
-            label="Save" if self.enabled else "Enable", emoji="🌐", style=discord.ButtonStyle.success, row=3
+            label="Save" if self.enabled else "Enable Network", emoji="🌐", style=discord.ButtonStyle.success, row=3
         )
         enable.callback = self._enable  # type: ignore[method-assign]
         self.add_item(enable)
         if self.enabled:
-            pause = discord.ui.Button(label="Pause Network Ads", emoji="⏸️", style=discord.ButtonStyle.primary, row=3)
+            auto = discord.ui.Button(
+                label="Turn Auto Partner Off" if self.auto_partner else "Turn Auto Partner On",
+                emoji="🤖",
+                style=discord.ButtonStyle.secondary if self.auto_partner else discord.ButtonStyle.primary,
+                row=3,
+            )
+            auto.callback = self._toggle_auto  # type: ignore[method-assign]
+            self.add_item(auto)
+            pause = discord.ui.Button(label="Pause Network", emoji="⏸️", style=discord.ButtonStyle.primary, row=3)
             pause.callback = self._disable  # type: ignore[method-assign]
             self.add_item(pause)
         if self.enabled or self.channel_id:
@@ -228,14 +240,16 @@ class NetworkSetupView(OwnedView):
             await self._rerender(interaction, f"⚠️ {exc.user_message}")
             return
         self.enabled = enabled
+        if not enabled:
+            self.auto_partner = False
         if enabled:
-            notice = "✅ Network ads are on. The first ad will arrive shortly."
+            notice = "✅ Network enabled. Only confirmed partner ads and requests will be posted here."
             if bot.runtime.hub.mode != "live":
-                notice += "\n-# 🧪 Parley is in TEST mode: real network ads start when it goes LIVE."
+                notice += "\n-# 🧪 Parley is in TEST mode."
         elif self.channel_id is None:
-            notice = "You left the network. No more ads will be posted here."
+            notice = "You left the network."
         else:
-            notice = "⏸️ Network ads are paused."
+            notice = "⏸️ Network paused."
         await self._rerender(interaction, notice)
         await bot.log_event(
             f"🌐 **{self.guild.name}** (`{self.guild.id}`) {'enabled' if enabled else 'disabled'} network ads "
@@ -247,6 +261,26 @@ class NetworkSetupView(OwnedView):
 
     async def _disable(self, interaction: discord.Interaction) -> None:
         await self._save(interaction, False)
+
+    async def _toggle_auto(self, interaction: discord.Interaction) -> None:
+        try:
+            await permissions.require_manager(self.bot, self.guild.id, interaction.user.id)
+            self._check_channel()
+            target = not self.auto_partner
+            async with self.bot.db.session() as session:
+                await network.set_auto_partner(
+                    session, guild_id=self.guild.id, enabled=target,
+                    actor_id=interaction.user.id, now=utcnow(),
+                )
+        except ParleyError as exc:
+            await self._rerender(interaction, f"⚠️ {exc.user_message}")
+            return
+        self.auto_partner = target
+        await self._rerender(
+            interaction,
+            "🤖 Auto Partner is on. Parley can find matches for you automatically."
+            if target else "Auto Partner is off. You can still send requests manually.",
+        )
 
     async def _leave(self, interaction: discord.Interaction) -> None:
         self.channel_id = None

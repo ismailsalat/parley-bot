@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 LISTINGS_PANEL = "listings"
 LOOKING_PANEL = "looking"
 WELCOME_PANEL = "welcome"
+PERKS_PANEL = "perks"
 
 PanelBuilder = Callable[["ParleyBot"], tuple[str, discord.ui.View]]
 
@@ -62,9 +63,14 @@ class PanelService:
     def welcome_channel(self) -> discord.TextChannel | None:
         return self.main_channel(self.bot.runtime.hub.welcome_channel_id)
 
+    def perks_channel(self) -> discord.TextChannel | None:
+        return self.main_channel(self.bot.runtime.hub.perks_channel_id)
+
     def panel_channel_ids(self) -> set[int]:
         h = self.bot.runtime.hub
-        return {cid for cid in (h.listings_channel_id, h.looking_channel_id, h.welcome_channel_id) if cid}
+        return {
+            cid for cid in (h.listings_channel_id, h.looking_channel_id, h.welcome_channel_id, h.perks_channel_id) if cid
+        }
 
     async def ensure_directory_locked(self) -> bool:
         """Keep both public feeds read-only except for Parley's short posting windows."""
@@ -147,6 +153,7 @@ class PanelService:
             LISTINGS_PANEL: (welcome.listings_panel, panels.listings_panel_enabled),
             LOOKING_PANEL: (welcome.looking_panel, panels.looking_panel_enabled),
             WELCOME_PANEL: (welcome.welcome_panel, panels.welcome_panel_enabled),
+            PERKS_PANEL: (welcome.perks_panel, panels.perks_panel_enabled),
         }[panel_type]
 
     def _channel_for(self, panel_type: str) -> discord.TextChannel | None:
@@ -154,6 +161,7 @@ class PanelService:
             LISTINGS_PANEL: self.listings_channel,
             LOOKING_PANEL: self.looking_channel,
             WELCOME_PANEL: self.welcome_channel,
+            PERKS_PANEL: self.perks_channel,
         }[panel_type]()
 
     async def _repost_panel(self, panel_type: str, channel: discord.TextChannel) -> discord.Message | None:
@@ -251,6 +259,7 @@ class PanelService:
         async with self._looking_lock:
             results[LOOKING_PANEL] = await self.ensure_panel(LOOKING_PANEL, keep_at_bottom=False, force_edit=force_edit)
         results[WELCOME_PANEL] = await self.ensure_panel(WELCOME_PANEL, keep_at_bottom=False, force_edit=force_edit)
+        results[PERKS_PANEL] = await self.ensure_panel(PERKS_PANEL, keep_at_bottom=False, force_edit=force_edit)
         return results
 
     async def post_above_panel(self, channel: discord.TextChannel, panel_type: str, **kwargs) -> discord.Message:
@@ -268,7 +277,7 @@ class PanelService:
         if channel_id not in self.panel_channel_ids() or not main_guild_id:
             return
         async with self.bot.db.session() as session:
-            for panel_type in (LISTINGS_PANEL, LOOKING_PANEL, WELCOME_PANEL):
+            for panel_type in (LISTINGS_PANEL, LOOKING_PANEL, WELCOME_PANEL, PERKS_PANEL):
                 stored = await repository.get_panel(session, main_guild_id, panel_type)
                 if stored is not None and stored.message_id == message_id:
                     break

@@ -10,6 +10,7 @@ from bot.database import repository
 
 SCOPE_REQUEST_USER = "request_user"
 SCOPE_DECLINED_PAIR = "declined_pair"
+SCOPE_PARTNER_PAIR = "partner_pair"
 SCOPE_LOOKING_POST = "looking_post"
 
 
@@ -28,3 +29,8 @@ async def start(session: AsyncSession, scope: str, subject: str | int, now: date
 
 def pair_key(source_guild_id: int, target_guild_id: int) -> str:
     return f"{source_guild_id}:{target_guild_id}"
+
+
+def unordered_pair_key(first_guild_id: int, second_guild_id: int) -> str:
+    a, b = sorted((first_guild_id, second_guild_id))
+    return f"{a}:{b}"

@@ -18,7 +18,7 @@ from bot.services.errors import LISTING_GONE, NotFound, ValidationError
 from bot.utils.helpers import format_duration, format_members, format_minimum, listing_jump_url, truncate, utcnow
 from bot.views.base import ConfirmView, OwnedView, get_bot, guard, handle_error, home_button, reply
 from bot.views.listings import ListingDraft, ListingFormView
-from bot.views.welcome import action_button, persistent_view, register_action, show_screen
+from bot.views.welcome import action_button, invite_url, persistent_view, register_action, show_screen
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -189,7 +189,9 @@ def management_text(bot: ParleyBot, listing: Listing, guild: discord.Guild) -> s
     if listing.status != ListingStatus.ACTIVE or listing.pending_changes or listing.is_test:
         relist = status_label(listing)
     else:
-        remaining = listing_service.refresh_remaining(listing, bot.runtime, utcnow())
+        remaining = listing_service.refresh_remaining(
+            listing, bot.runtime, utcnow(), connected=permissions.is_connected(bot, listing.guild_id)
+        )
         relist = f"Available in {format_duration(remaining)}" if remaining is not None else "Available now"
     lines = [
         "My Listing",
@@ -233,7 +235,9 @@ def management_embed(bot: ParleyBot, listing: Listing, guild: discord.Guild) -> 
     if listing.status != ListingStatus.ACTIVE or listing.pending_changes:
         relist_value = status_label(listing)
     else:
-        remaining = listing_service.refresh_remaining(listing, bot.runtime, utcnow())
+        remaining = listing_service.refresh_remaining(
+            listing, bot.runtime, utcnow(), connected=permissions.is_connected(bot, listing.guild_id)
+        )
         relist_value = f"In {format_duration(remaining)}" if remaining is not None else "Ready now"
     embed.add_field(name="↻ Relist", value=relist_value, inline=True)
 
@@ -242,6 +246,8 @@ def management_embed(bot: ParleyBot, listing: Listing, guild: discord.Guild) -> 
     else:
         edit_value = "Ready"
     embed.add_field(name="Ad editing", value=edit_value, inline=False)
+    connected = permissions.is_connected(bot, listing.guild_id)
+    embed.add_field(name="Parley", value="🟢 Connected" if connected else "⚪ Not Connected", inline=False)
 
     notes = []
     if listing.pending_changes:
@@ -261,12 +267,19 @@ def management_view(bot: ParleyBot, listing: Listing, guild: discord.Guild) -> d
     all_listings = action_button(bot, "directory", style=discord.ButtonStyle.secondary, row=3)
     all_listings.item.label = "All Listings"
     all_listings.item.emoji = None
+    connect = None
+    if not permissions.is_connected(bot, guild.id):
+        # The listing stays live either way; this is how they turn the perks back on.
+        invite = invite_url(bot)
+        if invite:
+            connect = discord.ui.Button(label="Connect Parley", emoji="✨", url=invite, row=2)
     return persistent_view(
         ManagementButton("edit_ad", guild.id, bot, row=0),
         ManagementButton("edit_info", guild.id, bot, row=0),
         discord.ui.Button(label="View Ad", url=ad_url, row=0) if ad_url else ManagementButton("preview", guild.id, bot, row=0),
         ManagementButton("partnerships", guild.id, bot, row=1),
         ManagementButton("relist", guild.id, bot, row=1),
+        connect,
         ManagementButton("remove", guild.id, bot, row=2),
         all_listings,
         home_button(bot, row=3),
@@ -495,7 +508,8 @@ async def relist(interaction: discord.Interaction, guild_id: int) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
     async with bot.db.session() as session:
         await listing_service.claim_refresh(
-            session, bot.runtime, guild_id=guild_id, actor_id=interaction.user.id, now=utcnow()
+            session, bot.runtime, guild_id=guild_id, actor_id=interaction.user.id, now=utcnow(),
+            connected=permissions.is_connected(bot, guild_id),
         )
 
     if listing.self_posted:

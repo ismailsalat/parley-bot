@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,7 @@ from bot.database import repository
 from bot.database.models import NetworkSettings
 from bot.services import listings as listing_service
 from bot.services import network, partnerships, permissions
+from bot.services.errors import ParleyError
 from bot.utils.helpers import utcnow
 from bot.utils.mentions import advertisement_kwargs
 
@@ -109,69 +111,82 @@ class BackgroundTasks:
         for index, destination in enumerate(due):
             if index:
                 await asyncio.sleep(config.network.send_spacing_seconds)  # stay well under rate limits
-            await self._post_to(destination)
+            await self._auto_pair(destination)
 
     async def _disable(self, guild_id: int, reason: str) -> None:
         async with self.bot.db.session() as session:
             await network.disable(session, guild_id=guild_id, reason=reason)
 
-    async def _post_to(self, destination: NetworkSettings) -> None:
+    async def _auto_pair(self, destination: NetworkSettings) -> None:
+        """One Auto Partner attempt. Random network ads are intentionally gone."""
         bot = self.bot
         config = bot.runtime
-        guild = bot.get_guild(destination.guild_id)
-        channel = bot.get_channel(destination.channel_id) if destination.channel_id else None
-        if guild is None:
+        source_guild = bot.get_guild(destination.guild_id)
+        source_channel = bot.get_channel(destination.channel_id) if destination.channel_id else None
+        now = utcnow()
+        if source_guild is None:
             await self._disable(destination.guild_id, "Parley is no longer in this server")
             return
-        if not isinstance(channel, discord.TextChannel) or channel.guild.id != guild.id:
+        if not isinstance(source_channel, discord.TextChannel) or source_channel.guild.id != source_guild.id:
             await self._disable(destination.guild_id, "network channel no longer exists")
             return
-        missing = permissions.missing_channel_permissions(channel, guild.me)
+        missing = permissions.missing_channel_permissions(source_channel, source_guild.me)
         if missing:
-            await self._disable(destination.guild_id, f"missing permissions in #{channel.name}: {', '.join(missing)}")
+            await self._disable(destination.guild_id, f"missing permissions in #{source_channel.name}: {', '.join(missing)}")
             return
-
-        now = utcnow()
-        async with bot.db.session() as session:
-            candidates = await network.eligible_sources(
-                session, config, destination_guild_id=guild.id, categories=destination.categories or []
-            )
-            last_shown = await repository.last_shown_map(
-                session, guild.id, now - timedelta(hours=max(config.network.repeat_window_hours, 1) * 4)
-            )
-            listing = network.pick_candidate(
-                candidates,
-                last_shown=last_shown,
-                now=now,
-                repeat_window=timedelta(hours=config.network.repeat_window_hours),
-                strategy=config.network.rotation_strategy,
-            )
-            if listing is None:
-                # Nothing fresh to show: wait a full interval rather than repeating ads.
-                await network.mark_attempt(session, guild_id=guild.id, now=now)
-                return
-
-        kwargs = network_ad_kwargs(bot, listing)
-        try:
-            message = await channel.send(**kwargs)
-        except discord.Forbidden:
-            await self._disable(guild.id, f"not allowed to post in #{channel.name}")
-            return
-        except discord.HTTPException as exc:
-            log.warning("network.send_failed destination=%s source=%s: %s", guild.id, listing.guild_id, exc)
+        if not destination.configured_by:
             async with bot.db.session() as session:
-                await network.mark_attempt(session, guild_id=guild.id, now=now)
+                await network.mark_attempt(session, guild_id=destination.guild_id, now=now)
             return
-
         async with bot.db.session() as session:
-            await network.record_post(
-                session,
-                source_guild_id=listing.guild_id,
-                destination_guild_id=guild.id,
-                channel_id=channel.id,
-                message_id=message.id,
-                now=now,
-            )
+            candidates = await network.eligible_sources(session, config, destination_guild_id=destination.guild_id, categories=destination.categories or [])
+        # Prefer fresh partners: shuffle so the same pair isn't retried first every tick.
+        random_candidates = list(candidates)
+        random.shuffle(random_candidates)
+        for candidate in random_candidates:
+            target_guild = bot.get_guild(candidate.guild_id)
+            if target_guild is None:
+                continue
+            async with bot.db.session() as session:
+                target_net = await repository.get_network_settings(session, candidate.guild_id)
+                if target_net is None or not target_net.enabled or not target_net.channel_id:
+                    continue
+                if await repository.pending_request_between(session, destination.guild_id, candidate.guild_id):
+                    continue
+                if await repository.pending_request_between(session, candidate.guild_id, destination.guild_id):
+                    continue
+                try:
+                    context = await partnerships.create_request(
+                        session, config, source_guild_id=destination.guild_id, target_guild_id=candidate.guild_id,
+                        requester_id=destination.configured_by, source_member_count=source_guild.member_count or 0,
+                        message=None, now=now,
+                    )
+                    guilds = await repository.get_guilds(session, [destination.guild_id, candidate.guild_id])
+                    contacts = await repository.get_contact_ids(session, candidate.guild_id)
+                except ParleyError:
+                    continue
+            from bot.views.partnership import deliver_request_notification, exchange_partner_ads
+            if target_net.auto_partner and target_net.configured_by:
+                manager = await permissions.is_manager(bot, candidate.guild_id, target_net.configured_by)
+                async with bot.db.session() as session:
+                    contact = await repository.is_contact(session, candidate.guild_id, target_net.configured_by)
+                if manager or contact:
+                    async with bot.db.session() as session:
+                        await partnerships.respond(
+                            session, config, request_id=context.request.id, responder_id=target_net.configured_by,
+                            responder_is_manager=manager, accept=True, now=now,
+                        )
+                    await exchange_partner_ads(bot, destination.guild_id, candidate.guild_id)
+                    await bot.log_event(f"🤖 Auto Partner matched `{destination.guild_id}` ↔ `{candidate.guild_id}`.")
+                else:
+                    await deliver_request_notification(bot, context.request, guilds, context.source, context.target, contacts, actor_id=destination.configured_by)
+            else:
+                await deliver_request_notification(bot, context.request, guilds, context.source, context.target, contacts, actor_id=destination.configured_by)
+            async with bot.db.session() as session:
+                await network.mark_attempt(session, guild_id=destination.guild_id, now=now)
+            return
+        async with bot.db.session() as session:
+            await network.mark_attempt(session, guild_id=destination.guild_id, now=now)
 
     # ------------------------------------------------------------ maintenance
 

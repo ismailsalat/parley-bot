@@ -32,7 +32,7 @@ from bot.views.base import (
     reply,
     user_label,
 )
-from bot.views.welcome import action_button, persistent_view, register_action
+from bot.views.welcome import action_button, add_bot_button, persistent_view, register_action
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -299,27 +299,23 @@ def request_embed(
     guilds: dict[int, Guild],
     source: Listing | None,
     target: Listing | None,
+    *,
+    connected: bool = True,
 ) -> discord.Embed:
     source_row = guilds.get(request.source_guild_id)
-    intro = templates.render(
-        bot.runtime,
-        "request_received",
-        requester_server=guild_name(guilds, request.source_guild_id),
-        target_server=guild_name(guilds, request.target_guild_id),
-        member_count=f"{source_row.member_count:,}" if source_row else "?",
-        category=", ".join(source.categories) if source else "",
-    )
-    embed = discord.Embed(
-        title="New Partnership Request",
-        description=(
-            f"{intro}\n\n{describe(guilds, source, request.source_guild_id)}\n→ "
-            f"{describe(guilds, target, request.target_guild_id)}"
-        ),
-        color=bot.runtime.bot.color_primary,
-    )
+    server_name = guild_name(guilds, request.source_guild_id)
+    category = ", ".join(source.categories) if source else "Other"
+    members = format_members(source_row.member_count if source_row else 0)
+    requester = user_label(bot, request.requester_user_id)
+    description = f"{requester} sent you a partnership request.\n\n**{server_name}**\n{category} · {members}"
+    if not connected:
+        description += (
+            f"\n\nDM {requester} to start the conversation."
+            "\n\n**✨ ADD PARLEY FOR EASY ONE-CLICK PARTNERSHIP ACCESS.**"
+        )
+    embed = discord.Embed(title="🤝 Partnership Request", description=description, color=bot.runtime.bot.color_primary)
     if request.message:
-        embed.add_field(name="Message", value=truncate(request.message, 1000), inline=False)
-    embed.add_field(name="Requested by", value=user_label(bot, request.requester_user_id), inline=False)
+        embed.add_field(name="Message", value=truncate(request.message, 500), inline=False)
     embed.set_footer(text=f"Request #{request.id}")
     return embed
 
@@ -329,8 +325,113 @@ def request_actions(bot: ParleyBot, request: PartnershipRequest) -> discord.ui.V
     return persistent_view(
         RequestResponseButton(request.id, True),
         RequestResponseButton(request.id, False),
-        ViewAdButton(request.source_guild_id, label="View Ad", emoji=emoji),
+        ViewAdButton(request.source_guild_id, label="View Server", emoji=emoji),
     )
+
+
+def manual_request_actions(bot: ParleyBot, request: PartnershipRequest) -> discord.ui.View:
+    _label, emoji = bot.runtime.button("view_ad")
+    return persistent_view(
+        ViewAdButton(request.source_guild_id, label="View Server", emoji=emoji),
+        add_bot_button(bot),
+    )
+
+
+def _partner_exchange_view(listing: Listing) -> discord.ui.View | None:
+    if not listing.invite_url:
+        return None
+    view = discord.ui.View(timeout=None)
+    view.add_item(discord.ui.Button(label="Join Server", url=listing.invite_url))
+    return view
+
+
+def _network_channel(bot: ParleyBot, channel_id: int | None, guild_id: int):
+    """The server's Network channel, or None. Accepts text and announcement channels."""
+    channel = bot.get_channel(channel_id) if channel_id else None
+    if getattr(channel, "type", None) not in (discord.ChannelType.text, discord.ChannelType.news):
+        return None
+    return channel if getattr(channel.guild, "id", None) == guild_id else None
+
+
+async def exchange_partner_ads(bot: ParleyBot, source_id: int, target_id: int) -> bool:
+    from bot.services import network as network_service
+    from bot.utils.mentions import advertisement_kwargs, safe_allowed_mentions
+    source_guild = bot.get_guild(source_id)
+    target_guild = bot.get_guild(target_id)
+    if source_guild is None or target_guild is None:
+        return False
+    async with bot.db.session() as session:
+        source = await repository.get_listing(session, source_id)
+        target = await repository.get_listing(session, target_id)
+        source_net = await repository.get_network_settings(session, source_id)
+        target_net = await repository.get_network_settings(session, target_id)
+    if not source or not target or not source_net or not target_net:
+        return False
+    if not source_net.enabled or not target_net.enabled or not source_net.channel_id or not target_net.channel_id:
+        return False
+    source_channel = _network_channel(bot, source_net.channel_id, source_id)
+    target_channel = _network_channel(bot, target_net.channel_id, target_id)
+    if source_channel is None or target_channel is None:
+        return False
+    for channel in (source_channel, target_channel):
+        me = channel.guild.me
+        if me is None:
+            return False
+        perms = channel.permissions_for(me)
+        if not (perms.view_channel and perms.send_messages and perms.read_message_history):
+            return False
+    def payload(listing: Listing) -> dict:
+        kwargs = advertisement_kwargs(listing.advertisement_text)
+        footer = "-# 🤝 Parley partner exchange"
+        if len(kwargs["content"]) + len(footer) + 1 <= 2000:
+            kwargs["content"] += "\n" + footer
+        view = _partner_exchange_view(listing)
+        if view is not None:
+            kwargs["view"] = view
+        kwargs["allowed_mentions"] = safe_allowed_mentions()
+        return kwargs
+    first = None
+    try:
+        first = await source_channel.send(**payload(target))
+        second = await target_channel.send(**payload(source))
+    except discord.HTTPException as exc:
+        if first is not None:
+            try:
+                await first.delete()
+            except discord.HTTPException:
+                pass
+        log.warning("partnership.exchange_failed source=%s target=%s: %s", source_id, target_id, exc)
+        return False
+    now = utcnow()
+    async with bot.db.session() as session:
+        await network_service.record_post(session, source_guild_id=target_id, destination_guild_id=source_id, channel_id=source_channel.id, message_id=first.id, now=now)
+        await network_service.record_post(session, source_guild_id=source_id, destination_guild_id=target_id, channel_id=target_channel.id, message_id=second.id, now=now)
+    await bot.log_event(f"🤝 Partner ads exchanged: `{source_id}` ↔ `{target_id}`.")
+    return True
+
+
+async def deliver_request_notification(
+    bot: ParleyBot, request: PartnershipRequest, guilds: dict[int, Guild],
+    source: Listing, target: Listing, contact_ids: list[int], *, actor_id: int | None,
+) -> tuple[int, int]:
+    connected = permissions.is_connected(bot, request.target_guild_id)
+    embed = request_embed(bot, request, guilds, source, target, connected=connected)
+    if connected:
+        async with bot.db.session() as session:
+            settings = await repository.get_network_settings(session, request.target_guild_id)
+        channel = (
+            _network_channel(bot, settings.channel_id, request.target_guild_id)
+            if settings and settings.enabled
+            else None
+        )
+        if channel is not None:
+            try:
+                await channel.send(embed=embed, view=request_actions(bot, request), allowed_mentions=discord.AllowedMentions.none())
+                return 1, 0
+            except discord.HTTPException:
+                log.warning("partnership.channel_delivery_failed id=%s target=%s", request.id, request.target_guild_id)
+        return await deliver_dms(bot, contact_ids, actor_id=actor_id, embed=embed, view=request_actions(bot, request))
+    return await deliver_dms(bot, contact_ids, actor_id=actor_id, embed=embed, view=manual_request_actions(bot, request))
 
 
 async def submit_request(
@@ -341,9 +442,8 @@ async def submit_request(
     bot = get_bot(interaction)
     user_id = interaction.user.id
     source_guild = bot.get_guild(source_id)
-    if source_guild is None:
-        raise ValidationError("Parley is no longer in your server. Add it back before sending partnership requests.")
-    permissions.require_public_bot_channel(source_guild)
+    if source_guild is not None:
+        permissions.require_public_bot_channel(source_guild)
 
     async with bot.db.session() as session:
         if not await can_represent(bot, session, source_id, user_id):
@@ -370,9 +470,8 @@ async def submit_request(
 
     delivered = held = 0
     if bot.runtime.partnerships.dm_notifications:
-        embed = request_embed(bot, context.request, guilds, context.source, context.target)
-        delivered, held = await deliver_dms(
-            bot, contact_ids, actor_id=user_id, embed=embed, view=request_actions(bot, context.request)
+        delivered, held = await deliver_request_notification(
+            bot, context.request, guilds, context.source, context.target, contact_ids, actor_id=user_id
         )
     text = templates.render(
         bot.runtime, "request_sent",
@@ -463,6 +562,13 @@ async def respond_to_request(interaction: discord.Interaction, request_id: int, 
 
     if bot.runtime.partnerships.dm_notifications:
         await deliver_dms(bot, recipients, actor_id=user_id, content=text)
+
+    if accept:
+        exchanged = await exchange_partner_ads(bot, request.source_guild_id, request.target_guild_id)
+        if exchanged:
+            text += "\n\n✅ Both server ads were exchanged in their Parley Network channels."
+        elif permissions.is_connected(bot, request.source_guild_id) and permissions.is_connected(bot, request.target_guild_id):
+            text += "\n\n-# Ads were not exchanged because both servers need an enabled Parley Network channel."
 
     status_line = f"{'✅ Accepted' if accept else '✖️ Declined'} by {user_label(bot, user_id)}"
     if _is_single_request_notice(interaction.message, request_id) and interaction.message is not None:
@@ -589,8 +695,19 @@ async def start_find_flow(interaction: discord.Interaction) -> None:
     """Browse matches immediately; ask for a source server only when the user has several."""
     bot = get_bot(interaction)
     async with bot.db.session() as session:
-        sources = await represented_listings(bot, session, interaction.user.id)
+        represented = await represented_listings(bot, session, interaction.user.id)
+        sources = [s for s in represented if permissions.is_connected(bot, s.guild_id)]
         guilds = await repository.get_guilds(session, [s.guild_id for s in sources])
+
+    if not sources:
+        add = add_bot_button(bot)
+        await reply(
+            interaction,
+            "Find a Partner is a **Parley Connected** perk. Your directory listing can stay live, "
+            "but connect Parley to browse matches and use partner posts.",
+            view=persistent_view(add, home_button(bot)),
+        )
+        return
 
     if len(sources) > 1:
         async def picked(inter: discord.Interaction, guild_id: int) -> None:

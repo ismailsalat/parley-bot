@@ -54,10 +54,17 @@ async def test_start_here_panel_stays_simple_and_optional_links_still_work_elsew
     runtime = replace(
         runtime,
         bot=replace(runtime.bot, support_url="https://discord.gg/help", website_url="https://example.com"),
-        hub=HubConfig(main_guild_id=1, welcome_channel_id=1, listings_channel_id=2, looking_channel_id=3),
+        hub=HubConfig(
+            main_guild_id=1, welcome_channel_id=1, listings_channel_id=2, looking_channel_id=3, perks_channel_id=4
+        ),
     )
+    # Start Here routes to the channels; Partner Posts live behind Find a Partner now that they are Connected-only.
     _content, view = welcome_panel(UIBot(runtime))
-    assert labels(view) == ["Server Directory", "Find a Partner", "Post Server Ad", "Post Partner Ad"]
+    assert labels(view) == ["Server Directory", "Find a Partner", "Parley Perks", "Post Server Ad", "Add Parley"]
+
+    # Before /setup runs there are no channel links, but the router is still usable.
+    _content, bare = welcome_panel(UIBot())
+    assert labels(bare) == ["Post Server Ad", "Add Parley"]
 
     links = optional_links(UIBot(runtime))
     assert {item.url for item in links} == {"https://discord.gg/help", "https://example.com"}

@@ -71,6 +71,16 @@ def require_public_bot_channel(guild: discord.Guild) -> discord.TextChannel:
         )
     return channel
 
+def is_connected(bot: ParleyBot, guild_id: int) -> bool:
+    """Is Parley currently installed in that server?
+
+    Connected servers keep the perks (faster Relist, Find a Partner, Partner
+    Posts, Parley Network, Auto Partner). A disconnected server keeps its
+    directory listing.
+    """
+    return bot.get_guild(guild_id) is not None
+
+
 def can_manage(permissions: discord.Permissions) -> bool:
     """Manage Server OR Administrator (the guild owner always has both)."""
     return permissions.administrator or permissions.manage_guild

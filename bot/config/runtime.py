@@ -30,7 +30,8 @@ DEFAULT_BUTTONS: dict[str, dict[str, str | None]] = {
     "requests": {"label": "Requests", "emoji": None, "style": "primary"},
     "looking": {"label": "Post Partner Ad", "emoji": None, "style": "primary"},
     "partner_posts": {"label": "My Partner Posts", "emoji": None, "style": "primary"},
-    "network": {"label": "Join Network", "emoji": "\U0001F310", "style": "primary"},
+    "network": {"label": "Parley Network", "emoji": "\U0001F310", "style": "primary"},
+    "perks": {"label": "Parley Perks", "emoji": "✨", "style": "success"},
     "join": {"label": "Join Server", "emoji": None, "style": "primary"},
     "request": {"label": "Request Partnership", "emoji": "🤝", "style": "primary"},
     "view_ad": {"label": "View Server Ad", "emoji": None, "style": "primary"},
@@ -63,7 +64,7 @@ BUTTON_STYLES = ("primary", "success", "danger", "secondary")
 # Buttons an administrator may relabel in Settings -> Appearance (custom_ids never change).
 CUSTOMIZABLE_BUTTONS = (
     "post", "connect", "find", "servers", "requests", "looking", "partner_posts",
-    "network", "join", "request", "view_ad", "next", "edit", "edit_ad", "edit_info",
+    "network", "perks", "join", "request", "view_ad", "next", "edit", "edit_ad", "edit_info",
     "partnerships", "preview", "self_post", "refresh", "relist", "publish", "remove",
     "accept", "decline", "add_bot", "support", "rules", "website", "directory",
 )
@@ -87,7 +88,9 @@ class BotConfig:
 
 @dataclass(frozen=True)
 class ListingConfig:
+    # Standard listings keep the existing cooldown. Connected servers get a shorter cooldown.
     refresh_cooldown_minutes: int = 30
+    connected_refresh_cooldown_minutes: int = 10
     max_ad_length: int = 1800
     categories: tuple[str, ...] = ("Gaming", "Anime", "Social", "Community", "Roleplay", "Creator")
     max_categories: int = 1
@@ -116,6 +119,7 @@ class PartnershipConfig:
     request_expiration_days: int = 7
     looking_post_cooldown_minutes: int = 60
     looking_panel_debounce_seconds: int = 8
+    pair_cooldown_hours: int = 168  # same two servers: 7 days
 
 
 @dataclass(frozen=True)
@@ -150,6 +154,12 @@ class PanelConfig:
         "## Welcome to Parley\n"
         "Choose where you want to go."
     )
+    perks_panel_enabled: bool = True
+    perks_panel_text: str = (
+        "## ✨ Parley Perks\n"
+        "Your directory listing can stay live without Parley. Connect Parley for faster Relists, "
+        "Find a Partner, partner posts, the Parley Network, Auto Partner and one-click requests."
+    )
 
     send_join_message: bool = True
     buttons: dict[str, dict[str, str]] = field(default_factory=lambda: {k: dict(v) for k, v in DEFAULT_BUTTONS.items()})
@@ -179,6 +189,7 @@ class HubConfig:
     welcome_channel_id: int = 0
     listings_channel_id: int = 0
     looking_channel_id: int = 0
+    perks_channel_id: int = 0
     support_channel_id: int = 0
     log_channel_id: int = 0
     staff_role_ids: tuple[int, ...] = ()
@@ -363,6 +374,7 @@ def sanitize(config: RuntimeConfig) -> tuple[RuntimeConfig, list[str]]:
         max_categories=_clamp(config.listings.max_categories, 1, len(categories)),
         max_contacts=_clamp(config.listings.max_contacts, 1, 25),
         refresh_cooldown_minutes=max(0, config.listings.refresh_cooldown_minutes),
+        connected_refresh_cooldown_minutes=max(0, config.listings.connected_refresh_cooldown_minutes),
         expiration_days=max(0, config.listings.expiration_days),
         minimum_member_options=tuple(min_options[:DISCORD_SELECT_OPTION_LIMIT]),
         find_page_size=_clamp(config.listings.find_page_size, 1, 4),
@@ -377,6 +389,7 @@ def sanitize(config: RuntimeConfig) -> tuple[RuntimeConfig, list[str]]:
         request_expiration_days=max(0, config.partnerships.request_expiration_days),
         looking_post_cooldown_minutes=max(0, config.partnerships.looking_post_cooldown_minutes),
         looking_panel_debounce_seconds=_clamp(config.partnerships.looking_panel_debounce_seconds, 1, 300),
+        pair_cooldown_hours=max(0, config.partnerships.pair_cooldown_hours),
     )
 
     min_interval = max(HARD_MIN_NETWORK_INTERVAL_MINUTES, config.network.min_interval_minutes)

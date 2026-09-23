@@ -71,6 +71,12 @@ async def create_request(
     if await repository.pending_request_between(session, source_guild_id, target_guild_id):
         raise Conflict(ALREADY_PENDING)
 
+    paired = await cooldowns.remaining(
+        session, cooldowns.SCOPE_PARTNER_PAIR, cooldowns.unordered_pair_key(source_guild_id, target_guild_id), now
+    )
+    if paired:
+        raise CooldownActive(f"These servers partnered recently. Try again in {format_duration(paired)}.", paired)
+
     declined = await cooldowns.remaining(
         session, cooldowns.SCOPE_DECLINED_PAIR, cooldowns.pair_key(source_guild_id, target_guild_id), now
     )
@@ -152,13 +158,17 @@ async def respond(
         raise Conflict("Someone else already answered this request.")
     await session.refresh(request)
 
-    if not accept:
+    if accept:
         await cooldowns.start(
-            session,
-            cooldowns.SCOPE_DECLINED_PAIR,
+            session, cooldowns.SCOPE_PARTNER_PAIR,
+            cooldowns.unordered_pair_key(request.source_guild_id, request.target_guild_id),
+            now, timedelta(hours=config.partnerships.pair_cooldown_hours),
+        )
+    else:
+        await cooldowns.start(
+            session, cooldowns.SCOPE_DECLINED_PAIR,
             cooldowns.pair_key(request.source_guild_id, request.target_guild_id),
-            now,
-            timedelta(hours=config.partnerships.decline_cooldown_hours),
+            now, timedelta(hours=config.partnerships.decline_cooldown_hours),
         )
 
     await repository.add_audit(

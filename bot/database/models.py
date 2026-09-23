@@ -213,6 +213,7 @@ class NetworkSettings(Base):
 
     guild_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_partner: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     channel_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     categories: Mapped[list] = mapped_column(JSON, default=list)
     interval_minutes: Mapped[int] = mapped_column(Integer, default=180)

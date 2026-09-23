@@ -396,15 +396,16 @@ async def mark_ad_edit_used(session: AsyncSession, *, guild_id: int, actor_id: i
     return listing
 
 
-def refresh_remaining(listing: Listing, config: RuntimeConfig, now: datetime) -> timedelta | None:
+def refresh_remaining(listing: Listing, config: RuntimeConfig, now: datetime, *, connected: bool = False) -> timedelta | None:
     if listing.refreshed_at is None:
         return None
-    available_at = listing.refreshed_at + timedelta(minutes=config.listings.refresh_cooldown_minutes)
+    cooldown = config.listings.connected_refresh_cooldown_minutes if connected else config.listings.refresh_cooldown_minutes
+    available_at = listing.refreshed_at + timedelta(minutes=cooldown)
     return available_at - now if available_at > now else None
 
 
 async def claim_refresh(
-    session: AsyncSession, config: RuntimeConfig, *, guild_id: int, actor_id: int, now: datetime
+    session: AsyncSession, config: RuntimeConfig, *, guild_id: int, actor_id: int, now: datetime, connected: bool = False
 ) -> Listing:
     """Check every Relist rule and record the Relist time *before* reposting.
 
@@ -418,7 +419,7 @@ async def claim_refresh(
         raise ValidationError("This listing is still waiting for staff approval.")
 
     if listing.status == ListingStatus.ACTIVE:
-        remaining = refresh_remaining(listing, config, now)
+        remaining = refresh_remaining(listing, config, now, connected=connected)
         if remaining is not None:
             raise CooldownActive(f"You can Relist again in {format_duration(remaining)}.", remaining)
 

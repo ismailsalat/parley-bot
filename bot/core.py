@@ -559,15 +559,26 @@ class ParleyBot(commands.Bot):
         from bot.services import network
 
         log.info("Removed from server %s (%s)", guild.name, guild.id)
-        listing = None
         async with self.db.session() as session:
             await network.disable(session, guild_id=guild.id, reason="Parley was removed from the server")
             listing = await repository.get_listing(session, guild.id)
-            if listing is not None and listing.status in ListingStatus.LIVE:
-                listing.status = ListingStatus.EXPIRED
-        if listing is not None and listing.status == ListingStatus.EXPIRED:
-            await self.panels.take_down_listing(listing)
-        await self.log_event(f"➖ Removed from **{guild.name}** (`{guild.id}`). Listing hidden until Parley is added back.")
+            if listing is not None:
+                partner_channel = listing.partner_channel_id
+                partner_message = listing.partner_message_id
+                partner_controls = listing.partner_controls_message_id
+                listing.partner_ad_text = None
+                listing.partner_channel_id = None
+                listing.partner_message_id = None
+                listing.partner_controls_message_id = None
+                listing.partner_posted_at = None
+            else:
+                partner_channel = partner_message = partner_controls = None
+        await self.panels.delete_listing_message(partner_channel, partner_controls)
+        await self.panels.delete_listing_message(partner_channel, partner_message)
+        await self.log_event(
+            f"➖ Removed from **{guild.name}** (`{guild.id}`). "
+            "Directory listing kept live; connected perks disabled."
+        )
 
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild) -> None:
         if before.name == after.name and before.icon == after.icon:

@@ -54,11 +54,11 @@ class SetupGuild:
         return channel
 
 
-async def test_automatic_setup_creates_only_the_five_channels():
+async def test_automatic_setup_creates_only_the_recommended_channels():
     guild = SetupGuild()
     result = await setup_service.automatic_setup(guild, staff_roles=[])
     assert [name for name, _ in guild.created] == [
-        "start-here", "server-directory", "find-partners", "support", "parley-logs"
+        "start-here", "server-directory", "find-partners", "parley-perks", "support", "parley-logs"
     ]
     assert result.ok and not result.failed
     assert "general" not in [name for name, _ in guild.created]

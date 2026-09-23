@@ -233,6 +233,15 @@ def looking_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
     return templates.render(bot.runtime, "looking_panel"), view
 
 
+def perks_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
+    """One clean explanation of why a server should keep Parley connected."""
+    view = persistent_view(
+        add_bot_button(bot, row=0),
+        action_button(bot, "network", row=0),
+    )
+    return bot.runtime.panels.perks_panel_text, view
+
+
 def _hub_channel_url(bot: ParleyBot, channel_id: int | None) -> str | None:
     guild_id = bot.runtime.hub.main_guild_id
     if not guild_id or not channel_id:
@@ -244,11 +253,13 @@ def welcome_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
     """Start Here is a tiny router, not another management dashboard."""
     directory_url = _hub_channel_url(bot, bot.runtime.hub.listings_channel_id)
     partner_url = _hub_channel_url(bot, bot.runtime.hub.looking_channel_id)
+    perks_url = _hub_channel_url(bot, bot.runtime.hub.perks_channel_id)
     view = persistent_view(
         discord.ui.Button(label="Server Directory", url=directory_url, row=0) if directory_url else None,
         discord.ui.Button(label="Find a Partner", url=partner_url, row=0) if partner_url else None,
+        discord.ui.Button(label="Parley Perks", url=perks_url, row=0) if perks_url else None,
         action_button(bot, "post", row=1),
-        action_button(bot, "looking", row=1),
+        add_bot_button(bot, row=1),  # Start Here still routes somewhere before the channels exist
     )
     return templates.render(bot.runtime, "welcome"), view
 

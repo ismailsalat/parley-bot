@@ -50,7 +50,10 @@ async def _active_managed_listings(bot: ParleyBot, user_id: int) -> tuple[list[L
     guilds = {g.id: g for g in permissions.cached_manageable_guilds(bot, user_id)}
     async with bot.db.session() as session:
         rows = await repository.get_listings(session, guilds.keys())
-    rows = [row for row in rows if row.status == ListingStatus.ACTIVE and row.guild_id in guilds]
+    rows = [
+        row for row in rows
+        if row.status == ListingStatus.ACTIVE and row.guild_id in guilds and permissions.is_connected(bot, row.guild_id)
+    ]
     rows.sort(key=lambda row: guilds[row.guild_id].name.lower())
     return rows, guilds
 

@@ -33,6 +33,20 @@ def test_database_errors_are_described_plainly(exc, problem):
     assert describe_database_error(exc)[0] == problem
 
 
+def test_grouped_connection_errors_are_found():
+    """asyncpg tries several addresses at once; the real error arrives inside a group."""
+    group = ExceptionGroup("multiple errors", [ConnectionRefusedError(61, "Connect call failed")])
+    assert describe_database_error(group)[0] == "Database connection failed."
+
+
+def test_windows_wording_is_recognised():
+    """Windows reports a refused connection with its own text, not a ConnectionRefusedError."""
+    windows = RuntimeError(
+        "[WinError 10061] No connection could be made because the target machine actively refused it"
+    )
+    assert describe_database_error(windows)[0] == "Database connection failed."
+
+
 def test_wrapped_errors_are_found():
     try:
         try:
