@@ -304,3 +304,24 @@ class TestMessage(Base):
     message_id: Mapped[int] = mapped_column(BigInteger)
     kind: Mapped[str] = mapped_column(String(30))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class OAuthSession(Base):
+    """A short-lived "Verify My Servers" session.
+
+    Holds only what is needed to prove *which* servers a Discord user manages:
+    the single-use state, who started it, when it dies, and - once the callback
+    succeeds - the eligible guilds. Access tokens are used during the callback
+    and never stored.
+    """
+
+    __tablename__ = "oauth_sessions"
+
+    id: Mapped[int] = mapped_column(AutoId, primary_key=True, autoincrement=True)
+    state: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    discord_user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    guilds: Mapped[list | None] = mapped_column(JSON, nullable=True)

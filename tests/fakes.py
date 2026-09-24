@@ -107,11 +107,18 @@ class FakeBot:
 class FakeResponse:
     def __init__(self) -> None:
         self.sent: list[dict[str, Any]] = []
+        self.deferred = False
 
     def is_done(self) -> bool:
-        return bool(self.sent)
+        return self.deferred or bool(self.sent)
 
     async def send_message(self, **kwargs: Any) -> None:
+        self.sent.append(kwargs)
+
+    async def defer(self, **_kwargs: Any) -> None:
+        self.deferred = True
+
+    async def edit_message(self, **kwargs: Any) -> None:
         self.sent.append(kwargs)
 
 
@@ -122,3 +129,7 @@ class FakeInteraction:
         self.response = FakeResponse()
         self.guild = None
         self.message = None
+
+    async def edit_original_response(self, **kwargs: Any) -> None:
+        """After a defer, edits land in the same place replies do."""
+        self.response.sent.append(kwargs)

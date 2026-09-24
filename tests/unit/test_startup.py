@@ -105,10 +105,15 @@ def test_deployment_files_use_the_lock():
     assert "-m bot.main" in (ROOT / "start.bat").read_text()
 
 
-def test_env_example_contains_no_secrets_and_only_needs_three_values():
+def test_env_example_contains_no_secrets_and_stays_minimal():
     text = (ROOT / ".env.example").read_text()
     active = [l for l in text.splitlines() if l and not l.startswith("#")]
-    assert [l.split("=")[0] for l in active] == ["DISCORD_TOKEN", "DATABASE_URL", "ENVIRONMENT"]
+    keys = [l.split("=")[0] for l in active]
+    # Only these three are needed to run Parley; anything else must be optional.
+    assert keys[:3] == ["DISCORD_TOKEN", "DATABASE_URL", "ENVIRONMENT"]
+    optional = {"DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET", "DISCORD_OAUTH_REDIRECT_URI"}
+    assert set(keys[3:]) <= optional, set(keys[3:]) - optional
+    # No value is ever shipped: a filled-in secret here would end up in git.
     assert all(l.split("=", 1)[1] in ("", "production", "development") for l in active)
 
 

@@ -258,11 +258,15 @@ async def run_submission(
     on_created=None,
     on_accept: Callable[[str, discord.Message], Awaitable[None]] | None = None,
     on_review: Callable[[str], Awaitable[None]] | None = None,
+    authorize: Callable[[ParleyBot, int, int], Awaitable[None]] | None = None,
 ) -> str:
     """Open one member's three-minute, one-message posting window.
 
     Different servers can post concurrently. We only block a second window from
     the same member or another admin trying to post the same server at once.
+
+    ``authorize`` replaces the Manage Server check for servers Parley is not in
+    (it must still prove authority - see bot/views/listings.py).
     """
     bot: ParleyBot = interaction.client  # type: ignore[assignment]
     channel = channel or bot.panels.listings_channel()
@@ -273,7 +277,9 @@ async def run_submission(
     member = channel.guild.get_member(interaction.user.id)
     if member is None:
         raise ValidationError("Join the Parley server first, then try again.")
-    await permissions.require_manager(bot, guild_id, interaction.user.id)
+    # Manage Server is proved through the gateway by default. A listing made without
+    # installing Parley passes the OAuth check instead - it is never skipped.
+    await (authorize or permissions.require_manager)(bot, guild_id, interaction.user.id)
     if not channel.permissions_for(member).view_channel:
         raise ValidationError(
             f"You need permission to view #{channel.name} before Parley can open a posting window for you."

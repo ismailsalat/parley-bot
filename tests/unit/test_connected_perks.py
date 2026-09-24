@@ -23,7 +23,8 @@ OTHER = 940000000000000002
 
 
 def labels(view) -> list[str]:
-    return [getattr(c, "item", c).label for c in view.children]
+    """Button labels on a view (selects have no label)."""
+    return [label for c in view.children if (label := getattr(getattr(c, "item", c), "label", None))]
 
 
 # ---------------------------------------------------------------- 1-3. leaving keeps the listing
@@ -453,8 +454,12 @@ async def test_verified_manager_can_manage_after_parley_is_removed(db, config):
         await load_managed_listing(bot, OTHER, OWNER)
 
 
-async def test_post_server_routes_to_existing_disconnected_listing(db, config):
-    """Post My Server should open an already-verified listing instead of pretending it vanished."""
+async def test_post_server_keeps_existing_disconnected_listings_reachable(db, config):
+    """Post Server Ad still reaches an already-verified listing - and can list a new server.
+
+    It used to open the Listing Manager directly, which dead-ended anyone who
+    wanted to list a *second* server without installing Parley.
+    """
     from bot.views.listings import start_post_flow
     from tests.fakes import FakeInteraction
 
@@ -469,6 +474,7 @@ async def test_post_server_routes_to_existing_disconnected_listing(db, config):
     await start_post_flow(interaction)
 
     sent = interaction.response.sent[-1]
-    assert sent["embed"].title == "🧭 Listing Manager"
-    assert any(field.name == "Parley" and field.value == "⚪ Not Connected" for field in sent["embed"].fields)
-    assert "Connect Parley" in labels(sent["view"])
+    assert sent["embed"].title == "Your existing listings"
+    chooser = next(c for c in sent["view"].children if isinstance(c, discord.ui.Select))
+    assert [option.value for option in chooser.options] == [str(OTHER)]  # the listing is one click away
+    assert "Verify Another Server" in labels(sent["view"])  # and so is a brand new one

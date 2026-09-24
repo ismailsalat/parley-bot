@@ -77,13 +77,31 @@ def test_every_add_parley_button_uses_the_canonical_builder():
 
 
 def test_only_one_place_builds_an_install_url():
-    """A second builder is how legacy links end up in old messages."""
+    """A second *install* builder is how legacy links end up in old messages.
+
+    bot/services/verification.py also builds an authorize URL, but for the
+    read-only "Verify My Servers" login - a different purpose, asserted below.
+    """
     builders = []
     for path in (ROOT / "bot").rglob("*.py"):
         text = path.read_text(encoding="utf-8")
         if "oauth_url(" in text or re.search(r"discord\.com/(?:api/)?oauth2/authorize", text):
             builders.append(path.relative_to(ROOT).as_posix())
-    assert builders == ["bot/views/welcome.py"], builders
+    assert sorted(builders) == ["bot/services/verification.py", "bot/views/welcome.py"], builders
+
+
+def test_verification_login_never_asks_for_the_bot_scope():
+    """Verifying who you are must not install anything."""
+    from bot.services import verification
+
+    assert set(verification.VERIFY_SCOPES) == {"identify", "guilds"}
+    url = verification.authorize_url(client_id=APP_ID, redirect_uri="https://example.com/cb", state="abc")
+    scopes = set(query(url)["scope"][0].split())
+    assert scopes == {"identify", "guilds"}
+    assert "bot" not in scopes and "applications.commands" not in scopes
+    assert query(url)["state"] == ["abc"]
+    # and the install link still does ask for them
+    assert set(query(invite_url(InstallBot()))["scope"][0].split()) == {"bot", "applications.commands"}
 
 
 @pytest.mark.parametrize(

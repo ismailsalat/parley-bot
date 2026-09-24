@@ -52,6 +52,31 @@ After that, all configuration happens in Discord. No more visits to Railway Vari
 
 If the DM doesn't arrive, use **OAuth2 → URL Generator** with scopes `bot` + `applications.commands` and the permissions below.
 
+### Listing a server (no bot required)
+
+Listing a server never requires installing Parley. **Post Server Ad** offers **Verify My Servers**:
+a read-only Discord login (`identify` + `guilds`) that tells Parley which servers you manage. You
+pick one, paste an invite, and the listing goes live with Parley in none of your servers.
+
+Adding Parley stays optional and unlocks the Connected perks (faster Relists, Find a Partner,
+Partner Posts, the Parley Network, Auto Partner, in-server partnership controls, live metadata).
+
+To turn verification on, set these (the secret belongs in Railway variables, never in git):
+
+| Variable | Value |
+|---|---|
+| `DISCORD_CLIENT_ID` | your application id |
+| `DISCORD_CLIENT_SECRET` | Developer Portal → OAuth2 → Client Secret |
+| `DISCORD_OAUTH_REDIRECT_URI` | `https://<your Railway domain>/oauth/discord/callback` |
+
+Add that same URL under **Developer Portal → OAuth2 → Redirects**. Parley serves the callback
+itself on `$PORT` with aiohttp (already a discord.py dependency), so Railway needs no extra
+service. Without these three, verification stays off and the button explains that rather than
+demanding the bot.
+
+Verification sessions are single-use, expire in 10 minutes, are bound to the Discord account that
+pressed the button, and no access token is ever stored.
+
 ### How Parley is installed
 
 Parley is a **guild install**: it is added to a server and keeps a bot user there, because the

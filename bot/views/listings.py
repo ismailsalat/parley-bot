@@ -12,7 +12,8 @@ from bot.database import repository
 from bot.database.models import Listing, ListingStatus
 from bot.modals.advertisement import AdvertisementModal, InviteModal
 from bot.services import listings as listing_service
-from bot.services import moderation, permissions
+from bot.services import moderation, permissions, verification
+from bot.views.verify import verified_guild_info
 from bot.services.errors import MANAGE_SERVER_REQUIRED, PermissionDenied, ValidationError, ParleyError
 from bot.utils.helpers import truncate, utcnow
 from bot.config import templates
@@ -30,7 +31,7 @@ from bot.views.base import (
     home_button,
     reply,
 )
-from bot.views.welcome import action_button, add_bot_button, persistent_view, register_action
+from bot.views.welcome import action_button, persistent_view, register_action
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -215,6 +216,18 @@ class PostServerPickerView(OwnedView):
             self.add_item(previous)
             self.add_item(next_button)
 
+        # Parley being installed somewhere must never be the only way to list a
+        # server: any other server can still be listed through verification.
+        another = discord.ui.Button(label="Verify Another Server", emoji="🔐", style=discord.ButtonStyle.primary, row=2)
+        another.callback = self._verify_another  # type: ignore[method-assign]
+        self.add_item(another)
+
+    async def _verify_another(self, interaction: discord.Interaction) -> None:
+        from bot.views.verify import start_verification
+
+        self.stop()
+        await start_verification(interaction)
+
     def embed(self) -> discord.Embed:
         ready = 0
         listed = 0
@@ -284,6 +297,21 @@ class PostServerPickerView(OwnedView):
         await interaction.response.edit_message(content=None, embed=self.embed(), view=self)
 
 
+def _verify_another_button(row: int | None = None) -> discord.ui.Button:
+    """The always-available route to listing a server Parley isn't in."""
+    button = discord.ui.Button(
+        label="Verify Another Server", emoji="🔐", style=discord.ButtonStyle.primary, row=row
+    )
+
+    async def callback(interaction: discord.Interaction) -> None:
+        from bot.views.verify import start_verification
+
+        await start_verification(interaction)
+
+    button.callback = callback  # type: ignore[method-assign]
+    return button
+
+
 @register_action("post", "connect")
 async def start_post_flow(interaction: discord.Interaction) -> None:
     bot = get_bot(interaction)
@@ -298,9 +326,9 @@ async def start_post_flow(interaction: discord.Interaction) -> None:
         await open_listing_form(interaction, guild)
         return
 
-    # In DMs / the Parley hub, new servers still need Parley installed once so
-    # Manage Server can be verified. Existing verified listings remain manageable
-    # through the manager who originally verified them, even after Parley is removed.
+    # In DMs / the Parley hub: servers where Parley is installed are offered directly,
+    # and anything else goes through "Verify My Servers", which needs no bot at all.
+    # Existing verified listings stay manageable even after Parley is removed.
     candidates = [
         g for g in permissions.cached_manageable_guilds(bot, user.id)
         if g.id != bot.runtime.hub.main_guild_id
@@ -323,12 +351,9 @@ async def start_post_flow(interaction: discord.Interaction) -> None:
         }
 
     if not candidates and disconnected_rows:
+        # Post Server Ad must never dead-end into management: listing another
+        # server is the whole point of the button.
         from bot.views.management import show_management
-
-        if len(disconnected_rows) == 1:
-            await show_management(interaction, disconnected_rows[0].guild_id)
-            return
-
         from bot.views.partnership import GuildPickerView
 
         async def picked(inter: discord.Interaction, guild_id: int) -> None:
@@ -337,45 +362,77 @@ async def start_post_flow(interaction: discord.Interaction) -> None:
         embed = discord.Embed(
             title="Your existing listings",
             description=(
-                "Parley is not currently connected to these servers, but their verified basic listings can still be managed."
+                "Parley is not currently connected to these servers, but their verified basic listings can still be managed.\n\n"
+                "To list a **different** server, press **Verify Another Server**."
             ),
             color=bot.runtime.bot.color_primary,
         )
-        await reply(
-            interaction,
-            embed=embed,
-            view=GuildPickerView(
-                user.id,
-                [
-                    (
-                        row.guild_id,
-                        disconnected_guilds[row.guild_id].name
-                        if row.guild_id in disconnected_guilds
-                        else f"Server {row.guild_id}",
-                    )
-                    for row in disconnected_rows
-                ],
-                picked,
-                placeholder="Choose a listing",
-            ),
+        view = GuildPickerView(
+            user.id,
+            [
+                (
+                    row.guild_id,
+                    disconnected_guilds[row.guild_id].name
+                    if row.guild_id in disconnected_guilds
+                    else f"Server {row.guild_id}",
+                )
+                for row in disconnected_rows
+            ],
+            picked,
+            placeholder="Choose a listing",
         )
+        view.add_item(_verify_another_button())
+        await reply(interaction, embed=embed, view=view)
         return
 
     if not candidates:
-        add = add_bot_button(bot)
-        embed = discord.Embed(
-            title="Connect Parley once to list a new server",
-            description=(
-                "For a server's first listing, Parley must be installed once so Discord can verify that you have **Manage Server**.\n\n"
-                "After the listing is verified and live, you can remove Parley and keep managing the basic listing here."
-            ),
-            color=bot.runtime.bot.color_primary,
-        )
-        await reply(interaction, embed=embed, view=persistent_view(add) if add else None)
+        # Listing never requires installing Parley: prove Manage Server with a
+        # read-only Discord login instead.
+        from bot.views.verify import start_verification
+
+        await start_verification(interaction)
         return
 
     view = PostServerPickerView(bot, user.id, candidates, existing)
     await reply(interaction, embed=view.embed(), view=view)
+
+
+async def open_verified_listing_form(interaction: discord.Interaction, verified) -> None:
+    """Listing form for a server Parley is *not* in, backed by OAuth verification."""
+    bot = get_bot(interaction)
+    user_id = interaction.user.id
+
+    async with bot.db.session() as session:
+        # Re-check against the verified set: a guild id never comes from the user.
+        verified = await verification.require_verified_guild(
+            session, user_id=user_id, guild_id=verified.id, now=utcnow()
+        )
+        await moderation.ensure_allowed(session, bot.runtime, guild_ids=[verified.id], user_id=user_id)
+        existing = await repository.get_listing(session, verified.id)
+
+    if existing is not None and existing.status in ListingStatus.LIVE:
+        from bot.views.management import manage_button
+
+        await reply(
+            interaction,
+            "This server is already listed.",
+            view=persistent_view(manage_button(bot, verified.id, verified.name)),
+        )
+        return
+
+    draft = ListingDraft(contacts=[user_id])
+    if existing is not None:
+        draft.categories = [c for c in existing.categories if c in bot.runtime.listings.categories]
+        draft.accepting = existing.accepting_partnerships
+        draft.minimum = existing.minimum_members
+        draft.ad_text = existing.advertisement_text
+        draft.invite_url = existing.invite_url
+
+    form = ListingFormView(
+        bot, user_id, verified.id, verified.name, draft,
+        mode="create", in_dm=interaction.guild is None, verified=verified,
+    )
+    await reply(interaction, form.render(), view=form)
 
 
 async def open_listing_form(interaction: discord.Interaction, guild: discord.Guild, *, edit_message: bool = False) -> None:
@@ -412,6 +469,67 @@ async def open_listing_form(interaction: discord.Interaction, guild: discord.Gui
 # ---------------------------------------------------------------- the form
 
 
+async def resolve_verified_invite(bot: ParleyBot, guild_id: int, raw: str | None) -> str | None:
+    """Validate a pasted invite for a server Parley is not in.
+
+    Parley cannot create an invite there, and cannot inspect the channel, so the
+    one thing that matters is checked: the invite really points at the server
+    the user verified.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        raise InviteMissing("Paste an invite link for this server.")
+    code = listing_service.parse_invite_code(raw)
+    try:
+        invite = await bot.fetch_invite(code, with_counts=False)
+    except discord.NotFound as exc:
+        raise ValidationError("That invite link is invalid or has expired.") from exc
+    except discord.HTTPException as exc:
+        raise ValidationError("Discord couldn't check that invite. Try again in a moment.") from exc
+    if invite.guild is None or invite.guild.id != guild_id:
+        raise ValidationError("That invite link points to a different server.")
+    return listing_service.canonical_invite(invite.code)
+
+
+class PasteInviteView(OwnedView):
+    """Botless listings need a pasted invite: Parley can't make one."""
+
+    def __init__(self, form: ListingFormView, *, next_step: str = "preview") -> None:
+        super().__init__(form.owner_id)
+        self.form = form
+        self.next_step = next_step  # "preview" or "self_post"
+        paste = discord.ui.Button(label="Paste Invite", emoji="🔗", style=discord.ButtonStyle.primary, row=0)
+        paste.callback = self._paste  # type: ignore[method-assign]
+        self.add_item(paste)
+        back = discord.ui.Button(label="Back", emoji="⬅️", style=discord.ButtonStyle.secondary, row=1)
+        back.callback = self._back  # type: ignore[method-assign]
+        self.add_item(back)
+
+    def render(self, notice: str | None = None) -> str:
+        text = (
+            f"## Invite for {self.form.guild_name}\n"
+            "Paste an invite link for this server so people can join it.\n"
+            "-# Parley isn't in this server, so it can't create one for you."
+        )
+        return f"\u26a0\ufe0f {notice}\n\n{text}" if notice else text
+
+    async def _paste(self, interaction: discord.Interaction) -> None:
+        async def submitted(inter: discord.Interaction, raw: str) -> None:
+            self.form.draft.invite_raw = raw
+            self.form.draft.invite_url = None
+            self.stop()
+            if self.next_step == "self_post":
+                await self.form.start_self_post(inter)
+            else:
+                await self.form.continue_to_preview(inter)
+
+        await interaction.response.send_modal(InviteModal(on_submit=submitted))
+
+    async def _back(self, interaction: discord.Interaction) -> None:
+        self.stop()
+        await AdModeView(self.form).show(interaction)
+
+
 class ListingFormView(OwnedView):
     """One screen: category, partnerships, minimum, contacts. Used for create and Edit Info."""
 
@@ -426,9 +544,13 @@ class ListingFormView(OwnedView):
         mode: str,
         in_dm: bool,
         connected: bool = True,
+        verified=None,
     ) -> None:
         super().__init__(owner_id)
         self.bot = bot
+        # Set when Parley is not in the server: everything is backed by the
+        # OAuth verification instead of a live guild.
+        self.verified = verified
         self.guild_id = guild_id
         self.guild_name = guild_name
         self.draft = draft
@@ -593,6 +715,9 @@ class ListingFormView(OwnedView):
         except ParleyError as exc:
             await AdModeView(self).show(interaction, exc.user_message)
             return
+        if self.verified is not None:
+            await self._continue_to_preview_verified(interaction)
+            return
         guild = self.bot.get_guild(self.guild_id)
         if guild is None:
             await self._rerender(interaction, "Parley is no longer in that server.")
@@ -611,24 +736,68 @@ class ListingFormView(OwnedView):
                 return
         await show_preview(interaction, self, edit_original=True)
 
+    async def _verified_authorize(self, bot: ParleyBot, guild_id: int, user_id: int) -> None:
+        """Authority for a server Parley isn't in: Discord's own OAuth answer."""
+        async with bot.db.session() as session:
+            await verification.require_verified_guild(
+                session, user_id=user_id, guild_id=guild_id, now=utcnow()
+            )
+
+    async def _continue_to_preview_verified(self, interaction: discord.Interaction) -> None:
+        """Botless: the invite must be pasted, and must point at the verified server."""
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        if not self.draft.invite_url:
+            try:
+                self.draft.invite_url = await resolve_verified_invite(
+                    self.bot, self.guild_id, self.draft.invite_raw
+                )
+            except InviteMissing:
+                view = PasteInviteView(self)
+                await interaction.edit_original_response(content=view.render(), view=view)
+                return
+            except ParleyError as exc:
+                view = PasteInviteView(self)
+                await interaction.edit_original_response(content=view.render(exc.user_message), view=view)
+                return
+        await show_preview(interaction, self, edit_original=True)
+
     async def start_self_post(self, interaction: discord.Interaction, *, invite_ready: bool = False) -> None:
-        """Let the owner post the real advertisement message in #server-directory."""
-        guild = self.bot.get_guild(self.guild_id)
-        if guild is None:
+        """Let the owner post the real advertisement message in #server-directory.
+
+        The posting window lives in Parley's own directory channel, so Parley does
+        not need to be installed in the server being listed.
+        """
+        botless = self.verified is not None
+        guild = None if botless else self.bot.get_guild(self.guild_id)
+        if not botless and guild is None:
             await self._rerender(interaction, "Parley is no longer in that server.")
             return
+        guild_name = self.guild_name if botless else guild.name
+        authorize = self._verified_authorize if botless else None
 
         if not interaction.response.is_done():
             await interaction.response.defer()
 
         if not invite_ready and not self.draft.invite_url:
             try:
-                self.draft.invite_url = await resolve_invite(self.bot, guild, self.draft.invite_raw)
+                if botless:
+                    # Parley cannot create an invite there: it must be pasted and
+                    # must point at the verified server.
+                    self.draft.invite_url = await resolve_verified_invite(
+                        self.bot, self.guild_id, self.draft.invite_raw
+                    )
+                else:
+                    self.draft.invite_url = await resolve_invite(self.bot, guild, self.draft.invite_raw)
             except InviteMissing:
-                view = InviteHelpView(self, guild, next_step="self_post")
+                view = PasteInviteView(self, next_step="self_post") if botless else InviteHelpView(self, guild, next_step="self_post")
                 await interaction.edit_original_response(content=view.render(), view=view)
                 return
             except ParleyError as exc:
+                if botless:
+                    view = PasteInviteView(self, next_step="self_post")
+                    await interaction.edit_original_response(content=view.render(exc.user_message), view=view)
+                    return
                 await interaction.edit_original_response(
                     content=f"## Can't open posting window\n{exc.user_message}",
                     view=persistent_view(home_button(self.bot)),
@@ -643,21 +812,22 @@ class ListingFormView(OwnedView):
             await self.bot.panels.adopt_self_post(self.guild_id, message)
             test = self.bot.runtime.hub.mode == "test"
             await self.bot.log_event(
-                f"**{guild.name}** (`{self.guild_id}`) was listed by {interaction.user.mention}{' [TEST]' if test else ''}."
+                f"**{guild_name}** (`{self.guild_id}`) was listed by {interaction.user.mention}{' [TEST]' if test else ''}."
             )
 
         async def held_for_review(text: str) -> None:
             self.draft.ad_text = text
             listing = await self._create(interaction)
-            await send_for_review(self.bot, listing, guild.name)
+            await send_for_review(self.bot, listing, guild_name)
 
         try:
             note = await self_post.run_submission(
                 interaction,
                 self.guild_id,
-                guild.name,
+                guild_name,
                 on_accept=accepted,
                 on_review=held_for_review,
+                authorize=authorize,
             )
         except ParleyError as exc:
             await interaction.edit_original_response(
@@ -703,15 +873,27 @@ class ListingFormView(OwnedView):
 
     async def _create(self, interaction: discord.Interaction):
         bot = self.bot
-        guild, _member = await permissions.require_manager(bot, self.guild_id, interaction.user.id)
-        contacts = await validate_contacts(guild, self.draft.contacts)
         test = bot.runtime.hub.mode == "test"
+
+        if self.verified is not None:
+            # Botless: Discord vouched for this guild, and only the verifying
+            # manager can be a contact (no member list to check anyone else against).
+            async with bot.db.session() as session:
+                verified = await verification.require_verified_guild(
+                    session, user_id=interaction.user.id, guild_id=self.guild_id, now=utcnow()
+                )
+            info = verified_guild_info(verified)
+            contacts = [interaction.user.id]
+        else:
+            guild, _member = await permissions.require_manager(bot, self.guild_id, interaction.user.id)
+            contacts = await validate_contacts(guild, self.draft.contacts)
+            info = guild_info(guild)
 
         async with bot.db.session() as session:
             listing = await listing_service.create_listing(
                 session,
                 bot.runtime,
-                guild=guild_info(guild),
+                guild=info,
                 actor_id=interaction.user.id,
                 data=listing_service.ListingInput(
                     categories=self.draft.categories,

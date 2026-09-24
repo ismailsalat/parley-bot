@@ -132,6 +132,17 @@ class Settings:
     on_railway: bool = False
     # Required for the controlled "Paste My Own Ad" channel flow.
     message_content_intent: bool = True
+    # "Verify My Servers": listing a server without installing Parley. The client id is
+    # the application id; only the secret and redirect URL come from the environment.
+    oauth_client_id: int | None = None
+    oauth_client_secret: str = ""
+    oauth_redirect_uri: str = ""
+    oauth_port: int = 8080
+
+    @property
+    def oauth_enabled(self) -> bool:
+        """Can Parley run "Verify My Servers"? Needs a secret and a callback URL."""
+        return bool(self.oauth_client_secret and self.oauth_redirect_uri)
 
     @property
     def is_production(self) -> bool:
@@ -147,11 +158,18 @@ class Settings:
         password = urlsplit(self.database_url).password if not self.uses_sqlite else None
         if password:
             values.append(password)
+        if self.oauth_client_secret:
+            values.append(self.oauth_client_secret)
         return [v for v in values if v and len(v) >= 6]
 
     def validate(self) -> list[str]:
         """Human-readable warnings. Channels, roles and all business settings are set in Discord (/setup, /settings)."""
         warnings: list[str] = []
+        if self.oauth_client_secret and not self.oauth_redirect_uri:
+            warnings.append(
+                "DISCORD_CLIENT_SECRET is set but DISCORD_OAUTH_REDIRECT_URI is not, so "
+                "\"Verify My Servers\" stays off."
+            )
         if self.uses_sqlite and self.on_railway:
             warnings.append(
                 "Railway is using a temporary SQLite file: data is lost on redeploy. "
@@ -211,4 +229,8 @@ def load_settings(*, load_env_file: bool = True) -> Settings:
         sync_commands=_bool("SYNC_COMMANDS", True),
         on_railway=on_railway,
         message_content_intent=True,
+        oauth_client_id=_optional_id("DISCORD_CLIENT_ID"),
+        oauth_client_secret=_env("DISCORD_CLIENT_SECRET"),
+        oauth_redirect_uri=_env("DISCORD_OAUTH_REDIRECT_URI"),
+        oauth_port=int(_env("PORT") or 8080),
     )

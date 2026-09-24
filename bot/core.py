@@ -20,6 +20,7 @@ from bot.database.models import ListingStatus
 from bot.database.session import Database
 from bot.services import configuration
 from bot.services.moderation import RateLimiter
+from bot.oauth_server import OAuthServer
 from bot.services.panels import PanelService
 from bot.tasks import BackgroundTasks
 from bot.utils.mentions import safe_allowed_mentions
@@ -102,6 +103,7 @@ class ParleyBot(commands.Bot):
         moderation = self.runtime.moderation
         self.click_limiter = RateLimiter(moderation.button_rate_limit, moderation.button_rate_window_seconds)
         self.panels = PanelService(self)
+        self.oauth = OAuthServer(self)  # "Verify My Servers"; a no-op unless configured
         self.background = BackgroundTasks(self)
         self._dm_panel_sent: dict[int, float] = {}
         self._started = False
@@ -123,6 +125,8 @@ class ParleyBot(commands.Bot):
             await self.load_extension(module)
         if self.hub.main_guild_id:
             await self.register_staff_commands(self.hub.main_guild_id, sync=False)
+
+        await self.oauth.start()
 
         if self.settings.sync_commands:
             await self._sync_commands()
@@ -611,6 +615,7 @@ class ParleyBot(commands.Bot):
 
     async def close(self) -> None:
         log.info("Shutting down…")
+        await self.oauth.stop()
         await self.background.stop()
         await self.panels.close()
         await super().close()
