@@ -477,4 +477,4 @@ async def test_post_server_keeps_existing_disconnected_listings_reachable(db, co
     assert sent["embed"].title == "Your existing listings"
     chooser = next(c for c in sent["view"].children if isinstance(c, discord.ui.Select))
     assert [option.value for option in chooser.options] == [str(OTHER)]  # the listing is one click away
-    assert "Verify Another Server" in labels(sent["view"])  # and so is a brand new one
+    assert "Add Another Server" in labels(sent["view"])  # and so is a brand new one

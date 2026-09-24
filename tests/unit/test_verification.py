@@ -71,13 +71,12 @@ async def test_post_server_ad_without_the_bot_offers_verification(db):
     await start_post_flow(interaction)
 
     message = interaction.response.sent[-1]
-    content = message["content"]
-    assert "Connect Parley once" not in content
-    assert "Post Your Server" in content
-    assert "do not need to add Parley" in content
+    embed = message["embed"]
+    assert "Connect Parley once" not in (embed.description or "")
+    assert "Post Your Server" in (embed.title or "")
+    assert "No bot required" in (embed.description or "")
     labels = [getattr(c, "item", c).label for c in message["view"].children]
-    assert labels[0] == "Verify My Servers"  # the primary action, not Add Parley
-    assert "Add Parley" not in labels[:1]
+    assert labels == ["Choose My Server", "Continue"]
 
 
 async def test_the_legacy_copy_is_gone_from_the_codebase():
@@ -433,9 +432,9 @@ async def test_zero_managed_servers_says_so_instead_of_asking_again(db):
     interaction = FakeInteraction(bot, ADMIN_ID)
     await show_verified_servers(interaction)
     sent = interaction.response.sent[-1]
-    assert "No manageable servers found" in sent["content"]
-    assert "hasn't seen a completed verification" not in sent["content"]
-    assert [getattr(c, "item", c).label for c in sent["view"].children] == ["Verify Again", "Home"]
+    assert "No servers found" in sent["embed"].title
+    assert "hasn't seen a completed verification" not in (sent["embed"].description or "")
+    assert [getattr(c, "item", c).label for c in sent["view"].children] == ["Choose Again", "Home"]
 
 
 async def test_pending_verification_still_asks_to_finish_in_the_browser(db):
@@ -444,7 +443,7 @@ async def test_pending_verification_still_asks_to_finish_in_the_browser(db):
     bot = oauth_bot(db)
     interaction = FakeInteraction(bot, ADMIN_ID)
     await show_verified_servers(interaction)
-    assert "hasn't seen a completed verification" in interaction.response.sent[-1]["content"]
+    assert "Still waiting for Discord" in interaction.response.sent[-1]["embed"].description
 
 
 # ---------------------------------------------------------------- always a route to a new server
@@ -478,7 +477,7 @@ async def test_a_connected_server_never_hides_the_botless_route(db, config):
 
     view = interaction.response.sent[-1]["view"]
     labels = [c.label for c in view.children if getattr(c, "label", None)]
-    assert "Verify Another Server" in labels
+    assert "Add Another Server" in labels
 
 
 # ---------------------------------------------------------------- 10. the whole journey
@@ -518,7 +517,7 @@ async def test_journey_verify_pick_publish_and_manage_without_the_bot(db, config
     # 1. the entry point offers verification, not an install
     first = FakeInteraction(bot, ADMIN_ID)
     await start_post_flow(first)
-    assert "Verify My Servers" in [c.label for c in first.response.sent[-1]["view"].children if getattr(c, "label", None)]
+    assert "Choose My Server" in [c.label for c in first.response.sent[-1]["view"].children if getattr(c, "label", None)]
 
     # 2. OAuth completes out of band, then Continue shows the picker
     await _verify(db)

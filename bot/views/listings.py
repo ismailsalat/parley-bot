@@ -219,63 +219,29 @@ class PostServerPickerView(OwnedView):
 
         # Parley being installed somewhere must never be the only way to list a
         # server: any other server can still be listed through verification.
-        another = discord.ui.Button(label="Verify Another Server", emoji="🔐", style=discord.ButtonStyle.primary, row=2)
+        another = discord.ui.Button(label="Add Another Server", emoji="✨", style=discord.ButtonStyle.primary, row=2)
         another.callback = self._verify_another  # type: ignore[method-assign]
         self.add_item(another)
 
     async def _verify_another(self, interaction: discord.Interaction) -> None:
-        await acknowledge(interaction)
+        await acknowledge(interaction, thinking=False)
         from bot.views.verify import start_verification
 
         self.stop()
         await start_verification(interaction)
 
     def embed(self) -> discord.Embed:
-        ready = 0
-        listed = 0
-        attention = 0
-        for guild in self.guilds:
-            listing = self.listings.get(guild.id)
-            public_ok = permissions.public_bot_channel(guild) is not None
-            if not public_ok:
-                attention += 1
-            elif listing is None or listing.status in (ListingStatus.REMOVED, ListingStatus.EXPIRED):
-                ready += 1
-            else:
-                listed += 1
-
         embed = discord.Embed(
-            title="Post a Server",
-            description=(
-                f"Parley is connected to **{len(self.guilds):,}** server"
-                f"{'s' if len(self.guilds) != 1 else ''} you can manage.\n"
-                "Pick any server below. Live listings open their management page; "
-                "unlisted or expired servers continue to setup."
-            ),
-            color=self.bot.runtime.bot.color_primary,
+            title="😊 Choose a Server",
+            description="Pick the server you want to list or manage.",
+            color=self.bot.runtime.bot.color_success,
         )
-        embed.add_field(name="Ready to list", value=f"**{ready:,}**", inline=True)
-        embed.add_field(name="Already listed", value=f"**{listed:,}**", inline=True)
-        embed.add_field(name="Needs attention", value=f"**{attention:,}**", inline=True)
-
-        lines: list[str] = []
-        first = self.page * self.PAGE_SIZE + 1
-        for index, guild in enumerate(self._page_guilds(), start=first):
-            listing = self.listings.get(guild.id)
-            status = _picker_status(listing, public_channel_ok=permissions.public_bot_channel(guild) is not None)
-            lines.append(
-                f"`{index:02}` **{truncate(guild.name, 55)}**\n"
-                f"-# {status} · {(guild.member_count or 0):,} members"
-            )
-        embed.add_field(name="Your connected servers", value="\n".join(lines), inline=False)
         if self.pages > 1:
-            embed.set_footer(text=f"Page {self.page + 1} of {self.pages} · Select a server to continue")
-        else:
-            embed.set_footer(text="Select a server to continue")
+            embed.set_footer(text=f"Page {self.page + 1} of {self.pages}")
         return embed
 
     async def _picked(self, interaction: discord.Interaction) -> None:
-        await acknowledge(interaction)
+        await acknowledge(interaction, thinking=False)
         guild_id = int(self._select.values[0])
         guild = self.bot.get_guild(guild_id)
         if guild is None:
@@ -303,11 +269,11 @@ class PostServerPickerView(OwnedView):
 def _verify_another_button(row: int | None = None) -> discord.ui.Button:
     """The always-available route to listing a server Parley isn't in."""
     button = discord.ui.Button(
-        label="Verify Another Server", emoji="🔐", style=discord.ButtonStyle.primary, row=row
+        label="Add Another Server", emoji="✨", style=discord.ButtonStyle.primary, row=row
     )
 
     async def callback(interaction: discord.Interaction) -> None:
-        await acknowledge(interaction)
+        await acknowledge(interaction, thinking=False)
         from bot.views.verify import start_verification
 
         await start_verification(interaction)
@@ -364,12 +330,9 @@ async def start_post_flow(interaction: discord.Interaction) -> None:
             await show_management(inter, guild_id)
 
         embed = discord.Embed(
-            title="Your existing listings",
-            description=(
-                "Parley is not currently connected to these servers, but their verified basic listings can still be managed.\n\n"
-                "To list a **different** server, press **Verify Another Server**."
-            ),
-            color=bot.runtime.bot.color_primary,
+            title="😊 Choose a Server",
+            description="Pick a listing to manage, or add another server.",
+            color=bot.runtime.bot.color_success,
         )
         view = GuildPickerView(
             user.id,
