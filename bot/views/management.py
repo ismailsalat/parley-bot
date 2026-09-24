@@ -17,7 +17,7 @@ from bot.services import listings as listing_service
 from bot.services import permissions
 from bot.services.errors import LISTING_GONE, NotFound, PermissionDenied, ValidationError
 from bot.utils.helpers import format_duration, format_members, format_minimum, listing_jump_url, truncate, utcnow
-from bot.views.base import ConfirmView, OwnedView, get_bot, guard, handle_error, home_button, reply
+from bot.views.base import ConfirmView, OwnedView, acknowledge, get_bot, guard, handle_error, home_button, reply
 from bot.views.listings import ListingDraft, ListingFormView
 from bot.views.welcome import action_button, invite_url, persistent_view, register_action, show_screen
 
@@ -70,6 +70,7 @@ class ManageButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wp:mana
         return cls(int(match["gid"]), label=item.label, emoji=item.emoji, style=item.style)
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)  # before guard: it reads the database
         if not await guard(interaction):
             return
         try:
@@ -104,7 +105,13 @@ class ManagementButton(
     async def from_custom_id(cls, interaction, item, match):  # type: ignore[override]
         return cls(match["action"], int(match["gid"]))
 
+    # These open a modal, which needs an un-acknowledged interaction. Everything
+    # else acknowledges first so slow database work can never time the button out.
+    MODAL_ACTIONS = frozenset({"edit_ad"})
+
     async def callback(self, interaction: discord.Interaction) -> None:
+        if self.action not in self.MODAL_ACTIONS:
+            await acknowledge(interaction)
         if not await guard(interaction):
             return
         handlers = {
@@ -483,8 +490,19 @@ async def start_self_post(interaction: discord.Interaction, guild_id: int) -> No
 
 
 async def edit_ad(interaction: discord.Interaction, guild_id: int) -> None:
+    """Open the ad editor.
+
+    A modal cannot follow a deferral, so this path must stay fast: it reads the
+    listing row only - no Discord API call - and the full Manage Server check
+    runs on submit, before anything is written.
+    """
     bot = get_bot(interaction)
-    guild, listing, _contacts = await load_managed_listing(bot, guild_id, interaction.user.id)
+    async with bot.db.session() as session:
+        listing = await repository.get_listing(session, guild_id)
+        stored = await repository.get_guild(session, guild_id)
+    if listing is None or listing.status == ListingStatus.REMOVED:
+        raise NotFound(LISTING_GONE)
+    guild = stored or SimpleNamespace(name=f"Server {guild_id}")
 
     if listing.self_posted:
         await start_self_post(interaction, guild_id)

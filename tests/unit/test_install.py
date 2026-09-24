@@ -137,3 +137,57 @@ def test_server_only_commands_are_still_guild_only():
         cog = next(v for k, v in namespace.items() if k.endswith("Commands") and hasattr(v, "__cog_app_commands__"))
         command = next(c for c in cog.__cog_app_commands__ if c.callback.__name__ == callback)
         assert command.guild_only is True
+
+
+# ---------------------------------------------------------------- interaction acknowledgement
+
+
+def _persistent_callbacks():
+    """Every persistent (restart-safe) button, with the source of its callback."""
+    import inspect
+
+    from bot.core import persistent_items
+
+    for cls in persistent_items():
+        yield cls.__name__, inspect.getsource(cls.callback)
+
+
+def test_persistent_buttons_acknowledge_before_slow_work():
+    """Discord drops a component interaction after ~3s, so the ack comes first.
+
+    ActionButton defers inside its own dispatch; the rest call acknowledge()
+    before guard(), which reads the database.
+    """
+    for name, source in _persistent_callbacks():
+        acked = "acknowledge(interaction)" in source or "interaction.response.defer(" in source
+        assert acked, f"{name}.callback does slow work before acknowledging"
+        if "acknowledge(interaction)" in source and "guard(interaction)" in source:
+            assert source.index("acknowledge(interaction)") < source.index("guard(interaction)"), name
+
+
+def test_the_one_modal_button_is_never_deferred():
+    """A modal needs a fresh interaction, so that path stays fast instead."""
+    import inspect
+
+    from bot.views.management import ManagementButton, edit_ad
+
+    assert ManagementButton.MODAL_ACTIONS == frozenset({"edit_ad"})
+    source = inspect.getsource(ManagementButton.callback)
+    assert "if self.action not in self.MODAL_ACTIONS:" in source
+
+    # and it must not call Discord before the modal opens
+    editor = inspect.getsource(edit_ad)
+    assert "load_managed_listing" not in editor.split("async def submit")[0]
+    assert "load_managed_listing" in editor.split("async def submit")[1]  # still checked on write
+
+
+def test_every_persistent_button_survives_a_restart():
+    """Custom ids carry their own state, so old messages keep working."""
+    import re
+
+    from bot.core import persistent_items
+
+    for cls in persistent_items():
+        pattern = cls.__discord_ui_compiled_template__.pattern
+        assert pattern.startswith("wp:"), pattern
+        assert re.compile(pattern)  # parses, so from_custom_id can rebuild the button

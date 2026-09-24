@@ -58,3 +58,22 @@ async def test_no_duplicate_slash_commands(db):
             assert command.description, command.qualified_name
     finally:
         await bot.close()
+
+
+def test_slow_user_buttons_acknowledge_before_database_work():
+    """The flows users hit most often must acknowledge Discord before slow DB/API work."""
+    checks = {
+        "bot/views/verify.py": ["async def _continue", "await acknowledge(interaction)"],
+        "bot/views/partnership.py": ["class GuildPickerView", "await acknowledge(interaction)"],
+        "bot/views/network.py": ["async def _save", "await acknowledge(interaction)"],
+        "bot/views/listings.py": ["async def _verify_another", "await acknowledge(interaction)"],
+    }
+    for rel, needles in checks.items():
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        for needle in needles:
+            assert needle in text, f"{rel} is missing {needle!r}"
+
+
+def test_startup_force_refreshes_persistent_panels():
+    core = (ROOT / "bot" / "core.py").read_text(encoding="utf-8")
+    assert "await self.panels.restore_panels(force_edit=True)" in core

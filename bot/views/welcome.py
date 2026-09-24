@@ -21,7 +21,7 @@ from bot.services import listings as listing_service
 from bot.services import permissions
 from bot.utils.helpers import format_duration, format_members, listing_jump_url, truncate, utcnow
 from bot.utils.mentions import safe_allowed_mentions
-from bot.views.base import OwnedView, get_bot, guard, handle_error, reply
+from bot.views.base import OwnedView, acknowledge, get_bot, guard, handle_error, reply
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -263,15 +263,15 @@ def _hub_channel_url(bot: ParleyBot, channel_id: int | None) -> str | None:
 
 def welcome_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
     """Start Here is a tiny router, not another management dashboard."""
+    # Four routes, no more: the directory, partners, listing your own server,
+    # and adding Parley. Perks are explained in their own channel.
     directory_url = _hub_channel_url(bot, bot.runtime.hub.listings_channel_id)
     partner_url = _hub_channel_url(bot, bot.runtime.hub.looking_channel_id)
-    perks_url = _hub_channel_url(bot, bot.runtime.hub.perks_channel_id)
     view = persistent_view(
         discord.ui.Button(label="Server Directory", url=directory_url, row=0) if directory_url else None,
-        discord.ui.Button(label="Find a Partner", url=partner_url, row=0) if partner_url else None,
-        discord.ui.Button(label="Parley Perks", url=perks_url, row=0) if perks_url else None,
+        discord.ui.Button(label="Find Partners", url=partner_url, row=0) if partner_url else None,
         action_button(bot, "post", row=1),
-        add_bot_button(bot, row=1),  # Start Here still routes somewhere before the channels exist
+        add_bot_button(bot, row=1),
     )
     return templates.render(bot.runtime, "welcome"), view
 
@@ -322,13 +322,21 @@ async def show_screen(
     view: discord.ui.View | None = None,
     embed: discord.Embed | None = None,
 ) -> None:
-    """Replace the current menu when possible (keeps DMs clean), else reply."""
-    if not interaction.response.is_done() and _can_edit_in_place(interaction):
-        kwargs = {"content": content, "view": view, "allowed_mentions": safe_allowed_mentions()}
-        if embed is None:
-            kwargs["embeds"] = []
-        else:
-            kwargs["embed"] = embed
+    """Replace the current menu when possible (keeps DMs clean), else reply.
+
+    Top-level persistent buttons are deferred immediately so they cannot hit
+    Discord's short interaction deadline. A deferred menu should complete that
+    same response instead of creating a second follow-up message.
+    """
+    kwargs = {"content": content, "view": view, "allowed_mentions": safe_allowed_mentions()}
+    if embed is None:
+        kwargs["embeds"] = []
+    else:
+        kwargs["embed"] = embed
+    if interaction.response.is_done():
+        await interaction.edit_original_response(**kwargs)
+        return
+    if _can_edit_in_place(interaction):
         await interaction.response.edit_message(**kwargs)
         return
     await reply(interaction, content, embed=embed, view=view)
@@ -512,6 +520,7 @@ class DirectoryOverviewView(OwnedView):
         return embed
 
     async def _picked(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         from bot.views.management import show_management
 
         await show_management(interaction, int(self._select.values[0]))

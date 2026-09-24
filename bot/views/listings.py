@@ -20,6 +20,7 @@ from bot.config import templates
 from bot.utils.mentions import safe_allowed_mentions
 from bot.views import self_post
 from bot.views.base import (
+    acknowledge,
     GENERIC_ERROR,
     ConfirmView,
     OwnedView,
@@ -223,6 +224,7 @@ class PostServerPickerView(OwnedView):
         self.add_item(another)
 
     async def _verify_another(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         from bot.views.verify import start_verification
 
         self.stop()
@@ -273,6 +275,7 @@ class PostServerPickerView(OwnedView):
         return embed
 
     async def _picked(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         guild_id = int(self._select.values[0])
         guild = self.bot.get_guild(guild_id)
         if guild is None:
@@ -304,6 +307,7 @@ def _verify_another_button(row: int | None = None) -> discord.ui.Button:
     )
 
     async def callback(interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         from bot.views.verify import start_verification
 
         await start_verification(interaction)
@@ -413,11 +417,17 @@ async def open_verified_listing_form(interaction: discord.Interaction, verified)
     if existing is not None and existing.status in ListingStatus.LIVE:
         from bot.views.management import manage_button
 
-        await reply(
-            interaction,
-            "This server is already listed.",
-            view=persistent_view(manage_button(bot, verified.id, verified.name)),
-        )
+        if interaction.response.is_done():
+            await interaction.edit_original_response(
+                content="This server is already listed.", embeds=[],
+                view=persistent_view(manage_button(bot, verified.id, verified.name)),
+            )
+        else:
+            await reply(
+                interaction,
+                "This server is already listed.",
+                view=persistent_view(manage_button(bot, verified.id, verified.name)),
+            )
         return
 
     draft = ListingDraft(contacts=[user_id])
@@ -432,7 +442,10 @@ async def open_verified_listing_form(interaction: discord.Interaction, verified)
         bot, user_id, verified.id, verified.name, draft,
         mode="create", in_dm=interaction.guild is None, verified=verified,
     )
-    await reply(interaction, form.render(), view=form)
+    if interaction.response.is_done():
+        await interaction.edit_original_response(content=form.render(), embeds=[], view=form)
+    else:
+        await reply(interaction, form.render(), view=form)
 
 
 async def open_listing_form(interaction: discord.Interaction, guild: discord.Guild, *, edit_message: bool = False) -> None:
@@ -448,7 +461,11 @@ async def open_listing_form(interaction: discord.Interaction, guild: discord.Gui
     if existing is not None and existing.status in ListingStatus.LIVE:
         from bot.views.management import manage_button  # local import: management imports this module
 
-        await reply(interaction, "This server is already listed.", view=persistent_view(manage_button(bot, guild.id, guild.name)))
+        view = persistent_view(manage_button(bot, guild.id, guild.name))
+        if interaction.response.is_done():
+            await interaction.edit_original_response(content="This server is already listed.", embeds=[], view=view)
+        else:
+            await reply(interaction, "This server is already listed.", view=view)
         return
 
     draft = ListingDraft(contacts=[user_id])
@@ -460,8 +477,8 @@ async def open_listing_form(interaction: discord.Interaction, guild: discord.Gui
         draft.invite_url = existing.invite_url
 
     form = ListingFormView(bot, user_id, guild.id, guild.name, draft, mode="create", in_dm=interaction.guild is None)
-    if edit_message:
-        await interaction.response.edit_message(content=form.render(), embeds=[], view=form)
+    if edit_message or interaction.response.is_done():
+        await interaction.edit_original_response(content=form.render(), embeds=[], view=form)
     else:
         await reply(interaction, form.render(), view=form)
 
@@ -1051,12 +1068,13 @@ class InviteHelpView(OwnedView):
         return f"⚠️ {notice}\n\n{text}" if notice else text
 
     async def _picked(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         channel = self.guild.get_channel(int(self._select.values[0]))
         if not isinstance(channel, discord.TextChannel):
-            await interaction.response.edit_message(content=self.render("That channel no longer exists."), view=self)
+            await interaction.edit_original_response(content=self.render("That channel no longer exists."), view=self)
             return
         if not channel.permissions_for(self.guild.me).create_instant_invite:
-            await interaction.response.edit_message(
+            await interaction.edit_original_response(
                 content=self.render(f"Parley needs **Create Invite** in #{channel.name}. Give it that permission or paste an invite."),
                 view=self,
             )
@@ -1065,7 +1083,7 @@ class InviteHelpView(OwnedView):
             invite = await channel.create_invite(max_age=0, max_uses=0, unique=False, reason="Parley listing invite")
         except discord.HTTPException as exc:
             log.info("Invite creation failed guild_id=%s channel=%s: %s", self.guild.id, channel.id, exc)
-            await interaction.response.edit_message(content=self.render("Discord didn't allow that invite. Try another channel."), view=self)
+            await interaction.edit_original_response(content=self.render("Discord didn't allow that invite. Try another channel."), view=self)
             return
         self.form.draft.invite_url = listing_service.canonical_invite(invite.code)
         self.stop()
@@ -1073,12 +1091,13 @@ class InviteHelpView(OwnedView):
 
     async def _paste(self, interaction: discord.Interaction) -> None:
         async def submitted(inter: discord.Interaction, raw: str) -> None:
+            await acknowledge(inter)
             try:
                 if not raw.strip():
                     raise ValidationError("Please paste an invite link.")
                 self.form.draft.invite_url = await resolve_invite(self.form.bot, self.guild, raw)
             except ParleyError as exc:
-                await inter.response.edit_message(content=self.render(exc.user_message), view=self)
+                await inter.edit_original_response(content=self.render(exc.user_message), view=self)
                 return
             self.stop()
             await self._continue(inter)
@@ -1298,6 +1317,7 @@ class ReviewButton(
         return cls(int(match["gid"]), match["action"], int(rev) if rev is not None else None)
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         if not await guard(interaction):
             return
         try:

@@ -14,7 +14,7 @@ from bot.services.errors import LISTING_GONE, NotFound, ValidationError
 from bot.utils.helpers import listing_jump_url, truncate, utcnow
 from bot.utils.mentions import safe_allowed_mentions
 from bot.views import self_post
-from bot.views.base import ConfirmView, OwnedView, get_bot, handle_error, home_button, reply
+from bot.views.base import ConfirmView, OwnedView, acknowledge, get_bot, handle_error, home_button, reply
 from bot.views.welcome import action_button, persistent_view, register_action, show_screen
 
 if TYPE_CHECKING:
@@ -249,13 +249,12 @@ async def _adopt_partner_post(
 
 
 async def open_partner_post_window(interaction: discord.Interaction, guild_id: int) -> None:
+    await acknowledge(interaction)
     bot = get_bot(interaction)
     guild, _listing = await _load(bot, guild_id, interaction.user.id)
     channel = bot.panels.looking_channel()
     if channel is None:
         raise ValidationError("The find-partners channel isn't set up yet.")
-
-    await interaction.response.defer(ephemeral=True, thinking=True)
 
     async def accepted(text: str, message: discord.Message) -> None:
         await _adopt_partner_post(bot, guild_id, text, message, interaction.user.id)

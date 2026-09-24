@@ -21,6 +21,7 @@ from bot.utils.helpers import format_members, format_minimum, listing_jump_url, 
 from bot.utils.mentions import advertisement_kwargs
 from bot.config import templates
 from bot.views.base import (
+    acknowledge,
     MENU_TIMEOUT_SECONDS,
     OwnedView,
     deliver_dms,
@@ -123,6 +124,7 @@ class RequestPartnershipButton(discord.ui.DynamicItem[discord.ui.Button], templa
         return cls(int(match["gid"]), label=item.label, emoji=item.emoji, style=item.style)
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)  # the prompt is a view, so deferring is safe
         if not await guard(interaction):
             return
         try:
@@ -149,6 +151,7 @@ class ViewAdButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wp:ad:(
         return cls(int(match["gid"]), label=item.label, emoji=item.emoji)
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         if not await guard(interaction):
             return
         try:
@@ -178,6 +181,7 @@ class RequestResponseButton(
         return cls(int(match["rid"]), match["action"] == "accept", label=item.label)
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         if not await guard(interaction):
             return
         try:
@@ -241,6 +245,7 @@ class GuildPickerView(OwnedView):
         self.add_item(select)
 
     async def _picked(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         await self._on_pick(interaction, int(self._select.values[0]))
 
 
@@ -248,6 +253,11 @@ class GuildPickerView(OwnedView):
 
 
 async def start_request_flow(interaction: discord.Interaction, target_id: int) -> None:
+    """Request a partnership from a public listing.
+
+    The first screen is a view, never a modal, so the button can acknowledge
+    Discord straight away and do its database work afterwards.
+    """
     bot = get_bot(interaction)
     async with bot.db.session() as session:
         target = listing_service.require_visible(await repository.get_listing(session, target_id))
@@ -266,24 +276,12 @@ async def start_request_flow(interaction: discord.Interaction, target_id: int) -
         )
         return
 
-    def modal_for(source_id: int) -> ShortMessageModal:
-        async def submit(inter: discord.Interaction, message: str) -> None:
-            await submit_request(inter, source_id, target_id, message)
-
-        return ShortMessageModal(
-            title=f"Partner with {target_name}",
-            label="Message (optional)",
-            placeholder="We're interested in partnering!",
-            max_length=bot.runtime.partnerships.max_message_length or 1,
-            on_submit=submit,
-        )
-
     if len(sources) == 1:
-        await interaction.response.send_modal(modal_for(sources[0].guild_id))
+        await RequestPromptView(bot, interaction.user.id, sources[0].guild_id, target_id, target_name).show(interaction)
         return
 
     async def picked(inter: discord.Interaction, source_id: int) -> None:
-        await inter.response.send_modal(modal_for(source_id))
+        await RequestPromptView(bot, inter.user.id, source_id, target_id, target_name).show(inter)
 
     options = [(s.guild_id, guild_name(guilds, s.guild_id)) for s in sources]
     await reply(
@@ -658,6 +656,7 @@ class RequestInboxView(OwnedView):
         self.add_item(home_button(bot, row=1))
 
     async def _selected(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         request_id = int(interaction.data["values"][0])  # type: ignore[index]
         async with self.bot.db.session() as session:
             request = await repository.get_request(session, request_id)
@@ -684,7 +683,7 @@ class RequestInboxView(OwnedView):
 
         back.callback = go_back  # type: ignore[method-assign]
         view.add_item(back)
-        await interaction.response.edit_message(content=None, embed=embed, view=view)
+        await interaction.edit_original_response(content=None, embed=embed, view=view)
 
 
 # ---------------------------------------------------------------- find partners
@@ -766,6 +765,7 @@ class CategoryView(OwnedView):
         await self._start(interaction, self._select.values[0])
 
     async def _start(self, interaction: discord.Interaction, category: str) -> None:
+        await acknowledge(interaction)
         self.stop()
         await FinderView(self.bot, self.owner_id, category=category, source_id=self.source_id).show(interaction)
 
@@ -996,6 +996,7 @@ class FinderView(OwnedView):
         await _edit_or_reply(interaction, None, self, embed=self.result_embed(notice))
 
     async def _next(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         await self.show(interaction)
 
     async def _request(self, interaction: discord.Interaction) -> None:
@@ -1007,7 +1008,7 @@ class FinderView(OwnedView):
                 view=persistent_view(action_button(self.bot, "post")),
             )
             return
-        await RequestPromptView(self, self.current.guild_id, self.current_name).show(interaction)
+        await RequestPromptView.for_finder(self, self.current.guild_id, self.current_name).show(interaction)
 
     async def _back(self, interaction: discord.Interaction) -> None:
         self.stop()
@@ -1017,8 +1018,19 @@ class FinderView(OwnedView):
 class RequestPromptView(OwnedView):
     """A message is optional, so sending is one press."""
 
-    def __init__(self, finder: FinderView, target_id: int, target_name: str) -> None:
-        super().__init__(finder.owner_id)
+    def __init__(
+        self,
+        bot: ParleyBot,
+        owner_id: int,
+        source_id: int,
+        target_id: int,
+        target_name: str,
+        *,
+        finder: FinderView | None = None,
+    ) -> None:
+        super().__init__(owner_id)
+        self.bot = bot
+        self.source_id = source_id
         self.finder = finder
         self.target_id = target_id
         self.target_name = target_name
@@ -1028,17 +1040,22 @@ class RequestPromptView(OwnedView):
         add.callback = self._add_message  # type: ignore[method-assign]
         self.add_item(send)
         self.add_item(add)
-        back = discord.ui.Button(label="Back", style=discord.ButtonStyle.secondary, row=1)
-        back.callback = self._back  # type: ignore[method-assign]
-        self.add_item(back)
+        if finder is not None:  # nothing to go back to when it came from a listing
+            back = discord.ui.Button(label="Back", style=discord.ButtonStyle.secondary, row=1)
+            back.callback = self._back  # type: ignore[method-assign]
+            self.add_item(back)
+
+    @classmethod
+    def for_finder(cls, finder: FinderView, target_id: int, target_name: str) -> "RequestPromptView":
+        assert finder.source_id is not None
+        return cls(finder.bot, finder.owner_id, finder.source_id, target_id, target_name, finder=finder)
 
     async def show(self, interaction: discord.Interaction) -> None:
         await _edit_or_reply(interaction, f"## Partner with {self.target_name}\nAdd a message?", self)
 
     async def _send(self, interaction: discord.Interaction, message: str) -> None:
         self.stop()
-        assert self.finder.source_id is not None
-        await submit_request(interaction, self.finder.source_id, self.target_id, message, finder=self.finder)
+        await submit_request(interaction, self.source_id, self.target_id, message, finder=self.finder)
 
     async def _send_plain(self, interaction: discord.Interaction) -> None:
         await self._send(interaction, "")
@@ -1052,13 +1069,14 @@ class RequestPromptView(OwnedView):
                 title=f"Partner with {truncate(self.target_name, 30)}",
                 label="Message (optional)",
                 placeholder="We're interested in partnering!",
-                max_length=self.finder.bot.runtime.partnerships.max_message_length or 1,
+                max_length=self.bot.runtime.partnerships.max_message_length or 1,
                 on_submit=submitted,
             )
         )
 
     async def _back(self, interaction: discord.Interaction) -> None:
         self.stop()
+        assert self.finder is not None
         await self.finder.show(interaction)
 
 
@@ -1121,6 +1139,7 @@ class ExhaustedView(OwnedView):
         return self.embed(first).description or ""
 
     async def _past(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         self.stop()
         await FinderView(
             self.bot, self.owner_id, category=self.category, source_id=self.source_id,
@@ -1141,6 +1160,7 @@ class ExhaustedView(OwnedView):
         await CategoryView(self.bot, self.owner_id, source_id=self.source_id).show(interaction)
 
     async def _again(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         self.stop()  # reset the seen list and reshuffle
         await FinderView(self.bot, self.owner_id, category=self.category, source_id=self.source_id).show(interaction)
 

@@ -195,8 +195,12 @@ async def test_empty_search_says_so_instead_of_looping(db, config):
 async def test_request_prompt_does_not_require_a_message(db):
     bot = FakeBot(db)
     finder = FinderView(bot, ADMIN_ID, category=ANY, source_id=MAIN)
-    view = RequestPromptView(finder, 5, "Night Owls")
+    view = RequestPromptView.for_finder(finder, 5, "Night Owls")
     assert labels(view) == ["Send Request", "Add Message", "Back"]
+
+    # From a public listing there is nothing to go back to, so Back is dropped.
+    from_listing = RequestPromptView(bot, ADMIN_ID, MAIN, 5, "Night Owls")
+    assert labels(from_listing) == ["Send Request", "Add Message"]
 
 
 async def test_multiple_servers_use_one_picker_not_button_grid(db, config):

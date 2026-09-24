@@ -16,7 +16,7 @@ import discord
 from bot.services import verification
 from bot.services.verification import VerifiedGuild
 from bot.utils.helpers import utcnow
-from bot.views.base import OwnedView, get_bot, home_button, reply
+from bot.views.base import OwnedView, acknowledge, get_bot, home_button, reply
 from bot.views.welcome import add_bot_button, invite_url
 
 if TYPE_CHECKING:
@@ -35,12 +35,33 @@ UNAVAILABLE = (
 )
 
 
+async def _show(interaction: discord.Interaction, content: str | None = None, *, embed: discord.Embed | None = None, view: discord.ui.View | None = None) -> None:
+    """Update the current ephemeral flow after a defer; otherwise answer normally."""
+    if interaction.response.is_done():
+        kwargs = {"content": content, "view": view}
+        if embed is None:
+            kwargs["embeds"] = []
+        else:
+            kwargs["embed"] = embed
+        await interaction.edit_original_response(**kwargs)
+        return
+    if interaction.message is not None and (interaction.guild is None or interaction.message.flags.ephemeral):
+        kwargs = {"content": content, "view": view}
+        if embed is None:
+            kwargs["embeds"] = []
+        else:
+            kwargs["embed"] = embed
+        await interaction.response.edit_message(**kwargs)
+        return
+    await reply(interaction, content, embed=embed, view=view)
+
+
 async def start_verification(interaction: discord.Interaction, *, notice: str | None = None) -> None:
     """The screen shown when Parley has nothing installed to verify against."""
     bot = get_bot(interaction)
     if not bot.settings.oauth_enabled or not (bot.settings.oauth_client_id or bot.application_id):
         # Degrade honestly rather than pretending the button works.
-        await reply(interaction, f"## {TITLE}\n{UNAVAILABLE}")
+        await _show(interaction, f"## {TITLE}\n{UNAVAILABLE}")
         return
 
     async with bot.db.session() as session:
@@ -53,7 +74,7 @@ async def start_verification(interaction: discord.Interaction, *, notice: str | 
         state=state,
     )
     view = VerifyView(bot, interaction.user.id, url)
-    await reply(interaction, view.render(notice), view=view)
+    await _show(interaction, view.render(notice), view=view)
 
 
 class VerifyView(OwnedView):
@@ -80,6 +101,7 @@ class VerifyView(OwnedView):
         return f"⚠️ {notice}\n\n{text}" if notice else text
 
     async def _continue(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         await show_verified_servers(interaction)
 
 
@@ -121,7 +143,7 @@ async def show_verified_servers(interaction: discord.Interaction) -> None:
         description="Choose a server you manage.",
         color=bot.runtime.bot.color_primary,
     )
-    await reply(
+    await _show(
         interaction,
         embed=embed,
         view=GuildPickerView(interaction.user.id, [(g.id, g.name) for g in guilds], picked),
@@ -149,9 +171,10 @@ class NoServersView(OwnedView):
         )
 
     async def show(self, interaction: discord.Interaction) -> None:
-        await reply(interaction, self.render(), view=self)
+        await _show(interaction, self.render(), view=self)
 
     async def _again(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         self.stop()
         await start_verification(interaction)
 

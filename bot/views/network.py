@@ -11,7 +11,7 @@ from bot.database import repository
 from bot.services import network, permissions
 from bot.services.errors import MANAGE_SERVER_REQUIRED, PermissionDenied, ValidationError, ParleyError
 from bot.utils.helpers import format_duration, utcnow
-from bot.views.base import OwnedView, get_bot, home_button, reply
+from bot.views.base import OwnedView, acknowledge, get_bot, home_button, reply
 from bot.views.partnership import GuildPickerView
 from bot.views.welcome import add_bot_button, persistent_view, register_action
 
@@ -81,8 +81,8 @@ async def open_network_setup(interaction: discord.Interaction, guild: discord.Gu
         enabled=bool(current and current.enabled),
         auto_partner=bool(current and current.auto_partner),
     )
-    if edit_message:
-        await interaction.response.edit_message(content=view.render(), view=view)
+    if edit_message or interaction.response.is_done():
+        await interaction.edit_original_response(content=view.render(), view=view)
     else:
         await reply(interaction, view.render(), view=view)
 
@@ -193,7 +193,10 @@ class NetworkSetupView(OwnedView):
 
     async def _rerender(self, interaction: discord.Interaction, notice: str | None = None) -> None:
         self._build()
-        await interaction.response.edit_message(content=self.render(notice), view=self)
+        if interaction.response.is_done():
+            await interaction.edit_original_response(content=self.render(notice), view=self)
+        else:
+            await interaction.response.edit_message(content=self.render(notice), view=self)
 
     async def _on_channel(self, interaction: discord.Interaction) -> None:
         self.channel_id = self._channel.values[0].id
@@ -219,6 +222,7 @@ class NetworkSetupView(OwnedView):
             raise ValidationError(f"Parley needs {', '.join(missing)} in {channel.mention}.")
 
     async def _save(self, interaction: discord.Interaction, enabled: bool) -> None:
+        await acknowledge(interaction)
         bot = self.bot
         try:
             await permissions.require_manager(bot, self.guild.id, interaction.user.id)
@@ -263,6 +267,7 @@ class NetworkSetupView(OwnedView):
         await self._save(interaction, False)
 
     async def _toggle_auto(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         try:
             await permissions.require_manager(self.bot, self.guild.id, interaction.user.id)
             self._check_channel()

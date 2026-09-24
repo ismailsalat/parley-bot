@@ -58,9 +58,10 @@ async def test_start_here_panel_stays_simple_and_optional_links_still_work_elsew
             main_guild_id=1, welcome_channel_id=1, listings_channel_id=2, looking_channel_id=3, perks_channel_id=4
         ),
     )
-    # Start Here routes to the channels; Partner Posts live behind Find a Partner now that they are Connected-only.
+    # Start Here is a four-button router: perks get explained in their own channel.
     _content, view = welcome_panel(UIBot(runtime))
-    assert labels(view) == ["Server Directory", "Find a Partner", "Parley Perks", "Post Server Ad", "Add Parley"]
+    assert labels(view) == ["Server Directory", "Find Partners", "Post Server Ad", "Add Parley"]
+    assert len(labels(view)) <= 4
 
     # Before /setup runs there are no channel links, but the router is still usable.
     _content, bare = welcome_panel(UIBot())

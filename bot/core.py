@@ -191,7 +191,7 @@ class ParleyBot(commands.Bot):
         # three-minute, one-message posting window.
         await self.panels.ensure_directory_locked()
         try:
-            await self.panels.restore_panels()
+            await self.panels.restore_panels(force_edit=True)
         except discord.HTTPException as exc:
             log.error("Could not restore panels: %s", exc)
         await self._startup_self_check()

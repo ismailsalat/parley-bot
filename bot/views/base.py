@@ -178,6 +178,17 @@ def user_label(bot: ParleyBot, user_id: int) -> str:
     return f"<@{user_id}> ({user.name})" if user else f"<@{user_id}>"
 
 
+async def acknowledge(interaction: discord.Interaction, *, thinking: bool = True) -> None:
+    """Tell Discord we heard the click, before doing anything slow.
+
+    Discord drops a component interaction after about three seconds, so any
+    callback that reads the database must land here first. Safe to call twice.
+    Never call it before opening a modal: a modal needs a fresh interaction.
+    """
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=interaction.guild is not None, thinking=thinking)
+
+
 async def deliver_dms(
     bot: ParleyBot, user_ids: list[int], *, actor_id: int | None, **kwargs: Any
 ) -> tuple[int, int]:
