@@ -19,6 +19,8 @@ class NetworkCommands(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="network", description="Receive partner ads in a channel of your choice (optional).")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def network(self, interaction: discord.Interaction) -> None:

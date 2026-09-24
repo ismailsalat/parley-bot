@@ -19,6 +19,8 @@ class FindCommands(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="find", description="Find servers to partner with.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     async def find(self, interaction: discord.Interaction) -> None:
         await start_find_flow(interaction)
 

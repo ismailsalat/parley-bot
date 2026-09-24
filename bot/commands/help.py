@@ -28,6 +28,8 @@ class HelpCommands(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="help", description="How Parley works.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     async def help(self, interaction: discord.Interaction) -> None:
         _content, view = control_panel(self.bot)
 

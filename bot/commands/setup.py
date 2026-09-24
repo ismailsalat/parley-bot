@@ -19,6 +19,8 @@ class SetupCommands(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="setup", description="Owner only: make this server your Parley hub.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def setup_command(self, interaction: discord.Interaction) -> None:

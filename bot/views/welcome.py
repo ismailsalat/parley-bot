@@ -129,12 +129,22 @@ SETUP_PERMISSIONS = PUBLIC_PERMISSIONS | discord.Permissions(
 )
 
 
+# Parley is a server app: it is installed *to a guild* and keeps a bot user there,
+# because the Connected perks need it inside the server. `bot` is the scope that makes
+# Discord perform a guild install; `applications.commands` registers the slash commands.
+INSTALL_SCOPES = ("bot", "applications.commands")
+
+
 def invite_url(bot: ParleyBot, *, setup: bool = False) -> str | None:
-    """The real OAuth install link, built from the application ID (never typed by hand)."""
+    """The one install link Parley hands out, built from the application ID.
+
+    Every "Add Parley" button goes through here, so there is a single install path
+    and no hand-typed or legacy URL can drift into the product.
+    """
     if bot.application_id is None:
         return None
     permissions = SETUP_PERMISSIONS if setup else PUBLIC_PERMISSIONS
-    return discord.utils.oauth_url(bot.application_id, permissions=permissions, scopes=("bot", "applications.commands"))
+    return discord.utils.oauth_url(bot.application_id, permissions=permissions, scopes=INSTALL_SCOPES)
 
 
 def setup_invite_url(bot: ParleyBot) -> str | None:

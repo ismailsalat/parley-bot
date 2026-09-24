@@ -22,6 +22,8 @@ class ManageCommands(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="manage", description="Edit, Relist or remove your Parley listing.")
+    @app_commands.allowed_installs(guilds=True, users=False)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     async def manage(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild
         member = interaction.user

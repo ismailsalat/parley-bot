@@ -52,6 +52,36 @@ After that, all configuration happens in Discord. No more visits to Railway Vari
 
 If the DM doesn't arrive, use **OAuth2 → URL Generator** with scopes `bot` + `applications.commands` and the permissions below.
 
+### How Parley is installed
+
+Parley is a **guild install**: it is added to a server and keeps a bot user there, because the
+Connected perks (Find a Partner, Partner Posts, the Parley Network, Auto Partner, faster Relists,
+live metadata, in-server partnership actions) need it inside the server. It is never a user install.
+
+Every **Add Parley** button comes from one builder, `invite_url()` in `bot/views/welcome.py`, so
+there is a single install link and no hand-typed or legacy URL:
+
+```
+https://discord.com/oauth2/authorize?client_id=<app id>&scope=bot+applications.commands&permissions=<set>
+```
+
+Match these in **Developer Portal → your app → Installation**, so the portal's own install link
+agrees with the one Parley hands out:
+
+| Setting | Value | Why |
+|---|---|---|
+| Installation Contexts | **Guild Install** ticked, **User Install** unticked | Parley manages servers; a user install has no bot user, so no Connected perk works |
+| Install Link | **Discord Provided Link** | Gives the app an in-client **Add App** entry; Parley's own buttons keep working either way |
+| Default Install Settings → Guild Install → Scopes | `bot`, `applications.commands` | `bot` performs the guild install; the other registers the slash commands |
+| Default Install Settings → Guild Install → Permissions | the table below | Parley never asks for Administrator |
+
+The commands declare the same policy in code (`allowed_installs` / `allowed_contexts`): `/connect`,
+`/network` and `/setup` stay server-only, while `/find`, `/manage` and `/help` also work in a DM
+with Parley, which the DM home relies on.
+
+**Discord's "Add your first app" server checklist is Discord's own UI, not Parley's.** No API lets
+an app tick it, and Parley does not fake it. See `AUDIT.md`.
+
 **Permissions Parley asks for (never Administrator):**
 
 | Permission | Why |

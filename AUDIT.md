@@ -189,3 +189,35 @@ A second pass reviewed the normal-user flow across listings, management, discove
 - **Discovery fairness:** removed the old newest-200 candidate ceiling. Finder pages through the eligible database set and uses reservoir sampling, so older eligible listings do not become invisible as Parley grows.
 - **Past partners:** Show Past Partners is now truly past-only instead of resetting into a mixed pool that could repeat fresh results.
 - **Copy:** default management wording is **View Ad**, not the ambiguous **View Listing**.
+
+---
+
+# Audit: Discord's "Add your first app" checklist
+
+**Question:** the server checklist still shows "Add your first app" although Parley is installed
+and working.
+
+**Verified against this repository (not assumed):**
+- One builder, `invite_url()` in `bot/views/welcome.py`, produces every install link:
+  `https://discord.com/oauth2/authorize?client_id=...&scope=bot+applications.commands&permissions=...`.
+- Searching `bot/` for `oauth_url(` and `discord.com/oauth2/authorize` returns that file only, so
+  there is no legacy, hand-typed or second install path. A test now enforces this.
+- That URL *is* the current guild-install flow: the `bot` scope is what makes Discord install the
+  app into the server. `discord.utils.oauth_url` in discord.py 2.7.1 has no `integration_type`
+  parameter, so nothing was missing from the link.
+
+**Conclusion:** nothing in Parley prevents the checklist from completing, and nothing in Parley can
+complete it. That card is server UI owned by Discord and its state is not exposed to apps. The
+guild onboarding API (`/guilds/{id}/onboarding`) is *member* onboarding (prompts, default channels),
+not the admin getting-started checklist, so it cannot tick it. No mechanism was faked.
+
+**Changes made, because they were genuinely missing:**
+- Parley never declared an installation context. The commands now say so explicitly with
+  `app_commands.allowed_installs(guilds=True, users=False)` and matching `allowed_contexts`, so the
+  code agrees with the Developer Portal instead of leaving it implicit. DM access is unchanged:
+  `/find`, `/manage`, `/help` keep working in a DM with Parley; `/connect`, `/network`, `/setup`
+  stay `guild_only()` as before.
+- `INSTALL_SCOPES` names the scopes in one place and documents why `bot` is required.
+- `tests/unit/test_install.py` pins the authorize URL, both permission sets, the "no link before
+  login" behaviour, that every Add Parley button uses the one builder, that only one file may build
+  an install URL, and the per-command install contexts.
