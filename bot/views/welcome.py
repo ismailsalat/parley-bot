@@ -21,7 +21,7 @@ from bot.services import listings as listing_service
 from bot.services import permissions
 from bot.utils.helpers import format_duration, format_members, listing_jump_url, truncate, utcnow
 from bot.utils.mentions import safe_allowed_mentions
-from bot.views.base import OwnedView, acknowledge, get_bot, guard, handle_error, home_button, reply
+from bot.views.base import OwnedView, acknowledge, get_bot, guard, handle_error, home_button, reply, edit_response
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -424,7 +424,7 @@ async def show_screen(
         await interaction.edit_original_response(**kwargs)
         return
     if _can_edit_in_place(interaction):
-        await interaction.response.edit_message(**kwargs)
+        await edit_response(interaction, **kwargs)
         return
     await reply(interaction, content, embed=embed, view=view)
 
@@ -615,12 +615,12 @@ class DirectoryOverviewView(OwnedView):
     async def _previous_page(self, interaction: discord.Interaction) -> None:
         self.page = max(0, self.page - 1)
         self._build_controls()
-        await interaction.response.edit_message(content=None, embed=self.render(), view=self)
+        await edit_response(interaction, content=None, embed=self.render(), view=self)
 
     async def _next_page(self, interaction: discord.Interaction) -> None:
         self.page = min(self.pages - 1, self.page + 1)
         self._build_controls()
-        await interaction.response.edit_message(content=None, embed=self.render(), view=self)
+        await edit_response(interaction, content=None, embed=self.render(), view=self)
 
 
 @register_action("directory")

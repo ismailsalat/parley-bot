@@ -12,6 +12,7 @@ from bot.services import moderation
 from bot.services.errors import ValidationError
 from bot.utils.helpers import format_members, format_minimum, truncate
 from bot.views.admin.common import ConfirmPage, Field, FieldsModal, Page
+from bot.views.base import acknowledge, reply
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -226,7 +227,12 @@ class ServerPage(Page):
             stored = await repository.get_guild(session, self.guild_id)
         name = stored.name if stored else str(self.guild_id)
         payload = review_payload(self.bot, self.listing, name, stored.member_count if stored else None)
-        await interaction.response.send_message(ephemeral=True, **payload)
+        await reply(
+            interaction,
+            payload.get("content"),
+            embeds=payload.get("embeds"),
+            view=payload.get("view"),
+        )
 
     def _action(self, action: str):
         questions = {
@@ -239,7 +245,7 @@ class ServerPage(Page):
         question, label = questions[action]
 
         async def apply(interaction: discord.Interaction) -> None:
-            await interaction.response.defer()
+            await acknowledge(interaction, thinking=False)
             await apply_staff_action(self.bot, action, self.guild_id, interaction.user.id)
             await self._again().show(interaction, f"✅ Done: {label.lower()}.")
 

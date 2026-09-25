@@ -16,7 +16,7 @@ from bot.services import configuration, permissions, testmode
 from bot.services import setup as setup_service
 from bot.services.errors import ValidationError
 from bot.views.admin.common import ConfirmPage, Page, PageFactory, channel_mention
-from bot.views.base import get_bot, reply
+from bot.views.base import acknowledge, get_bot, reply, edit_response
 from bot.views.welcome import register_action, setup_invite_url
 
 if TYPE_CHECKING:
@@ -156,7 +156,7 @@ class SetupWelcome(Page):
         if not setup_service.can_auto_setup(self.guild):
             await NoManageChannelsPage(self.bot, self.owner_id, self.guild).show(interaction)
             return
-        await interaction.response.edit_message(content="⏳ Setting up your channels…", view=None, embeds=[])
+        await edit_response(interaction, content="⏳ Setting up your channels…", view=None, embeds=[])
         staff_roles = [r for r in (self.guild.get_role(rid) for rid in self.bot.runtime.hub.staff_role_ids) if r]
         result = await setup_service.automatic_setup(self.guild, staff_roles)
         await save_hub(
@@ -172,7 +172,7 @@ class SetupWelcome(Page):
 
     async def _cancel(self, interaction: discord.Interaction) -> None:
         self.stop()
-        await interaction.response.edit_message(content="Setup cancelled. Run **/setup** any time.", view=None, embeds=[])
+        await edit_response(interaction, content="Setup cancelled. Run **/setup** any time.", view=None, embeds=[])
 
 
 class MoveHubPage(Page):
@@ -197,7 +197,7 @@ class MoveHubPage(Page):
 
     async def _cancel(self, interaction: discord.Interaction) -> None:
         self.stop()
-        await interaction.response.edit_message(content="Nothing was changed.", view=None, embeds=[])
+        await edit_response(interaction, content="Nothing was changed.", view=None, embeds=[])
 
 
 class NoManageChannelsPage(Page):
@@ -308,7 +308,7 @@ class ChannelPicker(Page):
         ids = [v for v in self.chosen.values() if v]
         if len(ids) != len(set(ids)):
             raise ValidationError("Please use a different channel for each purpose.")
-        await interaction.response.defer()
+        await acknowledge(interaction, thinking=False)
         await save_hub(self.bot, self.guild, dict(self.chosen), actor_id=interaction.user.id)
         if self.chosen.get("benefits_channel_id"):
             await ReadyPage(self.bot, self.owner_id, self.guild).show(interaction)
@@ -419,7 +419,7 @@ class PerksPlacementPage(Page):
     async def _use_selected(self, interaction: discord.Interaction) -> None:
         if not self.selected_channel_id:
             raise ValidationError("Choose a channel first.")
-        await interaction.response.defer(ephemeral=True)
+        await acknowledge(interaction, thinking=False)
         await _save_perks_channel(
             self.bot, self.guild, self.selected_channel_id, actor_id=interaction.user.id
         )
@@ -485,7 +485,7 @@ class CreatePerksChannelPage(Page):
         category = self.guild.get_channel(self.category_id or 0) if self.category_id else None
         if category is not None and not isinstance(category, discord.CategoryChannel):
             raise ValidationError("Choose a valid category.")
-        await interaction.response.defer(ephemeral=True)
+        await acknowledge(interaction, thinking=False)
         slot = setup_service.SLOT_BY_KEY["benefits_channel_id"]
         existing = setup_service.find_existing(self.guild, slot)
         if existing is not None:
@@ -589,7 +589,7 @@ class GoLivePage(Page):
         self.button("Cancel", self._go_back, style=discord.ButtonStyle.secondary, row=1)
 
     async def _live(self, interaction: discord.Interaction, keep: bool) -> None:
-        await interaction.response.defer()
+        await acknowledge(interaction, thinking=False)
         note = await testmode.go_live(self.bot, keep_listings=keep, actor_id=interaction.user.id)
         from bot.views.admin.settings import SettingsHome
 

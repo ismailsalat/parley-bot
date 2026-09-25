@@ -415,7 +415,7 @@ async def delete_partner_post(interaction: discord.Interaction, guild_id: int) -
         return
 
     done = confirm.interaction
-    await done.response.defer()
+    await acknowledge(done, thinking=False)
     await permissions.require_manager(bot, guild_id, done.user.id)
     channel_id, message_id, controls_id = await _clear_partner_fields(bot, guild_id, actor_id=done.user.id)
     await bot.panels.delete_listing_message(channel_id, message_id)

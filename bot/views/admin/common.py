@@ -18,7 +18,7 @@ from bot.services import permissions
 from bot.services.errors import ParleyError
 from bot.utils.emoji import is_valid_emoji
 from bot.utils.mentions import safe_allowed_mentions
-from bot.views.base import OwnedView, handle_error, reply
+from bot.views.base import OwnedView, arm_interaction_ack_watchdog, handle_error, reply, edit_response
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -120,7 +120,7 @@ class Page(OwnedView):
         if interaction.response.is_done():
             await interaction.edit_original_response(**kwargs)
         elif interaction.message is not None and (interaction.guild is None or interaction.message.flags.ephemeral):
-            await interaction.response.edit_message(**kwargs)
+            await edit_response(interaction, **kwargs)
         else:
             kwargs.pop("embeds")
             if embed:
@@ -172,6 +172,7 @@ class FieldsModal(discord.ui.Modal):
             self.add_item(text_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        arm_interaction_ack_watchdog(interaction)
         await self._callback(interaction, {key: item.value for key, item in self._inputs.items()})
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:

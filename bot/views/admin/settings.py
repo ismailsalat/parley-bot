@@ -11,7 +11,7 @@ import discord
 from bot.services import configuration, health, permissions
 from bot.services.setup import SLOTS
 from bot.views.admin.common import ConfirmPage, Page, _HomeMarker, channel_mention
-from bot.views.base import get_bot, home_button, reply
+from bot.views.base import acknowledge, get_bot, home_button, reply
 from bot.views.welcome import register_action
 
 if TYPE_CHECKING:
@@ -246,7 +246,7 @@ class ChannelsPage(Page):
         ).show(interaction)
 
     async def _repair(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer()
+        await acknowledge(interaction, thinking=False)
         results = await self.bot.panels.restore_panels(force_edit=True)
         words = {"ok": "fine", "created": "recreated", "moved": "moved to the bottom", "edited": "updated",
                  "disabled": "turned off", "no_channel": "no channel set", "error": "❌ failed (check permissions)"}
@@ -333,7 +333,7 @@ class HealthPage(Page):
 
     async def show(self, interaction: discord.Interaction, notice: str | None = None) -> None:
         if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
+            await acknowledge(interaction, thinking=False)
         self.checks = await health.run(self.bot)
         await super().show(interaction, notice)
 
@@ -359,7 +359,7 @@ class HealthPage(Page):
         await fix_permissions_page(self.bot, self.owner_id, back=lambda: HealthPage(self.bot, self.owner_id, back=self.back)).show(interaction)
 
     async def _repair(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer()
+        await acknowledge(interaction, thinking=False)
         await self.bot.panels.restore_panels(force_edit=True)
         await self.show(interaction, "🔧 Panels repaired.")
 
@@ -386,7 +386,7 @@ def fix_permissions_page(bot: ParleyBot, owner_id: int, *, back) -> Page:
     """Repair only the channel overwrites Parley needs. Never asks for Administrator."""
 
     async def apply(interaction: discord.Interaction) -> None:
-        await interaction.response.defer()
+        await acknowledge(interaction, thinking=False)
         guild = bot.get_guild(bot.runtime.hub.main_guild_id) if bot.runtime.hub.main_guild_id else None
         if guild is None:
             await back().show(interaction, "⚠️ Parley isn't in the main server.")

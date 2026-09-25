@@ -19,7 +19,7 @@ from bot.services.errors import PermissionDenied
 from bot.services.panels import LISTINGS_PANEL
 from bot.utils.mentions import advertisement_kwargs, safe_allowed_mentions
 from bot.views.admin.common import ConfirmPage, Page
-from bot.views.base import OwnedView, get_bot, reply
+from bot.views.base import OwnedView, acknowledge, get_bot, reply, edit_response
 from bot.views.welcome import ActionButton, add_bot_button, persistent_view, register_action
 
 if TYPE_CHECKING:
@@ -121,7 +121,7 @@ class SimulatedRequestView(OwnedView):
 
     async def _finish(self, interaction: discord.Interaction, intro: str, text: str) -> None:
         self.stop()
-        await interaction.response.edit_message(view=None)
+        await edit_response(interaction, view=None)
         await interaction.followup.send(f"-# 🧪 TEST · {intro}\n{text}"[:2000], allowed_mentions=safe_allowed_mentions())
 
 
@@ -161,7 +161,7 @@ class TestCenterPage(Page):
         await CategoryView(self.bot, interaction.user.id, source_id=None).show(interaction)
 
     async def _listing(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer()
+        await acknowledge(interaction, thinking=False)
         await self.show(interaction, await post_test_listing(self.bot, interaction.user.id))
 
     async def _partnership(self, interaction: discord.Interaction) -> None:
@@ -215,7 +215,7 @@ class TestUtilitiesPage(Page):
 
     async def _reset_cooldowns(self, interaction: discord.Interaction) -> None:
         await self._require_test_mode()
-        await interaction.response.defer()
+        await acknowledge(interaction, thinking=False)
         async with self.bot.db.session() as session:
             listings, cooldown_rows = await testmode.reset_test_cooldowns(session, actor_id=interaction.user.id)
         await self.show(
@@ -224,7 +224,7 @@ class TestUtilitiesPage(Page):
         )
 
     async def _cleanup_messages(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer()
+        await acknowledge(interaction, thinking=False)
         count = await testmode.delete_test_messages(self.bot)
         await self.bot.panels.restore_panels()
         await self.show(interaction, f"🧹 Deleted **{count}** Test Center message(s).")
@@ -233,7 +233,7 @@ class TestUtilitiesPage(Page):
         await self._require_test_mode()
 
         async def confirmed(done: discord.Interaction) -> None:
-            await done.response.defer()
+            await acknowledge(done, thinking=False)
             count = await testmode.clear_test_listings(self.bot, actor_id=done.user.id)
             await self.bot.panels.restore_panels()
             await self.show(done, f"✅ Cleared **{count}** test listing(s). You can run the listing flow from scratch again.")

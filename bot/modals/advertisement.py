@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 import discord
 
 from bot.config.runtime import DISCORD_MESSAGE_LIMIT
-from bot.views.base import handle_error
+from bot.views.base import arm_interaction_ack_watchdog, handle_error
 
 AdSubmit = Callable[[discord.Interaction, str, str], Awaitable[None]]
 InviteSubmit = Callable[[discord.Interaction, str], Awaitable[None]]
@@ -52,6 +52,7 @@ class AdvertisementModal(discord.ui.Modal):
             self.add_item(self.invite)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        arm_interaction_ack_watchdog(interaction)
         invite = self.invite.value if self.invite is not None else ""
         await self._callback(interaction, self.ad.value, invite)
 
@@ -73,6 +74,7 @@ class InviteModal(discord.ui.Modal):
         self.add_item(self.invite)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        arm_interaction_ack_watchdog(interaction)
         await self._callback(interaction, self.invite.value)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:

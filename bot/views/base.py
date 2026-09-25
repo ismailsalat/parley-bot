@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -20,10 +21,68 @@ log = logging.getLogger(__name__)
 
 GENERIC_ERROR = "Something went wrong on our side. Please try again in a moment."
 MENU_TIMEOUT_SECONDS = 600  # transient menus; interaction tokens last 15 minutes
+ACK_WATCHDOG_SECONDS = 1.8  # Discord requires the first interaction response within ~3 seconds
 
 
 def get_bot(interaction: discord.Interaction) -> ParleyBot:
     return interaction.client  # type: ignore[return-value]
+
+
+def arm_interaction_ack_watchdog(interaction: discord.Interaction) -> None:
+    """Last-resort acknowledgement for every user interaction.
+
+    Most Parley callbacks acknowledge immediately themselves. This watchdog is a
+    safety net for a cold database connection, Discord API delay, or a newly
+    added callback that accidentally does slow work first. If the callback has
+    not responded after a short grace period, Parley defers the interaction so
+    Discord does not show "This application did not respond".
+
+    Component interactions use a deferred *message update* so existing menu
+    code can still call ``edit_original_response``. Commands/modal submits use
+    a normal ephemeral thinking response. Modal-opening buttons are unaffected
+    because opening the modal completes the response before the watchdog fires.
+    """
+    if interaction.response.is_done():
+        return
+    # Unit-test doubles and non-Discord shims may not expose the wire-level
+    # interaction id/type. Real Discord interactions always do.
+    if not hasattr(interaction, "id") or not hasattr(interaction, "type"):
+        return
+
+    bot = get_bot(interaction)
+    tasks = getattr(bot, "_interaction_ack_watchdogs", None)
+    if tasks is None:
+        tasks = {}
+        setattr(bot, "_interaction_ack_watchdogs", tasks)
+    if interaction.id in tasks:
+        return
+
+    async def _watch() -> None:
+        try:
+            await asyncio.sleep(ACK_WATCHDOG_SECONDS)
+            if interaction.response.is_done():
+                return
+            is_component = interaction.type == discord.InteractionType.component
+            await interaction.response.defer(
+                ephemeral=not is_component,
+                thinking=not is_component,
+            )
+            log.warning(
+                "Interaction ack watchdog fired type=%s user_id=%s guild_id=%s",
+                getattr(interaction.type, "name", interaction.type),
+                interaction.user.id,
+                getattr(interaction, "guild_id", None),
+            )
+        except (discord.HTTPException, discord.InteractionResponded):
+            # Another callback response won the race, or Discord no longer accepts
+            # the interaction. Either case needs no user-visible second error.
+            pass
+        finally:
+            tasks.pop(interaction.id, None)
+
+    tasks[interaction.id] = asyncio.create_task(
+        _watch(), name=f"parley-interaction-ack-{interaction.id}"
+    )
 
 
 async def reply(
@@ -54,6 +113,15 @@ async def reply(
     return None
 
 
+async def edit_response(interaction: discord.Interaction, **kwargs: Any) -> discord.InteractionMessage | None:
+    """Edit the component message whether or not a watchdog already deferred it."""
+    kwargs.setdefault("allowed_mentions", safe_allowed_mentions())
+    if interaction.response.is_done():
+        return await interaction.edit_original_response(**kwargs)
+    await interaction.response.edit_message(**kwargs)
+    return None
+
+
 async def handle_error(interaction: discord.Interaction, error: BaseException) -> None:
     """Friendly message for expected errors; log + generic message for bugs."""
     original = getattr(error, "original", error)
@@ -79,6 +147,7 @@ async def handle_error(interaction: discord.Interaction, error: BaseException) -
 
 async def guard(interaction: discord.Interaction) -> bool:
     """Runs before every command and component: spam limit + blocked users."""
+    arm_interaction_ack_watchdog(interaction)
     bot = get_bot(interaction)
     if not bot.click_limiter.hit(interaction.user.id):
         await reply(interaction, "You're clicking a little fast. Please wait a few seconds.")
@@ -138,7 +207,7 @@ class ConfirmView(OwnedView):
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         self.confirmed = False
         self.interaction = interaction
-        await interaction.response.edit_message(content="Cancelled.", view=None)
+        await edit_response(interaction, content="Cancelled.", view=None)
         self.stop()
 
 

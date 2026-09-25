@@ -21,6 +21,7 @@ from bot.utils.mentions import safe_allowed_mentions
 from bot.views import self_post
 from bot.views.base import (
     acknowledge,
+    arm_interaction_ack_watchdog,
     GENERIC_ERROR,
     ConfirmView,
     OwnedView,
@@ -31,6 +32,7 @@ from bot.views.base import (
     handle_error,
     home_button,
     reply,
+    edit_response,
 )
 from bot.views.welcome import action_button, persistent_view, register_action, show_screen
 
@@ -258,12 +260,12 @@ class PostServerPickerView(OwnedView):
     async def _previous(self, interaction: discord.Interaction) -> None:
         self.page = max(0, self.page - 1)
         self._build()
-        await interaction.response.edit_message(content=None, embed=self.embed(), view=self)
+        await edit_response(interaction, content=None, embed=self.embed(), view=self)
 
     async def _next(self, interaction: discord.Interaction) -> None:
         self.page = min(self.pages - 1, self.page + 1)
         self._build()
-        await interaction.response.edit_message(content=None, embed=self.embed(), view=self)
+        await edit_response(interaction, content=None, embed=self.embed(), view=self)
 
 
 def _verify_another_button(row: int | None = None) -> discord.ui.Button:
@@ -676,7 +678,7 @@ class ListingFormView(OwnedView):
 
     async def _rerender(self, interaction: discord.Interaction, notice: str | None = None) -> None:
         self._build()
-        await interaction.response.edit_message(content=self.render(notice), view=self)
+        await edit_response(interaction, content=self.render(notice), view=self)
 
     # ---- simple field callbacks
 
@@ -708,7 +710,7 @@ class ListingFormView(OwnedView):
 
     async def _cancel(self, interaction: discord.Interaction) -> None:
         self.stop()
-        await interaction.response.edit_message(content="Cancelled. Nothing was changed.", view=None)
+        await edit_response(interaction, content="Cancelled. Nothing was changed.", view=None)
 
     # ---- create
 
@@ -753,7 +755,7 @@ class ListingFormView(OwnedView):
             await self._rerender(interaction, "Parley is no longer in that server.")
             return
         if not interaction.response.is_done():
-            await interaction.response.defer()
+            await acknowledge(interaction, thinking=False)
         if not self.draft.invite_url:
             try:
                 self.draft.invite_url = await resolve_invite(self.bot, guild, self.draft.invite_raw)
@@ -776,7 +778,7 @@ class ListingFormView(OwnedView):
     async def _continue_to_preview_verified(self, interaction: discord.Interaction) -> None:
         """Botless: the invite must be pasted, and must point at the verified server."""
         if not interaction.response.is_done():
-            await interaction.response.defer()
+            await acknowledge(interaction, thinking=False)
         if not self.draft.invite_url:
             try:
                 self.draft.invite_url = await resolve_verified_invite(
@@ -807,7 +809,7 @@ class ListingFormView(OwnedView):
         authorize = self._verified_authorize if botless else None
 
         if not interaction.response.is_done():
-            await interaction.response.defer()
+            await acknowledge(interaction, thinking=False)
 
         if not invite_ready and not self.draft.invite_url:
             try:
@@ -903,7 +905,7 @@ class ListingFormView(OwnedView):
 
     async def publish(self, interaction: discord.Interaction) -> None:
         """Create the listing and post it. Only reports success after Discord confirms."""
-        await interaction.response.edit_message(content="Publishing your listing…", view=None)
+        await edit_response(interaction, content="Publishing your listing…", view=None)
         try:
             result = await self._create_and_publish(interaction)
         except ParleyError as exc:
@@ -1007,7 +1009,7 @@ class ListingFormView(OwnedView):
         await self._rerender(interaction)
 
     async def _save_info(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer()
+        await acknowledge(interaction, thinking=False)
         bot = self.bot
         try:
             guild = bot.get_guild(self.guild_id)
@@ -1187,7 +1189,7 @@ class AdModeView(OwnedView):
         if interaction.response.is_done():
             await interaction.edit_original_response(content=self.render(notice), view=self)
         else:
-            await interaction.response.edit_message(content=self.render(notice), view=self)
+            await edit_response(interaction, content=self.render(notice), view=self)
 
     async def _paste(self, interaction: discord.Interaction) -> None:
         self.stop()
@@ -1224,6 +1226,7 @@ class BuilderModal(discord.ui.Modal):
         self.add_item(self.extra)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        arm_interaction_ack_watchdog(interaction)
         form = self.form
         guild = form.bot.get_guild(form.guild_id)
         form.draft.ad_text = listing_service.build_simple_ad(
@@ -1306,7 +1309,7 @@ class EmojiWarningView(OwnedView):
         if interaction.response.is_done():
             await interaction.edit_original_response(content=self.render(), view=self)
         else:
-            await interaction.response.edit_message(content=self.render(), view=self)
+            await edit_response(interaction, content=self.render(), view=self)
 
     async def _continue(self, interaction: discord.Interaction) -> None:
         self.stop()
@@ -1323,7 +1326,7 @@ async def show_preview(interaction: discord.Interaction, form: ListingFormView, 
     if edit_original or interaction.response.is_done():
         await interaction.edit_original_response(content=content, view=view, allowed_mentions=safe_allowed_mentions())
     else:
-        await interaction.response.edit_message(content=content, view=view, allowed_mentions=safe_allowed_mentions())
+        await edit_response(interaction, content=content, view=view, allowed_mentions=safe_allowed_mentions())
 
 
 # ---------------------------------------------------------------- staff review (only when approval is required)
@@ -1453,7 +1456,7 @@ async def review(interaction: discord.Interaction, guild_id: int, approve: bool,
     bot = get_bot(interaction)
     if not await permissions.is_staff(bot, interaction.user.id):
         raise PermissionDenied("Only Parley staff can review listings.")
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    await acknowledge(interaction)
     async with bot.db.session() as session:
         listing, kind = await listing_service.review_listing(
             session, guild_id=guild_id, approve=approve, moderator_id=interaction.user.id, now=utcnow(), revision=revision
@@ -1488,7 +1491,7 @@ async def ban_from_review(interaction: discord.Interaction, guild_id: int) -> No
     await confirm.wait()
     if not confirm.confirmed or confirm.interaction is None:
         return
-    await confirm.interaction.response.defer()
+    await acknowledge(confirm.interaction, thinking=False)
     async with bot.db.session() as session:
         listing = await moderation.ban_guild(session, guild_id=guild_id, reason="Banned from review", moderator_id=interaction.user.id)
     await bot.panels.take_down_listing(listing)

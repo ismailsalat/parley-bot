@@ -20,7 +20,7 @@ from bot.services.errors import ValidationError
 from bot.utils.helpers import parse_snowflake, utcnow
 from bot.views.admin.moderation import apply_staff_action, listing_embed
 from bot.views.admin.settings import open_settings
-from bot.views.base import reply
+from bot.views.base import acknowledge, reply
 from bot.views.partnership import view_ad_button
 from bot.views.welcome import persistent_view
 
@@ -72,7 +72,7 @@ class StaffCommands(commands.Cog):
     @app_commands.describe(guild_id="Server ID", restore="Choose True to lift a suspension")
     async def suspend(self, interaction: discord.Interaction, guild_id: str, restore: bool = False) -> None:
         gid = parse_id(guild_id)
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await acknowledge(interaction)
         await apply_staff_action(self.bot, "restore" if restore else "suspend", gid, interaction.user.id)
         await reply(interaction, f"✅ {'Restored' if restore else 'Suspended'} the listing for `{gid}`.")
 
@@ -132,7 +132,7 @@ class StaffCommands(commands.Cog):
 
     @admin.command(name="health", description="Run the Parley health check.")
     async def health_check(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await acknowledge(interaction)
         await reply(interaction, health.render(await health.run(self.bot)))
 
     @admin.command(name="import-settings", description="Restore settings from an exported file.")

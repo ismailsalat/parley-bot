@@ -12,7 +12,7 @@ from bot.database.models import ListingStatus
 from bot.services import network, permissions
 from bot.services.errors import MANAGE_SERVER_REQUIRED, PermissionDenied, ValidationError, ParleyError
 from bot.utils.helpers import format_duration, utcnow
-from bot.views.base import OwnedView, acknowledge, get_bot, home_button, reply
+from bot.views.base import OwnedView, acknowledge, get_bot, home_button, reply, edit_response
 from bot.views.partnership import GuildPickerView
 from bot.views.welcome import add_bot_button, persistent_view, register_action
 
@@ -318,7 +318,7 @@ class NetworkSetupView(OwnedView):
         if interaction.response.is_done():
             await interaction.edit_original_response(content=self.render(notice), view=self)
         else:
-            await interaction.response.edit_message(content=self.render(notice), view=self)
+            await edit_response(interaction, content=self.render(notice), view=self)
 
     async def _toggle_advanced(self, interaction: discord.Interaction) -> None:
         self.advanced = not self.advanced

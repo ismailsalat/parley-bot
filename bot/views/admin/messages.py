@@ -11,6 +11,7 @@ from bot.config.runtime import CUSTOMIZABLE_BUTTONS, DEFAULT_BUTTONS
 from bot.services import configuration
 from bot.utils.helpers import truncate
 from bot.views.admin.common import ConfirmPage, Field, FieldsModal, Page, on_off
+from bot.views.base import acknowledge
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -259,7 +260,7 @@ class ButtonsPage(Page):
         async def submitted(inter: discord.Interaction, values: dict[str, str]) -> None:
             from bot.services.errors import ParleyError
 
-            await inter.response.defer()
+            await acknowledge(inter, thinking=False)
             try:
                 async with self.bot.db.session() as session:
                     await configuration.set_button(
@@ -281,7 +282,7 @@ class ButtonsPage(Page):
 
     async def _reset(self, interaction: discord.Interaction) -> None:
         assert self.selected is not None
-        await interaction.response.defer()
+        await acknowledge(interaction, thinking=False)
         async with self.bot.db.session() as session:
             await configuration.reset_button(session, self.selected, actor_id=interaction.user.id)
         await self._saved(interaction, "↩️ Button reset to default.")
@@ -316,7 +317,7 @@ class AnnouncementsPage(Page):
         self.nav()
 
     async def _save(self, interaction: discord.Interaction, changes: dict) -> None:
-        await interaction.response.defer()
+        await acknowledge(interaction, thinking=False)
         async with self.bot.db.session() as session:
             await configuration.save(session, changes, actor_id=interaction.user.id)
         await self.bot.settings_changed(refresh_panels=True)
@@ -380,7 +381,7 @@ class LinksPage(Page):
         async def submitted(inter: discord.Interaction, values: dict[str, str]) -> None:
             from bot.services.errors import ParleyError
 
-            await inter.response.defer()
+            await acknowledge(inter, thinking=False)
             try:
                 async with self.bot.db.session() as session:
                     await configuration.set_links(
@@ -423,7 +424,7 @@ class ThemePage(Page):
 
     def _toggle(self, key: str, value: bool):
         async def callback(interaction: discord.Interaction) -> None:
-            await interaction.response.defer()
+            await acknowledge(interaction, thinking=False)
             async with self.bot.db.session() as session:
                 await configuration.save(session, {key: value}, actor_id=interaction.user.id)
             await self.bot.settings_changed(refresh_panels=True)
@@ -435,7 +436,7 @@ class ThemePage(Page):
         cfg = self.bot.runtime.bot
 
         async def submitted(inter: discord.Interaction, values: dict[str, str]) -> None:
-            await inter.response.defer()
+            await acknowledge(inter, thinking=False)
             async with self.bot.db.session() as session:
                 await configuration.save(
                     session, {"bot.name": values["name"].strip() or "Parley", "bot.activity_text": values["status"].strip()},

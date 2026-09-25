@@ -15,7 +15,7 @@ import discord
 from bot.services import verification
 from bot.services.verification import VerifiedGuild
 from bot.utils.helpers import utcnow
-from bot.views.base import OwnedView, acknowledge, get_bot, home_button, reply
+from bot.views.base import OwnedView, acknowledge, get_bot, home_button, reply, edit_response
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -59,7 +59,7 @@ async def _show(
             kwargs["embeds"] = []
         else:
             kwargs["embed"] = embed
-        await interaction.response.edit_message(**kwargs)
+        await edit_response(interaction, **kwargs)
         return
     await reply(interaction, content, embed=embed, view=view)
 

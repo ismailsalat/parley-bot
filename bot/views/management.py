@@ -369,7 +369,7 @@ class PartnershipSettingsView(OwnedView):
         self.add_item(ManageButton(guild_id, label="Back", emoji=None, style=discord.ButtonStyle.secondary, row=1))
 
     async def _toggle(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await acknowledge(interaction)
         guild, listing, contacts = await load_managed_listing(self.bot, self.guild_id, interaction.user.id)
         target = not listing.accepting_partnerships
         async with self.bot.db.session() as session:
@@ -445,7 +445,7 @@ async def start_self_post(interaction: discord.Interaction, guild_id: int) -> No
     if not listing_service.ad_edit_available(listing):
         raise ValidationError("You've already edited this ad since your last Relist. Relist again to unlock another edit.")
 
-    await interaction.response.defer()
+    await acknowledge(interaction, thinking=False)
 
     async def held_for_review(text: str) -> None:
         now = utcnow()
@@ -516,7 +516,7 @@ async def edit_ad(interaction: discord.Interaction, guild_id: int) -> None:
     async def submit(inter: discord.Interaction, text: str, _invite: str) -> None:
         from bot.views.listings import after_edit
 
-        await inter.response.defer(ephemeral=True, thinking=True)
+        await acknowledge(inter)
         await load_managed_listing(bot, guild_id, inter.user.id)
         async with bot.db.session() as session:
             updated = await listing_service.update_advertisement(
@@ -588,7 +588,7 @@ async def relist(interaction: discord.Interaction, guild_id: int) -> None:
         if live_guild is not None:
             permissions.require_public_bot_channel(live_guild)
     if not interaction.response.is_done():
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await acknowledge(interaction)
     async with bot.db.session() as session:
         await listing_service.claim_refresh(
             session, bot.runtime, guild_id=guild_id, actor_id=interaction.user.id, now=utcnow(),
@@ -683,7 +683,7 @@ async def remove(interaction: discord.Interaction, guild_id: int) -> None:
     if not confirm.confirmed or confirm.interaction is None:
         return
     done = confirm.interaction
-    await done.response.defer()
+    await acknowledge(done, thinking=False)
     await load_managed_listing(bot, guild_id, done.user.id)
     async with bot.db.session() as session:
         listing = await listing_service.remove_listing(session, guild_id=guild_id, actor_id=done.user.id, now=utcnow())

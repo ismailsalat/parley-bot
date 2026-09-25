@@ -32,6 +32,7 @@ from bot.views.base import (
     home_button,
     reply,
     user_label,
+    edit_response,
 )
 from bot.views.welcome import action_button, add_bot_button, persistent_view, register_action
 
@@ -499,7 +500,7 @@ async def submit_request(
     interaction: discord.Interaction, source_id: int, target_id: int, message: str, finder=None
 ) -> None:
     if not interaction.response.is_done():
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await acknowledge(interaction)
     bot = get_bot(interaction)
     user_id = interaction.user.id
     source_guild = bot.get_guild(source_id)
@@ -576,7 +577,7 @@ async def respond_to_request(interaction: discord.Interaction, request_id: int, 
     # Dynamic request buttons already acknowledge before entering here. Keep this
     # safe for direct callers without attempting a second response.
     if not interaction.response.is_done():
-        await interaction.response.defer(ephemeral=True, thinking=False)
+        await acknowledge(interaction, thinking=False)
     bot = get_bot(interaction)
     user_id = interaction.user.id
 
@@ -966,7 +967,7 @@ class CategoryView(OwnedView):
         if interaction.response.is_done():
             await interaction.edit_original_response(content=text, embeds=[], view=self)
         elif interaction.message is not None and (interaction.guild is None or interaction.message.flags.ephemeral):
-            await interaction.response.edit_message(content=text, embeds=[], view=self)
+            await edit_response(interaction, content=text, embeds=[], view=self)
         else:
             await reply(interaction, text, view=self)
 
@@ -1400,7 +1401,7 @@ class ExhaustedView(OwnedView):
         if interaction.response.is_done():
             await interaction.edit_original_response(content=None, embed=embed, view=self)
         elif interaction.message is not None and (interaction.guild is None or interaction.message.flags.ephemeral):
-            await interaction.response.edit_message(content=None, embed=embed, view=self)
+            await edit_response(interaction, content=None, embed=embed, view=self)
         else:
             await reply(interaction, embed=embed, view=self)
 
@@ -1440,9 +1441,9 @@ async def _edit_or_reply(
             await interaction.edit_original_response(content=content, embed=embed, view=view)
     elif interaction.message is not None and (interaction.guild is None or interaction.message.flags.ephemeral):
         if embed is None:
-            await interaction.response.edit_message(content=content, embeds=[], view=view)
+            await edit_response(interaction, content=content, embeds=[], view=view)
         else:
-            await interaction.response.edit_message(content=content, embed=embed, view=view)
+            await edit_response(interaction, content=content, embed=embed, view=view)
     else:
         await reply(interaction, content, embed=embed, view=view)
 

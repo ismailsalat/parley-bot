@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -17,8 +18,7 @@ import discord
 
 from bot.database import repository
 from bot.database.models import ListingStatus
-from bot.services import configuration, listings as listing_service
-from bot.services import setup as setup_service
+from bot.services import listings as listing_service
 from bot.services.errors import ValidationError
 from bot.utils.helpers import listing_jump_url
 from bot.utils.mentions import safe_allowed_mentions
@@ -44,6 +44,10 @@ class PanelService:
         self._listings_lock = asyncio.Lock()
         self._looking_lock = asyncio.Lock()
         self._looking_task: asyncio.Task | None = None
+        # Discord emits on_raw_message_delete for our own panel moves too. Keep a
+        # short TTL so that self-initiated deletes are not mistaken for manual
+        # deletions and recreated a second time.
+        self._intentional_panel_deletes: dict[int, float] = {}
 
     # ------------------------------------------------------------ channels
 
@@ -241,6 +245,8 @@ class PanelService:
         async with self.bot.db.session() as session:
             stored = await repository.get_panel(session, guild_id, panel_type)
         if stored is not None:
+            if stored.message_id:
+                self._intentional_panel_deletes[stored.message_id] = time.monotonic() + 60.0
             await self._delete(stored.channel_id, stored.message_id)
 
         _builder, enabled = self._builder(panel_type)
@@ -357,7 +363,19 @@ class PanelService:
         return message
 
     async def handle_message_deleted(self, channel_id: int, message_id: int) -> None:
-        """Recreate a panel right away if someone deletes it."""
+        """Recreate a panel right away if someone deletes it.
+
+        Deletes initiated by ``_repost_panel`` are ignored here; that method is
+        already creating the replacement. Without this guard the raw delete event
+        could race the repost and create duplicate panels / extra API traffic.
+        """
+        now = time.monotonic()
+        expired = [mid for mid, until in self._intentional_panel_deletes.items() if until <= now]
+        for mid in expired:
+            self._intentional_panel_deletes.pop(mid, None)
+        if self._intentional_panel_deletes.pop(message_id, None) is not None:
+            return
+
         main_guild_id = self.bot.runtime.hub.main_guild_id
         if channel_id not in self.panel_channel_ids() or not main_guild_id:
             return

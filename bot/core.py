@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import logging
 import time
@@ -106,6 +107,7 @@ class ParleyBot(commands.Bot):
         self.oauth = OAuthServer(self)  # "Verify My Servers"; a no-op unless configured
         self.background = BackgroundTasks(self)
         self._dm_panel_sent: dict[int, float] = {}
+        self._interaction_ack_watchdogs: dict[int, asyncio.Task] = {}
         self._started = False
 
     @property
@@ -722,6 +724,11 @@ class ParleyBot(commands.Bot):
 
     async def close(self) -> None:
         log.info("Shutting down…")
+        for task in list(self._interaction_ack_watchdogs.values()):
+            task.cancel()
+        if self._interaction_ack_watchdogs:
+            await asyncio.gather(*self._interaction_ack_watchdogs.values(), return_exceptions=True)
+            self._interaction_ack_watchdogs.clear()
         await self.oauth.stop()
         await self.background.stop()
         await self.panels.close()
