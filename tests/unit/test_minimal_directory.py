@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from bot.database.models import Listing
 from bot.views.self_post import directory_card_kwargs
-from bot.views.welcome import listings_panel
+from bot.views.welcome import listings_panel, parley_perks_panel
 from tests.fakes import FakeBot
 
 
@@ -45,3 +45,16 @@ def test_relist_pointer_is_one_line_not_an_embed(db):
     )
     assert kwargs["content"].startswith("-# **Rivals HQ**")
     assert _labels(kwargs["view"])[0] == "View Ad"
+
+
+def test_parley_perks_is_compact_and_points_to_setup(db):
+    bot = FakeBot(db)
+    bot.application_id = 123456789
+    content, view = parley_perks_panel(bot)
+    assert content.startswith("# ✦ Parley Perks")
+    assert "You must add the Parley bot" in content
+    assert "Automatic Partner Ads" in content
+    labels = _labels(view)
+    assert labels[0] == "Add Parley"
+    # FakeBot has no configured How Parley Works channel, so the link is omitted safely.
+    assert labels == ["Add Parley"]

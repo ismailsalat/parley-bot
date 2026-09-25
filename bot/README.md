@@ -127,7 +127,7 @@ The **➕ Add Parley** button that other server owners see does not include Mana
 
 Type **/setup** in the server that should be your Parley hub. Only the owner of the bot application can do this, so no other server can claim to be the hub.
 
-- **✨ Automatic Setup** creates six channels and posts the panels:
+- **✨ Automatic Setup** creates the six core channels and posts their panels:
   - `#start-here`
   - `#server-directory`: members can read but not post; Parley manages it.
   - `#find-partners`
@@ -135,7 +135,9 @@ Type **/setup** in the server that should be your Parley hub. Only the owner of 
   - `#support`
   - `#waypoint-logs`: staff only.
 
-  Channels that already exist are reused. Older untouched defaults (`#welcome`, `#partner-listings`, `#looking-for-partners`, `#parley-perks`) are recognized; if Parley has Manage Channels, it renames those defaults to the clearer names above. Custom channel names are never changed.
+  Before Parley Perks is posted, the setup wizard asks where you want it. You can choose any existing text channel, or create a new read-only `#💎・parley-perks` channel and optionally place it under a category. Existing channels keep their current name and member permissions. You can change this later in **Settings → Server → Channels → Parley Perks**.
+
+  Core channels that already exist are reused. Older untouched defaults (`#welcome`, `#partner-listings`, `#looking-for-partners`) are recognized; custom channel names are never changed.
 - **⚙️ Choose Channels** lets you pick existing channels from menus and shows ✅/❌ for each permission Parley needs.
 - **🧪 Test Setup** runs the Health Check.
 

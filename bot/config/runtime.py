@@ -188,6 +188,22 @@ class PanelConfig:
         "Server managers can edit the ad, Relist, handle requests, and change Network settings. The same server state is used everywhere, so there is only one listing, one cooldown, and one Network setup per server.\n\n"
         "-# Need help? Ask in the Support channel."
     )
+    benefits_panel_enabled: bool = True
+    benefits_panel_text: str = (
+        "# ✦ Parley Perks\n"
+        "*Add Parley to your server to unlock the full partnership network.*\n\n"
+        "**You must add the Parley bot to your server to use these perks:**\n\n"
+        "- **🤝 Automatic Partner Ads** — accepted partnerships can automatically exchange server ads in each server's selected partnership channel.\n"
+        "- **🔎 Find Partners From Your Server** — search for partnership opportunities directly from your own server.\n"
+        "- **Staff Access** — owners, admins, and members with **Manage Server** permission can manage Parley.\n"
+        "- **📢 Synced Server Ad** — your listing stays synced between your server and the main Parley server.\n"
+        "- **🔄 Synced Cooldowns** — relist cooldowns and listing status stay the same everywhere.\n"
+        "- **Network Setup** — choose where approved partner ads should be posted.\n"
+        "- **Partnership Management** — send, receive, accept, and manage partnership requests.\n"
+        "- **Multi-Server Control** — manage every server where you have permission and Parley is installed.\n"
+        "- **⚡ Simple Setup** — Parley guides you through anything your server still needs before finding partners.\n\n"
+        "**Add Parley to your server to get started.**"
+    )
 
     # Start Here may make one intentional announcement when the panel is first created.
     welcome_ping_everyone: bool = True
@@ -223,6 +239,7 @@ class HubConfig:
     listings_channel_id: int = 0
     looking_channel_id: int = 0
     perks_channel_id: int = 0
+    benefits_channel_id: int = 0
     support_channel_id: int = 0
     log_channel_id: int = 0
     staff_role_ids: tuple[int, ...] = ()

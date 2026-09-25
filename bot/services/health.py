@@ -10,7 +10,7 @@ import discord
 
 from bot.database import migrations, repository
 from bot.services import permissions
-from bot.services.panels import LISTINGS_PANEL, LOOKING_PANEL, WELCOME_PANEL
+from bot.services.panels import LISTINGS_PANEL, LOOKING_PANEL, PARLEY_PERKS_PANEL, PERKS_PANEL, WELCOME_PANEL
 from bot.services.setup import SLOTS
 
 if TYPE_CHECKING:
@@ -20,11 +20,16 @@ log = logging.getLogger(__name__)
 
 OK, WARN, FAIL = "ok", "warn", "fail"
 ICONS = {OK: "✅", WARN: "⚠️", FAIL: "❌"}
-PANEL_LABELS = {WELCOME_PANEL: "Welcome panel", LISTINGS_PANEL: "Listings panel", LOOKING_PANEL: "Looking panel"}
+PANEL_LABELS = {
+    WELCOME_PANEL: "Welcome panel", LISTINGS_PANEL: "Listings panel", LOOKING_PANEL: "Looking panel",
+    PERKS_PANEL: "How Parley Works panel", PARLEY_PERKS_PANEL: "Parley Perks panel",
+}
 CHANNEL_CHECK_NAMES = {
     "welcome_channel_id": "Welcome channel",
     "listings_channel_id": "Listings channel",
     "looking_channel_id": "Looking for partners channel",
+    "perks_channel_id": "How Parley Works channel",
+    "benefits_channel_id": "Parley Perks channel",
     "support_channel_id": "Support channel",
     "log_channel_id": "Staff logs channel",
 }
@@ -52,8 +57,8 @@ GROUPS = {
     "Discord": ("Discord", "Main server", "Persistent buttons", "Background tasks"),
     "Database": ("SQLite", "PostgreSQL", "Database schema", "Settings"),
     "Listings": ("Listings channel", "Welcome channel", "Looking for partners channel", "Approvals"),
-    "Panels": ("Welcome panel", "Listings panel", "Looking panel"),
-    "Permissions": ("Create Invite permission", "Staff logs channel", "Support channel", "Paste My Own Ad"),
+    "Panels": ("Welcome panel", "Listings panel", "Looking panel", "How Parley Works panel", "Parley Perks panel"),
+    "Permissions": ("Create Invite permission", "Staff logs channel", "Support channel", "How Parley Works channel", "Parley Perks channel", "Paste My Own Ad"),
     "Network": ("Network scheduler", "Mode"),
 }
 

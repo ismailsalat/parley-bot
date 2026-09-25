@@ -301,6 +301,16 @@ def perks_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
     return templates.render(bot.runtime, "perks"), view
 
 
+def parley_perks_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
+    """Read-only benefits page for servers that add Parley."""
+    how_url = _hub_channel_url(bot, bot.runtime.hub.perks_channel_id)
+    view = persistent_view(
+        add_bot_button(bot, row=0),
+        discord.ui.Button(label="How Parley Works", url=how_url, row=0) if how_url else None,
+    )
+    return templates.render(bot.runtime, "benefits"), view
+
+
 def _hub_channel_url(bot: ParleyBot, channel_id: int | None) -> str | None:
     guild_id = bot.runtime.hub.main_guild_id
     if not guild_id or not channel_id:

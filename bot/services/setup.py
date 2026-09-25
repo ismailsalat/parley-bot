@@ -1,10 +1,10 @@
 """First-run setup of the main Parley server.
 
-Automatic Setup creates (or reuses, by name) Parley's guided channel set:
+Automatic Setup creates (or reuses, by name) Parley's core guided channel set:
 #👋・start-here, #📣・server-directory, #🤝・partner-board, #📖・how-parley-works,
-#💬・support and a staff-only #🛡️・parley-logs. Legacy channel names are reused
-so upgrades never create duplicates. It needs Manage Channels; without it the
-owner picks existing channels instead. Nothing here requires Administrator.
+#💬・support and a staff-only #🛡️・parley-logs. Parley Perks is intentionally
+placed separately by the owner so it can live in an existing channel or in a
+new read-only #💎・parley-perks channel. Nothing here requires Administrator.
 """
 
 from __future__ import annotations
@@ -46,7 +46,12 @@ SLOTS: tuple[ChannelSlot, ...] = (
     ChannelSlot(
         "perks_channel_id", "📖・how-parley-works", "How Parley Works", False,
         "A simple guide to Server Directory listings, Network setup, Find Partners, requests, Relist, and ad exchange.",
-        ("💎・parley-perks", "parley-perks", "how-parley-works"),
+        ("how-parley-works",),
+    ),
+    ChannelSlot(
+        "benefits_channel_id", "💎・parley-perks", "Parley Perks", False,
+        "Benefits unlocked by adding Parley to your server. Read-only guide with quick setup links.",
+        ("parley-perks",),
     ),
     ChannelSlot(
         "support_channel_id", "💬・support", "Support", False,
@@ -61,6 +66,12 @@ SLOTS: tuple[ChannelSlot, ...] = (
 )
 
 SLOT_BY_KEY = {slot.key: slot for slot in SLOTS}
+
+# Parley Perks is intentionally excluded from Automatic Setup. The setup wizard
+# asks where the owner wants the panel before creating/posting anything.
+AUTO_SETUP_SLOTS: tuple[ChannelSlot, ...] = tuple(
+    slot for slot in SLOTS if slot.key != "benefits_channel_id"
+)
 
 
 def bot_channel_permissions() -> discord.PermissionOverwrite:
@@ -84,14 +95,16 @@ def overwrites_for(
     """Channel permissions for a newly created channel.
 
     * start-here / server-directory: members can read but not post (the bot manages them)
-    * how-parley-works: read-only guide for members
+    * how-parley-works / parley-perks: read-only guides for members
     * parley-logs: hidden from everyone except staff roles, admins and the bot
     """
     everyone = guild.default_role
     own = listings_channel_permissions() if slot.key in ("listings_channel_id", "looking_channel_id") else bot_channel_permissions()
     result: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {guild.me: own}
-    if slot.key in ("welcome_channel_id", "listings_channel_id", "looking_channel_id", "perks_channel_id"):
-        result[everyone] = discord.PermissionOverwrite(send_messages=False, create_public_threads=False)
+    if slot.key in ("welcome_channel_id", "listings_channel_id", "looking_channel_id", "perks_channel_id", "benefits_channel_id"):
+        result[everyone] = discord.PermissionOverwrite(
+            send_messages=False, create_public_threads=False, create_private_threads=False, send_messages_in_threads=False
+        )
     elif slot.key == "log_channel_id":
         result[everyone] = discord.PermissionOverwrite(view_channel=False)
         for role in staff_roles:
@@ -158,13 +171,17 @@ async def _repair_reused_channel(slot: ChannelSlot, channel: discord.TextChannel
                 use_external_emojis=True, manage_messages=True, manage_roles=True,
             )
             await channel.set_permissions(guild.me, overwrite=bot_ow, reason="Parley: managed feed permissions")
-        elif slot.key in ("welcome_channel_id", "perks_channel_id"):
+        elif slot.key in ("welcome_channel_id", "perks_channel_id", "benefits_channel_id"):
             everyone = guild.default_role
             current = channel.overwrites_for(everyone)
             allow, deny = current.pair()
             locked = discord.PermissionOverwrite.from_pair(allow, deny)
             locked.send_messages = False
-            await channel.set_permissions(everyone, overwrite=locked, reason="Parley: lock start-here")
+            if hasattr(locked, "create_public_threads"):
+                locked.create_public_threads = False
+            if hasattr(locked, "send_messages_in_threads"):
+                locked.send_messages_in_threads = False
+            await channel.set_permissions(everyone, overwrite=locked, reason="Parley: lock read-only guide")
     except discord.HTTPException as exc:
         log.warning("setup.permission_repair_failed channel=%s guild_id=%s: %s", channel.name, guild.id, exc)
 
@@ -172,7 +189,7 @@ async def _repair_reused_channel(slot: ChannelSlot, channel: discord.TextChannel
 async def automatic_setup(guild: discord.Guild, staff_roles: list[discord.Role]) -> SetupResult:
     """Create or reuse the recommended channels and enforce the directory lock."""
     result = SetupResult()
-    for slot in SLOTS:
+    for slot in AUTO_SETUP_SLOTS:
         existing = find_existing(guild, slot)
         if existing is not None:
             result.channels[slot.key] = existing

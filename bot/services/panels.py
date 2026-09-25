@@ -17,7 +17,8 @@ import discord
 
 from bot.database import repository
 from bot.database.models import ListingStatus
-from bot.services import listings as listing_service
+from bot.services import configuration, listings as listing_service
+from bot.services import setup as setup_service
 from bot.services.errors import ValidationError
 from bot.utils.helpers import listing_jump_url
 from bot.utils.mentions import safe_allowed_mentions
@@ -31,6 +32,7 @@ LISTINGS_PANEL = "listings"
 LOOKING_PANEL = "looking"
 WELCOME_PANEL = "welcome"
 PERKS_PANEL = "perks"
+PARLEY_PERKS_PANEL = "parley_perks"
 
 PanelBuilder = Callable[["ParleyBot"], tuple[str, discord.ui.View]]
 
@@ -66,6 +68,9 @@ class PanelService:
     def perks_channel(self) -> discord.TextChannel | None:
         return self.main_channel(self.bot.runtime.hub.perks_channel_id)
 
+    def benefits_channel(self) -> discord.TextChannel | None:
+        return self.main_channel(self.bot.runtime.hub.benefits_channel_id)
+
     async def _refresh_how_it_works_channel(self) -> None:
         """Rename the old Parley Perks channel in place on upgrade.
 
@@ -98,7 +103,10 @@ class PanelService:
     def panel_channel_ids(self) -> set[int]:
         h = self.bot.runtime.hub
         return {
-            cid for cid in (h.listings_channel_id, h.looking_channel_id, h.welcome_channel_id, h.perks_channel_id) if cid
+            cid for cid in (
+                h.listings_channel_id, h.looking_channel_id, h.welcome_channel_id,
+                h.perks_channel_id, h.benefits_channel_id
+            ) if cid
         }
 
     async def ensure_directory_locked(self) -> bool:
@@ -183,6 +191,7 @@ class PanelService:
             LOOKING_PANEL: (welcome.looking_panel, panels.looking_panel_enabled),
             WELCOME_PANEL: (welcome.welcome_panel, panels.welcome_panel_enabled),
             PERKS_PANEL: (welcome.perks_panel, panels.perks_panel_enabled),
+            PARLEY_PERKS_PANEL: (welcome.parley_perks_panel, panels.benefits_panel_enabled),
         }[panel_type]
 
     def _channel_for(self, panel_type: str) -> discord.TextChannel | None:
@@ -191,6 +200,7 @@ class PanelService:
             LOOKING_PANEL: self.looking_channel,
             WELCOME_PANEL: self.welcome_channel,
             PERKS_PANEL: self.perks_channel,
+            PARLEY_PERKS_PANEL: self.benefits_channel,
         }[panel_type]()
 
     def _welcome_mentions(self) -> str | None:
@@ -334,6 +344,7 @@ class PanelService:
             results[LOOKING_PANEL] = await self.ensure_panel(LOOKING_PANEL, keep_at_bottom=False, force_edit=force_edit)
         results[WELCOME_PANEL] = await self.ensure_panel(WELCOME_PANEL, keep_at_bottom=False, force_edit=force_edit)
         results[PERKS_PANEL] = await self.ensure_panel(PERKS_PANEL, keep_at_bottom=False, force_edit=force_edit)
+        results[PARLEY_PERKS_PANEL] = await self.ensure_panel(PARLEY_PERKS_PANEL, keep_at_bottom=False, force_edit=force_edit)
         return results
 
     async def post_above_panel(self, channel: discord.TextChannel, panel_type: str, **kwargs) -> discord.Message:
@@ -351,7 +362,7 @@ class PanelService:
         if channel_id not in self.panel_channel_ids() or not main_guild_id:
             return
         async with self.bot.db.session() as session:
-            for panel_type in (LISTINGS_PANEL, LOOKING_PANEL, WELCOME_PANEL, PERKS_PANEL):
+            for panel_type in (LISTINGS_PANEL, LOOKING_PANEL, WELCOME_PANEL, PERKS_PANEL, PARLEY_PERKS_PANEL):
                 stored = await repository.get_panel(session, main_guild_id, panel_type)
                 if stored is not None and stored.message_id == message_id:
                     break

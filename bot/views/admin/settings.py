@@ -217,9 +217,10 @@ class ChannelsPage(Page):
 
     def build(self) -> None:
         self.button("Choose Channels", self._choose, emoji="⚙️", style=discord.ButtonStyle.primary, row=0)
+        self.button("Parley Perks", self._perks_channel, emoji="💎", style=discord.ButtonStyle.primary, row=0)
         self.button("Repair Panels", self._repair, emoji="🔧", row=0)
         if self.bot.hub_env_fields:
-            self.button("Save to Database", self._save_env, emoji="💾", row=0)
+            self.button("Save to Database", self._save_env, emoji="💾", row=1)
         self.button("Fix Permissions", self._fix_permissions, emoji="🛡️", row=1)
         self.nav()
 
@@ -231,6 +232,18 @@ class ChannelsPage(Page):
             await self.refresh(interaction, "⚠️ Open **/settings** inside your main server to pick channels (Discord only lists a server's channels there).")
             return
         await ChannelPicker(self.bot, self.owner_id, guild, back=lambda: ChannelsPage(self.bot, self.owner_id, back=self.back)).show(interaction)
+
+    async def _perks_channel(self, interaction: discord.Interaction) -> None:
+        from bot.views.admin.setup import PerksPlacementPage
+
+        guild = interaction.guild
+        if guild is None or guild.id != (self.bot.runtime.hub.main_guild_id or guild.id):
+            await self.refresh(interaction, "⚠️ Open **/settings** inside your main server to choose the Parley Perks channel.")
+            return
+        back = lambda: ChannelsPage(self.bot, self.owner_id, back=self.back)  # noqa: E731
+        await PerksPlacementPage(
+            self.bot, self.owner_id, guild, done=back, back=back, allow_skip=False
+        ).show(interaction)
 
     async def _repair(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()

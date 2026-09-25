@@ -48,16 +48,16 @@ RESETTABLE_SECTIONS: dict[str, tuple[str, ...]] = {
     "partnerships": ("partnerships.",),
     "network": ("network.",),
     "messages": ("messages.", "panels.welcome_panel_text", "panels.listings_panel_text",
-                 "panels.looking_panel_text", "panels.perks_panel_text"),
+                 "panels.looking_panel_text", "panels.perks_panel_text", "panels.benefits_panel_text"),
     "appearance": ("panels.buttons", "bot.", "panels.listings_panel_enabled", "panels.looking_panel_enabled",
-                   "panels.welcome_panel_enabled", "panels.perks_panel_enabled", "panels.send_join_message",
+                   "panels.welcome_panel_enabled", "panels.perks_panel_enabled", "panels.benefits_panel_enabled", "panels.send_join_message",
                    "panels.welcome_ping_everyone", "panels.welcome_ping_role_ids", "panels.panel_images_enabled"),
     "moderation": ("moderation.",),
 }
 
 HUB_CHANNEL_FIELDS = (
     "welcome_channel_id", "listings_channel_id", "looking_channel_id", "perks_channel_id",
-    "support_channel_id", "log_channel_id"
+    "benefits_channel_id", "support_channel_id", "log_channel_id"
 )
 _ENV_HUB_FIELDS = ("main_guild_id", *HUB_CHANNEL_FIELDS)
 
