@@ -7,6 +7,7 @@ change). Nothing about permissions is stored in the database.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING
@@ -120,13 +121,95 @@ async def is_manager(bot: ParleyBot, guild_id: int, user_id: int) -> bool:
 
 
 def cached_manageable_guilds(bot: ParleyBot, user_id: int) -> list[discord.Guild]:
-    """Guilds where the gateway-synced member cache says the user can manage."""
+    """Fast cache-only view of servers the user can manage.
+
+    Do not use this by itself for user-facing server pickers: Discord does not
+    guarantee every member is present in every guild's local cache. Use
+    :func:`manageable_guilds` for complete discovery.
+    """
     result = []
     for guild in bot.guilds:
         member = guild.get_member(user_id)
         if member is not None and can_manage(member.guild_permissions):
             result.append(guild)
     return sorted(result, key=lambda g: g.name.lower())
+
+
+MANAGEABLE_DISCOVERY_TTL = 45.0
+MANAGEABLE_DISCOVERY_CONCURRENCY = 6
+
+
+async def manageable_guilds(bot: ParleyBot, user_id: int) -> list[discord.Guild]:
+    """Return every *connected* guild the user currently has authority to manage.
+
+    Server pickers used to depend only on ``Guild.get_member``. That silently
+    omitted perfectly valid administrators when Discord had not cached that
+    member in another guild. We now use the gateway cache first, then fetch only
+    the missing members from Discord. Results are briefly cached to avoid turning
+    repeated dashboard clicks into an API storm; every sensitive action still
+    calls :func:`require_manager`, which performs a fresh permission check before
+    changing anything.
+    """
+    now = time.monotonic()
+    guild_ids = tuple(sorted(g.id for g in bot.guilds))
+    cache = getattr(bot, "_manageable_guilds_cache", None)
+    if cache is None:
+        cache = {}
+        try:
+            setattr(bot, "_manageable_guilds_cache", cache)
+        except Exception:
+            # Minimal test doubles may not allow attributes; discovery still works.
+            pass
+
+    hit = cache.get(user_id) if isinstance(cache, dict) else None
+    if hit is not None:
+        expires_at, cached_guild_ids, connected_snapshot = hit
+        if expires_at > now and connected_snapshot == guild_ids:
+            by_id = {g.id: g for g in bot.guilds}
+            return sorted(
+                [by_id[gid] for gid in cached_guild_ids if gid in by_id],
+                key=lambda g: g.name.lower(),
+            )
+
+    manageable: dict[int, discord.Guild] = {}
+    missing: list[discord.Guild] = []
+    for guild in bot.guilds:
+        # Guild owners are always authorized even if their Member object is not
+        # currently cached. This also avoids an unnecessary API call.
+        if getattr(guild, "owner_id", None) == user_id:
+            manageable[guild.id] = guild
+            continue
+        member = guild.get_member(user_id)
+        if member is None:
+            missing.append(guild)
+        elif can_manage(member.guild_permissions):
+            manageable[guild.id] = guild
+
+    semaphore = asyncio.Semaphore(MANAGEABLE_DISCOVERY_CONCURRENCY)
+
+    async def probe(guild: discord.Guild) -> None:
+        async with semaphore:
+            try:
+                member = await guild.fetch_member(user_id)
+            except discord.NotFound:
+                return
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                # A discovery failure must not break the whole dashboard. The
+                # user can retry, and require_manager remains authoritative.
+                log.warning("Could not verify manager %s in guild %s: %s", user_id, guild.id, exc)
+                return
+            if can_manage(member.guild_permissions):
+                manageable[guild.id] = guild
+
+    if missing:
+        await asyncio.gather(*(probe(guild) for guild in missing))
+
+    result = sorted(manageable.values(), key=lambda g: g.name.lower())
+    if isinstance(cache, dict):
+        if len(cache) > 5_000:
+            cache.clear()
+        cache[user_id] = (now + MANAGEABLE_DISCOVERY_TTL, tuple(g.id for g in result), guild_ids)
+    return result
 
 
 async def is_owner(bot: ParleyBot, user_id: int) -> bool:

@@ -40,7 +40,10 @@ async def start_network_flow(interaction: discord.Interaction) -> None:
         await open_network_setup(interaction, guild)
         return
 
-    candidates = [g for g in permissions.cached_manageable_guilds(bot, interaction.user.id) if g.id != bot.runtime.hub.main_guild_id]
+    candidates = [
+        g for g in await permissions.manageable_guilds(bot, interaction.user.id)
+        if g.id != bot.runtime.hub.main_guild_id
+    ]
     if not candidates:
         add = add_bot_button(bot)
         embed = discord.Embed(

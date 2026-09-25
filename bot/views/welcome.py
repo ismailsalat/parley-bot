@@ -255,7 +255,7 @@ def set_listing_button_label(view: discord.ui.View, *, multiple: bool) -> None:
 
 async def personalize_control_panel(bot: ParleyBot, user_id: int, *, staff: bool = False) -> tuple[str, discord.ui.View]:
     content, view = control_panel(bot, staff=staff)
-    managed_ids = {g.id for g in permissions.cached_manageable_guilds(bot, user_id)}
+    managed_ids = {g.id for g in await permissions.manageable_guilds(bot, user_id)}
     from bot.database import repository
     from bot.database.models import ListingStatus
     async with bot.db.session() as session:
@@ -321,7 +321,7 @@ async def network_help(interaction: discord.Interaction) -> None:
     """Explain the Network before offering setup."""
     bot = get_bot(interaction)
     connected = [
-        guild for guild in permissions.cached_manageable_guilds(bot, interaction.user.id)
+        guild for guild in await permissions.manageable_guilds(bot, interaction.user.id)
         if guild.id != bot.runtime.hub.main_guild_id
     ]
     text = templates.render(bot.runtime, "network_help")
@@ -614,7 +614,7 @@ async def directory_overview(interaction: discord.Interaction) -> None:
     bot = get_bot(interaction)
     live = {
         guild.id: guild
-        for guild in permissions.cached_manageable_guilds(bot, interaction.user.id)
+        for guild in await permissions.manageable_guilds(bot, interaction.user.id)
         if guild.id != bot.runtime.hub.main_guild_id
     }
     async with bot.db.session() as session:

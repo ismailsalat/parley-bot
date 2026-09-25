@@ -468,13 +468,17 @@ async def test_a_connected_server_never_hides_the_botless_route(db, config):
     bot.guilds = [connected]
     import bot.services.permissions as perms
 
-    original = perms.cached_manageable_guilds
-    perms.cached_manageable_guilds = lambda _bot, _uid: [connected]
+    original = perms.manageable_guilds
+
+    async def manageable(_bot, _uid):
+        return [connected]
+
+    perms.manageable_guilds = manageable
     try:
         interaction = FakeInteraction(bot, ADMIN_ID)
         await start_post_flow(interaction)
     finally:
-        perms.cached_manageable_guilds = original
+        perms.manageable_guilds = original
 
     view = interaction.response.sent[-1]["view"]
     labels = [c.label for c in view.children if getattr(c, "label", None)]

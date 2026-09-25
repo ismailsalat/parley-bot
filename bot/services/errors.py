@@ -41,5 +41,5 @@ class CooldownActive(ParleyError):
         self.remaining = remaining
 
 
-MANAGE_SERVER_REQUIRED = "You need Manage Server permission."
+MANAGE_SERVER_REQUIRED = "You need Manage Server or Administrator permission."
 LISTING_GONE = "This listing no longer exists."

@@ -25,11 +25,13 @@ class ManageCommands(commands.Cog):
     @app_commands.command(name="manage", description="Edit, Relist or remove your Parley listing.")
     @app_commands.allowed_installs(guilds=True, users=False)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
-    @app_commands.default_permissions(manage_guild=True)
     async def manage(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild
         member = interaction.user
-        if guild is not None:
+        # The Parley hub is a dashboard, not the server being managed. A normal
+        # hub member can use /manage and then only sees servers they actually
+        # administer. In any other guild, Manage Server/Admin is required.
+        if guild is not None and guild.id != self.bot.runtime.hub.main_guild_id:
             if not isinstance(member, discord.Member) or not permissions.can_manage(member.guild_permissions):
                 raise PermissionDenied(MANAGE_SERVER_REQUIRED)
             async with self.bot.db.session() as session:

@@ -300,7 +300,7 @@ async def start_post_flow(interaction: discord.Interaction) -> None:
     # and anything else goes through "Verify My Servers", which needs no bot at all.
     # Existing verified listings stay manageable even after Parley is removed.
     candidates = [
-        g for g in permissions.cached_manageable_guilds(bot, user.id)
+        g for g in await permissions.manageable_guilds(bot, user.id)
         if g.id != bot.runtime.hub.main_guild_id
     ]
     candidate_ids = {g.id for g in candidates}
@@ -416,6 +416,9 @@ async def open_listing_form(
 ) -> None:
     bot = get_bot(interaction)
     user_id = interaction.user.id
+    # This is the shared boundary used by buttons, pickers and /connect. Always
+    # re-check the selected server itself so a stale picker can never grant access.
+    await permissions.require_manager(bot, guild.id, user_id)
     await bot.maybe_dm_manager_onboarding(guild, interaction.user)
     # A hidden bot-only channel cannot be used to qualify for the partnership directory.
     permissions.require_public_bot_channel(guild)

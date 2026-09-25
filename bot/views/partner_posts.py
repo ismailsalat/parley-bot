@@ -42,7 +42,7 @@ def partner_post_controls(bot: ParleyBot, guild_id: int) -> discord.ui.View:
 
 
 async def _active_managed_listings(bot: ParleyBot, user_id: int) -> tuple[list[Listing], dict[int, discord.Guild]]:
-    guilds = {g.id: g for g in permissions.cached_manageable_guilds(bot, user_id)}
+    guilds = {g.id: g for g in await permissions.manageable_guilds(bot, user_id)}
     async with bot.db.session() as session:
         rows = await repository.get_listings(session, guilds.keys())
     rows = [
@@ -66,7 +66,7 @@ async def start_partner_posts(interaction: discord.Interaction) -> None:
     bot = get_bot(interaction)
     connected = {
         guild.id: guild
-        for guild in permissions.cached_manageable_guilds(bot, interaction.user.id)
+        for guild in await permissions.manageable_guilds(bot, interaction.user.id)
         if guild.id != bot.runtime.hub.main_guild_id
     }
 

@@ -184,7 +184,7 @@ Every change applies immediately, without a restart. Every section has **Reset t
 
 If you manage several connected servers, **My Listing** becomes **My Servers** and uses one clean server picker. Server-choice screens use compact embeds; one-server users skip the picker entirely.
 
-Partnership requests are also multi-server aware. If you can represent more than one listed server, Parley asks which server is sending the request, shows a clear **From → To** confirmation, and lets you change the source before sending. Duplicate requests name both servers so a second admin can immediately see that another admin may already have sent it. A configurable server-wide cooldown prevents two admins from firing requests too quickly.
+Partnership requests are also multi-server aware. In the Parley hub/DM, server pickers discover every connected server where Discord currently gives you **Manage Server** or **Administrator**, even when that member was not present in the bot's local gateway cache. If you can represent more than one listed server, Parley asks which server is sending the request, shows a clear **From → To** confirmation, and lets you change the source before sending. Duplicate requests name both servers so a second admin can immediately see that another admin may already have sent it. A configurable server-wide cooldown prevents two admins from firing requests too quickly.
 
 **A server manager gets partnership-ready in one guided flow:**
 
@@ -242,7 +242,8 @@ A message on a request is optional, and after sending one you go straight back t
 
 **Commands** stay tiny:
 
-- Everyone: `/connect` `/manage` `/find` `/network` `/help`
+- Safe entry points visible to everyone: `/find`, `/manage`, `/help`. `/find` and `/manage` never grant access by themselves; they only show servers the caller can actually manage.
+- Server-specific manager commands: `/connect`, `/network`, `/relist` require **Manage Server** or **Administrator** in that server. `/setup` remains owner/staff controlled by its own runtime checks.
 - Bot owner: `/setup`
 - Staff, in the main server only: `/settings` and `/admin`, with `remove`, `suspend`, `ban-server`, `unban-server`, `block-user`, `unblock-user`, `listing`, `stats`, `health` and `import-settings`
 

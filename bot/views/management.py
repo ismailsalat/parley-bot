@@ -142,7 +142,7 @@ def manage_button(bot: ParleyBot, guild_id: int, guild_name: str, row: int | Non
 @register_action("servers")
 async def show_my_servers(interaction: discord.Interaction) -> None:
     bot = get_bot(interaction)
-    connected = {g.id: g for g in permissions.cached_manageable_guilds(bot, interaction.user.id)}
+    connected = {g.id: g for g in await permissions.manageable_guilds(bot, interaction.user.id)}
     async with bot.db.session() as session:
         delegated_ids = set(await repository.guild_ids_connected_by(session, interaction.user.id))
         guild_ids = set(connected) | delegated_ids
@@ -633,7 +633,7 @@ async def relist_from_anywhere(interaction: discord.Interaction) -> None:
                 await relist(interaction, interaction.guild.id)
                 return
 
-    managed = {g.id: g for g in permissions.cached_manageable_guilds(bot, interaction.user.id)}
+    managed = {g.id: g for g in await permissions.manageable_guilds(bot, interaction.user.id)}
     async with bot.db.session() as session:
         delegated_ids = set(await repository.guild_ids_connected_by(session, interaction.user.id))
         guild_ids = set(managed) | delegated_ids

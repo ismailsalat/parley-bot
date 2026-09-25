@@ -57,7 +57,7 @@ async def test_require_manager_checks_current_state_every_time():
     guild = FakeGuild(1, {10: discord.Permissions(manage_guild=True), 11: discord.Permissions.none()})
     bot = FakeBot(guild)
     await permissions.require_manager(bot, 1, 10)
-    with pytest.raises(PermissionDenied, match="You need Manage Server permission."):
+    with pytest.raises(PermissionDenied, match="You need Manage Server or Administrator permission."):
         await permissions.require_manager(bot, 1, 11)
     # permission removed later: the next check sees it immediately (nothing is cached)
     guild._members[10] = discord.Permissions.none()
@@ -79,3 +79,36 @@ def test_manageable_guilds_listing():
     a = FakeGuild(1, {10: discord.Permissions(administrator=True)})
     b = FakeGuild(2, {10: discord.Permissions.none()})
     assert [g.id for g in permissions.cached_manageable_guilds(FakeBot(a, b), 10)] == [1]
+
+
+class FakeUncachedGuild(FakeGuild):
+    """Discord knows the member, but the gateway member cache does not."""
+
+    def get_member(self, user_id: int):
+        return None
+
+
+async def test_manageable_guilds_fetches_uncached_administrators():
+    admin = FakeUncachedGuild(1, {10: discord.Permissions(administrator=True)})
+    manager = FakeUncachedGuild(2, {10: discord.Permissions(manage_guild=True)})
+    ordinary = FakeUncachedGuild(3, {10: discord.Permissions(send_messages=True)})
+    bot = FakeBot(admin, manager, ordinary)
+
+    result = await permissions.manageable_guilds(bot, 10)
+
+    assert [guild.id for guild in result] == [1, 2]
+    assert admin.fetches == 1
+    assert manager.fetches == 1
+    assert ordinary.fetches == 1
+
+
+async def test_manageable_guilds_cache_never_grants_action_permission():
+    guild = FakeUncachedGuild(1, {10: discord.Permissions(administrator=True)})
+    bot = FakeBot(guild)
+    assert [g.id for g in await permissions.manageable_guilds(bot, 10)] == [1]
+
+    # Discovery may be briefly cached for UI performance, but the action boundary
+    # always asks Discord again and sees a revoked permission immediately.
+    guild._members[10] = discord.Permissions.none()
+    with pytest.raises(PermissionDenied):
+        await permissions.require_manager(bot, 1, 10)

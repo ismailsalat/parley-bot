@@ -52,7 +52,7 @@ async def represented_listings(bot: ParleyBot, session: AsyncSession, user_id: i
     the listing plus any partnership contacts.
     """
     contact_ids = set(await repository.guild_ids_where_contact(session, user_id))
-    live_manager_ids = {guild.id for guild in permissions.cached_manageable_guilds(bot, user_id)}
+    live_manager_ids = {guild.id for guild in await permissions.manageable_guilds(bot, user_id)}
     verified_ids = set(await repository.guild_ids_connected_by(session, user_id))
     disconnected_manager_ids = {gid for gid in verified_ids if not permissions.is_connected(bot, gid)}
     rows = await repository.get_listings(session, contact_ids | live_manager_ids | disconnected_manager_ids)
@@ -658,7 +658,7 @@ async def show_requests(interaction: discord.Interaction) -> None:
     user_id = interaction.user.id
     async with bot.db.session() as session:
         contact_ids = set(await repository.guild_ids_where_contact(session, user_id))
-        manager_ids = {g.id for g in permissions.cached_manageable_guilds(bot, user_id)}
+        manager_ids = {g.id for g in await permissions.manageable_guilds(bot, user_id)}
         mine = [
             row.guild_id
             for row in await repository.get_listings(session, contact_ids | manager_ids)
@@ -817,14 +817,14 @@ async def start_find_flow(interaction: discord.Interaction) -> None:
     context_guild = interaction.guild
     if context_guild is not None and context_guild.id != bot.runtime.hub.main_guild_id:
         if not await permissions.is_manager(bot, context_guild.id, interaction.user.id):
-            raise PermissionDenied("You need **Manage Server** to find partnerships for this server.")
+            raise PermissionDenied("You need **Manage Server** or **Administrator** to find partnerships for this server.")
         await _continue_find_for_guild(interaction, context_guild)
         return
 
     # In DMs / the main Parley server, show every connected server the person
     # can actually manage. Listing and Network readiness are handled after pick.
     connected = [
-        guild for guild in permissions.cached_manageable_guilds(bot, interaction.user.id)
+        guild for guild in await permissions.manageable_guilds(bot, interaction.user.id)
         if guild.id != bot.runtime.hub.main_guild_id
     ]
     if not connected:
