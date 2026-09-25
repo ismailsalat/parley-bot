@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
+import re
 import time
 from dataclasses import replace
 
@@ -24,12 +25,15 @@ from bot.services.moderation import RateLimiter
 from bot.oauth_server import OAuthServer
 from bot.services.panels import PanelService
 from bot.tasks import BackgroundTasks
+from bot.utils.helpers import utcnow
 from bot.utils.mentions import safe_allowed_mentions
 
 log = logging.getLogger(__name__)
 
 JOIN_CHANNEL_NAMES = ("general", "start-here", "welcome", "bot-commands", "bots", "commands", "chat")
 VIEW_MODULES = ("bot.views.network","bot.views.partner_posts",  "bot.views.admin.settings", "bot.views.admin.setup", "bot.views.admin.test_center")
+TOP_LEVEL_ACTION_ID = re.compile(r"^wp:act:(?P<action>[a-z_]+)$")
+INTERACTION_ROUTING_REVISION = "2026-09-25-static-router-r1"
 
 
 def build_intents(message_content: bool = True) -> discord.Intents:
@@ -58,10 +62,7 @@ def persistent_items() -> list[type[discord.ui.DynamicItem]]:
     from bot.views.listings import ReviewButton
     from bot.views.management import ManageButton, ManagementButton
     from bot.views.partnership import RequestPartnershipButton, RequestResponseButton, ViewAdButton
-    from bot.views.welcome import ActionButton
-
     return [
-        ActionButton,
         RequestPartnershipButton,
         ViewAdButton,
         RequestResponseButton,
@@ -108,6 +109,13 @@ class ParleyBot(commands.Bot):
         self.background = BackgroundTasks(self)
         self._dm_panel_sent: dict[int, float] = {}
         self._interaction_ack_watchdogs: dict[int, asyncio.Task] = {}
+        self._interaction_recovery_tasks: dict[int, asyncio.Task] = {}
+        self._completed_interactions: set[int] = set()
+        self._claimed_action_interactions: set[int] = set()
+        self._persistent_dynamic_item_types: tuple[type[discord.ui.DynamicItem], ...] = ()
+        self._action_router_view: discord.ui.View | None = None
+        self._dynamic_registry_guard_installed = False
+        self._reconnect_repair_task: asyncio.Task | None = None
         self._started = False
 
     @property
@@ -120,8 +128,25 @@ class ParleyBot(commands.Bot):
         await self.reload_runtime_config()
 
         items = persistent_items()
+        self._persistent_dynamic_item_types = tuple(items)
         self.add_dynamic_items(*items)
-        log.info("Registered %d persistent button types", len(items))
+        self._install_dynamic_registry_guard()
+
+        # Standard discord.py persistent-view routing is the canonical path for
+        # top-level wp:act:* buttons. DynamicItem is reserved for parameterized
+        # ids (guild/request/review ids). A raw on_interaction route remains as a
+        # third independent fallback.
+        from bot.views.welcome import action_router_view
+
+        self._action_router_view = action_router_view()
+        self.add_view(self._action_router_view)
+        self._ensure_interaction_routing(reason="setup")
+        log.info(
+            "Interaction routing %s ready: %d dynamic types + %d static actions",
+            INTERACTION_ROUTING_REVISION,
+            len(items),
+            len(self._action_router_view.children),
+        )
 
         for module in COMMAND_MODULES:
             await self.load_extension(module)
@@ -132,6 +157,105 @@ class ParleyBot(commands.Bot):
 
         if self.settings.sync_commands:
             await self._sync_commands()
+
+    def _install_dynamic_registry_guard(self) -> None:
+        """Keep discord.py's global DynamicItem templates registered.
+
+        discord.py 2.7 keeps DynamicItem templates in one global dictionary. A
+        mixed View (normal items + DynamicItems) records those templates in its
+        snapshot; when that transient view stops, ViewStore.remove_view can pop
+        the shared template even though other persistent messages still need it.
+        Parley uses many short-lived menus, so without this guard the failure
+        appears exactly as: buttons work after deploy, then all old buttons stop.
+
+        Wrap remove_view once, restore Parley's templates immediately afterwards,
+        and also audit the registry from the background watchdog/on_interaction.
+        """
+        store = self._connection._view_store
+        if self._dynamic_registry_guard_installed:
+            return
+        original_remove = store.remove_view
+
+        def guarded_remove(view) -> None:
+            original_remove(view)
+            # discord.py 2.7 can remove globally registered DynamicItem
+            # templates when *any* view containing that template stops. It can
+            # also remove message-independent static routes when a shared view
+            # is explicitly stopped. Repair both routing layers immediately.
+            self._ensure_interaction_routing(reason=f"view_removed:{type(view).__name__}")
+
+        store.remove_view = guarded_remove  # type: ignore[method-assign]
+        self._dynamic_registry_guard_installed = True
+
+    def _ensure_dynamic_item_registry(self, *, reason: str) -> int:
+        """Synchronously restore any parameterized DynamicItem templates."""
+        store = self._connection._view_store
+        missing = []
+        for cls in self._persistent_dynamic_item_types:
+            pattern = cls.__discord_ui_compiled_template__
+            if store._dynamic_items.get(pattern) is not cls:
+                missing.append(cls)
+        if missing:
+            store.add_dynamic_items(*missing)
+            log.warning(
+                "interaction.dynamic_registry_repaired reason=%s missing=%s",
+                reason,
+                ",".join(cls.__name__ for cls in missing),
+            )
+        return len(missing)
+
+    def _ensure_action_router_registered(self, *, reason: str) -> int:
+        """Ensure every wp:act:* id has a message-independent persistent route."""
+        from bot.views.welcome import action_router_view, registered_actions
+
+        store = self._connection._view_store
+        global_routes = store._views.get(None, {})
+        component_type = discord.ComponentType.button.value
+        missing = [
+            action
+            for action in registered_actions()
+            if (component_type, f"wp:act:{action}") not in global_routes
+        ]
+        if missing:
+            # add_view overwrites only these stable keys. Do not stop the older
+            # router: stopping a view can remove keys that a newer router replaced.
+            self._action_router_view = action_router_view()
+            self.add_view(self._action_router_view)
+            log.warning(
+                "interaction.static_router_repaired reason=%s missing=%s",
+                reason,
+                ",".join(sorted(missing)),
+            )
+        return len(missing)
+
+    def _ensure_interaction_routing(self, *, reason: str) -> tuple[int, int]:
+        """Repair both persistent routing layers without network I/O."""
+        dynamic = self._ensure_dynamic_item_registry(reason=reason)
+        static = self._ensure_action_router_registered(reason=reason)
+        return dynamic, static
+
+    def interaction_routing_status(self) -> dict[str, object]:
+        """Small health snapshot used by diagnostics/tests."""
+        from bot.views.welcome import registered_actions
+
+        store = self._connection._view_store
+        dynamic_missing = [
+            cls.__name__
+            for cls in self._persistent_dynamic_item_types
+            if store._dynamic_items.get(cls.__discord_ui_compiled_template__) is not cls
+        ]
+        routes = store._views.get(None, {})
+        component_type = discord.ComponentType.button.value
+        action_missing = [
+            action for action in registered_actions()
+            if (component_type, f"wp:act:{action}") not in routes
+        ]
+        return {
+            "revision": INTERACTION_ROUTING_REVISION,
+            "dynamic_missing": dynamic_missing,
+            "action_missing": action_missing,
+            "ok": not dynamic_missing and not action_missing,
+        }
 
     async def _sync_commands(self) -> None:
         try:
@@ -176,7 +300,14 @@ class ParleyBot(commands.Bot):
         assert self.user is not None
         log.info("Connected to Discord as %s (id %s) in %d servers", self.user, self.user.id, len(self.guilds))
         if self._started:
-            return  # on_ready also fires after a reconnect; nothing to redo
+            # A reconnect can produce either RESUMED or a fresh READY session.
+            # Verify controls in both cases instead of assuming the old component
+            # state is still healthy.
+            if self._reconnect_repair_task is None or self._reconnect_repair_task.done():
+                self._reconnect_repair_task = asyncio.create_task(
+                    self._repair_after_resume(), name="parley-ready-panel-repair"
+                )
+            return
         self._started = True
 
         await self._apply_presence()
@@ -193,7 +324,13 @@ class ParleyBot(commands.Bot):
         # three-minute, one-message posting window.
         await self.panels.ensure_directory_locked()
         try:
-            await self.panels.restore_panels(force_edit=True)
+            # Every process start gets genuinely fresh public entry panels. This
+            # replaces stale component messages instead of merely trusting an old
+            # message forever. The panel service spaces writes to avoid 429 bursts.
+            await self.panels.refresh_entry_panels(repost=True)
+            await self.panels.cleanup_orphan_entry_panels()
+            self.background.last_run["entry_panels_reposted_monotonic"] = time.monotonic()
+            self.background.last_run["entry_panels_reposted"] = utcnow()
         except discord.HTTPException as exc:
             log.error("Could not restore panels: %s", exc)
         try:
@@ -204,6 +341,106 @@ class ParleyBot(commands.Bot):
             log.exception("Could not refresh live listing buttons during startup")
         await self._startup_self_check()
         log.info("%s is ready (mode: %s)", self.runtime.bot.name, self.hub.mode.upper())
+
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        """Independent safety route for persistent top-level buttons.
+
+        Discord.py normally dispatches DynamicItem callbacks before this event.
+        Keeping a second route here means an old ``wp:act:*`` button can still
+        work even if DynamicItem reconstruction is missed after a deploy. A tiny
+        synchronous claim set guarantees that only one route actually runs it.
+        """
+        data = getattr(interaction, "data", None) or {}
+        custom_id = data.get("custom_id") if isinstance(data, dict) else None
+        if isinstance(custom_id, str):
+            log.info(
+                "interaction.received custom_id=%s user_id=%s guild_id=%s",
+                custom_id,
+                interaction.user.id,
+                getattr(interaction, "guild_id", None),
+            )
+
+            # The library normally dispatches Views before this event. Audit the
+            # registries anyway; if a parameterized DynamicItem template vanished
+            # between clicks, restore it and dispatch this *same click* manually.
+            store = self._connection._view_store
+            had_dynamic_match = any(pattern.fullmatch(custom_id) for pattern in store._dynamic_items)
+            repaired_dynamic, _ = self._ensure_interaction_routing(reason="interaction")
+
+            match = TOP_LEVEL_ACTION_ID.fullmatch(custom_id)
+            if match is not None:
+                from bot.views.base import arm_interaction_ack_watchdog
+                from bot.views.welcome import claim_action_interaction, dispatch_action
+
+                # Arm the deadline backup at the earliest user-code event we get.
+                arm_interaction_ack_watchdog(interaction)
+                action = match.group("action")
+                if claim_action_interaction(self, interaction, action, source="event_fallback"):
+                    await dispatch_action(interaction, action, source="event_fallback")
+                return
+
+            # Any Parley-owned persistent component gets an acknowledgement
+            # watchdog even if an obsolete custom_id no longer matches a current
+            # DynamicItem. That prevents a silent red timeout and records the id.
+            if custom_id.startswith("wp:"):
+                from bot.views.base import arm_interaction_ack_watchdog
+
+                arm_interaction_ack_watchdog(interaction)
+                if not had_dynamic_match and repaired_dynamic:
+                    component_type = data.get("component_type", discord.ComponentType.button.value)
+                    try:
+                        component_type = int(component_type)
+                    except (TypeError, ValueError):
+                        component_type = discord.ComponentType.button.value
+                    # parse_interaction_create already attempted dispatch before
+                    # on_interaction. It could not schedule this click when the
+                    # template was missing, so replay dynamic dispatch once now.
+                    if any(pattern.fullmatch(custom_id) for pattern in store._dynamic_items):
+                        store.dispatch_dynamic_items(component_type, custom_id, interaction)
+                        log.warning(
+                            "interaction.dynamic_current_click_recovered custom_id=%s user_id=%s",
+                            custom_id,
+                            interaction.user.id,
+                        )
+                return
+
+            # Last compatibility layer for very old public Parley panels whose
+            # component IDs predate the current ``wp:*`` namespace. We only do
+            # this for messages authored by this bot inside one of the configured
+            # hub panel channels, so unrelated third-party/transient components
+            # are never intercepted.
+            message = getattr(interaction, "message", None)
+            channel_id = getattr(interaction, "channel_id", None)
+            if (
+                message is not None
+                and self.user is not None
+                and getattr(getattr(message, "author", None), "id", None) == self.user.id
+                and channel_id in self.panels.panel_channel_ids()
+            ):
+                from bot.views.base import arm_interaction_ack_watchdog
+
+                log.warning(
+                    "interaction.legacy_component custom_id=%s message_id=%s channel_id=%s",
+                    custom_id,
+                    getattr(message, "id", None),
+                    channel_id,
+                )
+                arm_interaction_ack_watchdog(interaction)
+
+    async def _repair_after_resume(self) -> None:
+        """Repair public controls after a gateway resume without blocking reconnect."""
+        try:
+            await asyncio.sleep(1.0)
+            if not self.is_ready() or not self.hub.configured:
+                return
+            self._ensure_interaction_routing(reason="gateway_resume")
+            results = await self.panels.refresh_entry_panels(repost=True)
+            await self.panels.cleanup_orphan_entry_panels()
+            log.info("Reconnect panel refresh: %s", results)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Could not verify panels after Discord session resume")
 
     async def _rename_legacy_hub_channels(self) -> None:
         """Rename only untouched legacy default hub channel names to the clearer v1 names.
@@ -287,6 +524,11 @@ class ParleyBot(commands.Bot):
 
     async def on_resumed(self) -> None:
         log.info("Discord session resumed")
+        if self._reconnect_repair_task is not None and not self._reconnect_repair_task.done():
+            self._reconnect_repair_task.cancel()
+        self._reconnect_repair_task = asyncio.create_task(
+            self._repair_after_resume(), name="parley-reconnect-panel-repair"
+        )
 
     async def on_disconnect(self) -> None:
         log.info("Disconnected from Discord; discord.py will reconnect automatically")
@@ -724,11 +966,21 @@ class ParleyBot(commands.Bot):
 
     async def close(self) -> None:
         log.info("Shutting down…")
+        if self._reconnect_repair_task is not None and not self._reconnect_repair_task.done():
+            self._reconnect_repair_task.cancel()
+            await asyncio.gather(self._reconnect_repair_task, return_exceptions=True)
         for task in list(self._interaction_ack_watchdogs.values()):
             task.cancel()
         if self._interaction_ack_watchdogs:
             await asyncio.gather(*self._interaction_ack_watchdogs.values(), return_exceptions=True)
             self._interaction_ack_watchdogs.clear()
+        for task in list(self._interaction_recovery_tasks.values()):
+            task.cancel()
+        if self._interaction_recovery_tasks:
+            await asyncio.gather(*self._interaction_recovery_tasks.values(), return_exceptions=True)
+            self._interaction_recovery_tasks.clear()
+        self._completed_interactions.clear()
+        self._claimed_action_interactions.clear()
         await self.oauth.stop()
         await self.background.stop()
         await self.panels.close()

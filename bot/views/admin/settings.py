@@ -247,9 +247,11 @@ class ChannelsPage(Page):
 
     async def _repair(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction, thinking=False)
-        results = await self.bot.panels.restore_panels(force_edit=True)
+        # Staff repair deliberately replaces the public entry panels so every
+        # button is a fresh Discord component, not merely an edit of an old one.
+        results = await self.bot.panels.refresh_entry_panels(repost=True)
         words = {"ok": "fine", "created": "recreated", "moved": "moved to the bottom", "edited": "updated",
-                 "disabled": "turned off", "no_channel": "no channel set", "error": "❌ failed (check permissions)"}
+                 "reposted": "reposted with fresh buttons", "disabled": "turned off", "no_channel": "no channel set", "error": "❌ failed (check permissions)"}
         summary = ", ".join(f"{name}: {words.get(state, state)}" for name, state in results.items())
         await self.show(interaction, f"🔧 Panels checked — {summary}.")
 

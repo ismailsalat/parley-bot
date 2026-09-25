@@ -75,4 +75,4 @@ def test_slow_user_buttons_acknowledge_before_database_work():
 
 def test_startup_force_refreshes_persistent_panels():
     core = (ROOT / "bot" / "core.py").read_text(encoding="utf-8")
-    assert "await self.panels.restore_panels(force_edit=True)" in core
+    assert "await self.panels.refresh_entry_panels(repost=True)" in core

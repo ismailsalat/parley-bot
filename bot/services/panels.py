@@ -33,6 +33,8 @@ LOOKING_PANEL = "looking"
 WELCOME_PANEL = "welcome"
 PERKS_PANEL = "perks"
 PARLEY_PERKS_PANEL = "parley_perks"
+STARTUP_PANEL_SPACING_SECONDS = 0.9
+LISTING_REFRESH_SPACING_SECONDS = 0.8
 
 PanelBuilder = Callable[["ParleyBot"], tuple[str, discord.ui.View]]
 
@@ -353,6 +355,123 @@ class PanelService:
         results[PARLEY_PERKS_PANEL] = await self.ensure_panel(PARLEY_PERKS_PANEL, keep_at_bottom=False, force_edit=force_edit)
         return results
 
+    async def refresh_entry_panels(self, *, repost: bool) -> dict[str, str]:
+        """Refresh every permanent public entry panel with paced Discord writes.
+
+        ``repost=True`` is used once per process start. It deliberately replaces
+        the stored panel messages so every deploy gets brand-new Discord
+        components instead of relying forever on an old button message.
+
+        ``repost=False`` is used after gateway resumes and by periodic recovery;
+        it force-edits current messages in place to avoid needless churn.
+        """
+        await self._refresh_how_it_works_channel()
+        results: dict[str, str] = {}
+        ordered = (
+            WELCOME_PANEL,
+            LISTINGS_PANEL,
+            LOOKING_PANEL,
+            PERKS_PANEL,
+            PARLEY_PERKS_PANEL,
+        )
+        async def refresh_one(panel_type: str) -> str:
+            channel = self._channel_for(panel_type)
+            if channel is None:
+                return "no_channel"
+            _builder, enabled = self._builder(panel_type)
+            if not enabled:
+                return await self.ensure_panel(
+                    panel_type,
+                    keep_at_bottom=panel_type == LISTINGS_PANEL,
+                    force_edit=True,
+                )
+            if repost:
+                message = await self._repost_panel(panel_type, channel)
+                return "reposted" if message is not None else "error"
+            return await self.ensure_panel(
+                panel_type,
+                keep_at_bottom=panel_type == LISTINGS_PANEL,
+                force_edit=True,
+            )
+
+        for index, panel_type in enumerate(ordered):
+            if panel_type == LISTINGS_PANEL:
+                async with self._listings_lock:
+                    results[panel_type] = await refresh_one(panel_type)
+            elif panel_type == LOOKING_PANEL:
+                async with self._looking_lock:
+                    results[panel_type] = await refresh_one(panel_type)
+            else:
+                results[panel_type] = await refresh_one(panel_type)
+            if index < len(ordered) - 1:
+                await asyncio.sleep(STARTUP_PANEL_SPACING_SECONDS)
+        log.info("Permanent panels refreshed: %s", results)
+        return results
+
+    async def cleanup_orphan_entry_panels(self, *, history_limit: int = 250) -> int:
+        """Remove stale bot-owned entry panels left behind by older deployments.
+
+        The database tracks the current panel message in each channel, but very
+        old releases or a crash between send/delete can leave an extra public
+        message behind. Users may keep clicking those old controls. On startup,
+        scan only recent bot-authored messages that contain a top-level
+        ``wp:act:*`` component and remove every one except the currently stored
+        panel IDs. Listing/request cards use different custom-id prefixes and are
+        therefore not touched.
+        """
+        if self.bot.user is None or not self.bot.runtime.hub.main_guild_id:
+            return 0
+        guild_id = self.bot.runtime.hub.main_guild_id
+        async with self.bot.db.session() as session:
+            current_ids = {
+                panel.message_id
+                for panel_type in (LISTINGS_PANEL, LOOKING_PANEL, WELCOME_PANEL, PERKS_PANEL, PARLEY_PERKS_PANEL)
+                if (panel := await repository.get_panel(session, guild_id, panel_type)) is not None
+                and panel.message_id is not None
+            }
+
+        deleted = 0
+        seen_channels: set[int] = set()
+        for channel_id in self.panel_channel_ids():
+            if channel_id in seen_channels:
+                continue
+            seen_channels.add(channel_id)
+            channel = self.bot.get_channel(channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                continue
+            try:
+                async for message in channel.history(limit=history_limit):
+                    if message.author.id != self.bot.user.id or message.id in current_ids:
+                        continue
+                    has_entry_action = any(
+                        isinstance(getattr(component, "custom_id", None), str)
+                        and component.custom_id.startswith("wp:act:")
+                        for row in message.components
+                        for component in getattr(row, "children", ())
+                    )
+                    # Very old Start Here builds may predate wp:act:* but still
+                    # contain the unmistakable panel heading. Clean those too so
+                    # nobody can keep clicking a dead September-era panel.
+                    is_legacy_welcome = (
+                        channel.id == self.bot.runtime.hub.welcome_channel_id
+                        and "Welcome to Parley" in (message.content or "")
+                    )
+                    if not has_entry_action and not is_legacy_welcome:
+                        continue
+                    try:
+                        await message.delete()
+                        deleted += 1
+                        await asyncio.sleep(0.25)
+                    except discord.NotFound:
+                        pass
+                    except discord.HTTPException as exc:
+                        log.warning("Could not remove stale entry panel message %s: %s", message.id, exc)
+            except discord.HTTPException as exc:
+                log.warning("Could not scan #%s for stale entry panels: %s", channel.name, exc)
+        if deleted:
+            log.info("Removed %d stale/orphan entry panel message(s)", deleted)
+        return deleted
+
     async def post_above_panel(self, channel: discord.TextChannel, panel_type: str, **kwargs) -> discord.Message:
         """Post a message (e.g. a Test Center example) and move the panel under it."""
         lock = self._looking_lock if panel_type == LOOKING_PANEL else self._listings_lock
@@ -621,8 +740,11 @@ class PanelService:
                 failed += 1
                 log.exception("Unexpected error refreshing listing controls for guild %s", listing.guild_id)
 
-            if index % 25 == 0:
-                await asyncio.sleep(0)
+            # Startup can touch both a directory message and a partner-board
+            # control strip for one listing. Pace each listing so a large hub
+            # cannot burst PATCH requests into Discord's rate-limit bucket.
+            if index < len(rows):
+                await asyncio.sleep(LISTING_REFRESH_SPACING_SECONDS)
 
         return refreshed, failed
 

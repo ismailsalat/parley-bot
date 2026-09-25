@@ -30,6 +30,7 @@ from bot.views.base import (
     guild_info,
     handle_error,
     home_button,
+    mark_interaction_complete,
     reply,
     user_label,
     edit_response,
@@ -143,12 +144,14 @@ class RequestPartnershipButton(discord.ui.DynamicItem[discord.ui.Button], templa
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction)  # the prompt is a view, so deferring is safe
-        if not await guard(interaction):
-            return
         try:
+            if not await guard(interaction):
+                return
             await start_request_flow(interaction, self.guild_id)
         except Exception as exc:  # noqa: BLE001 - handled and logged
             await handle_error(interaction, exc)
+        finally:
+            mark_interaction_complete(interaction)
 
 
 class ViewAdButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wp:ad:(?P<gid>\d+)"):
@@ -170,12 +173,14 @@ class ViewAdButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wp:ad:(
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction)
-        if not await guard(interaction):
-            return
         try:
+            if not await guard(interaction):
+                return
             await show_ad(interaction, self.guild_id)
         except Exception as exc:  # noqa: BLE001
             await handle_error(interaction, exc)
+        finally:
+            mark_interaction_complete(interaction)
 
 
 class RequestResponseButton(
@@ -200,12 +205,14 @@ class RequestResponseButton(
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction)
-        if not await guard(interaction):
-            return
         try:
+            if not await guard(interaction):
+                return
             await respond_to_request(interaction, self.request_id, self.accept)
         except Exception as exc:  # noqa: BLE001
             await handle_error(interaction, exc)
+        finally:
+            mark_interaction_complete(interaction)
 
 
 def request_button(bot: ParleyBot, guild_id: int, row: int | None = None) -> RequestPartnershipButton:

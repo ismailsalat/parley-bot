@@ -135,6 +135,18 @@ class StaffCommands(commands.Cog):
         await acknowledge(interaction)
         await reply(interaction, health.render(await health.run(self.bot)))
 
+    @admin.command(name="repair-panels", description="Repost Parley panels with fresh buttons.")
+    async def repair_panels(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
+        results = await self.bot.panels.refresh_entry_panels(repost=True)
+        refreshed, failed = await self.bot.panels.refresh_active_listing_views()
+        summary = ", ".join(f"{name}={state}" for name, state in results.items())
+        await reply(
+            interaction,
+            f"✅ Repaired public panels with fresh buttons.\n{summary}\n"
+            f"Listing controls refreshed: {refreshed}; failed: {failed}.",
+        )
+
     @admin.command(name="import-settings", description="Restore settings from an exported file.")
     @app_commands.describe(file="waypoint-settings.json from Export Settings", include_channels="Also restore main-server channels (same server only)")
     async def import_settings(self, interaction: discord.Interaction, file: discord.Attachment, include_channels: bool = False) -> None:

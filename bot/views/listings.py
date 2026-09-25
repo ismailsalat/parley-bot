@@ -31,6 +31,7 @@ from bot.views.base import (
     guild_info,
     handle_error,
     home_button,
+    mark_interaction_complete,
     reply,
     edit_response,
 )
@@ -1359,15 +1360,17 @@ class ReviewButton(
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction)
-        if not await guard(interaction):
-            return
         try:
+            if not await guard(interaction):
+                return
             if self.action == "ban":
                 await ban_from_review(interaction, self.guild_id)
             else:
                 await review(interaction, self.guild_id, self.action == "approve", self.revision)
         except Exception as exc:  # noqa: BLE001
             await handle_error(interaction, exc)
+        finally:
+            mark_interaction_complete(interaction)
 
 
 def _info_changes(listing: Listing) -> list[str]:

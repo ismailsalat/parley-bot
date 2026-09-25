@@ -198,11 +198,33 @@ async def run(bot: ParleyBot) -> list[Check]:
 
     registered = set(bot._connection._view_store._dynamic_items.values())
     expected = set(persistent_items())
-    checks.append(
-        Check(OK, "Persistent buttons", f"{len(expected)} types")
-        if expected <= registered
-        else Check(FAIL, "Persistent buttons", "some old buttons won't respond — restart Parley")
-    )
+    routing_fn = getattr(bot, "interaction_routing_status", None)
+    routing = routing_fn() if callable(routing_fn) else {
+        "revision": "test/fallback",
+        "action_missing": [],
+        "dynamic_missing": [],
+    }
+    dynamic_ok = expected <= registered
+    action_missing = list(routing.get("action_missing", []))
+    dynamic_missing = list(routing.get("dynamic_missing", []))
+    if dynamic_ok and not action_missing and not dynamic_missing:
+        checks.append(
+            Check(
+                OK,
+                "Persistent buttons",
+                f"{len(expected)} dynamic types + static action router · {routing.get('revision')}",
+            )
+        )
+    else:
+        missing = dynamic_missing + [f"action:{name}" for name in action_missing]
+        checks.append(
+            Check(
+                FAIL,
+                "Persistent buttons",
+                "routing registry damaged" + (f" · missing {', '.join(missing[:4])}" if missing else ""),
+                "repair",
+            )
+        )
 
     status = bot.background.status()
     if not status["running"]:

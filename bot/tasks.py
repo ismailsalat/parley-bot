@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -26,6 +27,12 @@ if TYPE_CHECKING:
     from bot.core import ParleyBot
 
 log = logging.getLogger(__name__)
+
+EVENT_LOOP_CHECK_SECONDS = 1.0
+EVENT_LOOP_WARN_SECONDS = 1.25
+EVENT_LOOP_CRITICAL_SECONDS = 2.50
+LISTING_CONTROL_REFRESH_SECONDS = 60 * 60
+ENTRY_PANEL_REPOST_SECONDS = 30 * 60
 
 def network_ad_kwargs(bot: ParleyBot, listing) -> dict:
     """A network ad: the owner's normal message + optional footer + buttons (never an embed)."""
@@ -60,6 +67,7 @@ class BackgroundTasks:
             asyncio.create_task(
                 self._loop("maintenance", self.maintenance_tick, self._maintenance_delay), name="waypoint-maintenance"
             ),
+            asyncio.create_task(self._event_loop_watchdog(), name="parley-event-loop-watchdog"),
         ]
         log.info("Background tasks started")
 
@@ -80,6 +88,8 @@ class BackgroundTasks:
             "running": bool(self._tasks) and all(not t.done() for t in self._tasks),
             "last_network_tick": self.last_run.get("network"),
             "last_maintenance": self.last_run.get("maintenance"),
+            "last_listing_control_refresh": self.last_run.get("listing_controls"),
+            "last_event_loop_lag": self.last_run.get("event_loop_lag"),
         }
 
     def _network_delay(self) -> float:
@@ -99,6 +109,46 @@ class BackgroundTasks:
                 # One bad iteration must not kill the loop; the error is logged in full.
                 log.exception("Background task '%s' failed; retrying next cycle", name)
             await asyncio.sleep(delay())
+
+    async def _event_loop_watchdog(self) -> None:
+        """Detect the one failure a normal interaction watchdog cannot fix: loop stalls.
+
+        If Python itself stops scheduling coroutines for several seconds, both the
+        button callback and its acknowledgement timer are delayed. Recording that
+        lag makes a future Discord timeout immediately diagnosable instead of
+        looking like a random broken button.
+        """
+        expected = time.monotonic() + EVENT_LOOP_CHECK_SECONDS
+        latency_check = 0
+        while True:
+            try:
+                await asyncio.sleep(EVENT_LOOP_CHECK_SECONDS)
+                now = time.monotonic()
+                lag = max(0.0, now - expected)
+                self.last_run["event_loop_lag"] = round(lag, 3)
+                if lag >= EVENT_LOOP_CRITICAL_SECONDS:
+                    log.error("event_loop.lag critical=%.3fs", lag)
+                elif lag >= EVENT_LOOP_WARN_SECONDS:
+                    log.warning("event_loop.lag warning=%.3fs", lag)
+                expected = now + EVENT_LOOP_CHECK_SECONDS
+
+                # No network I/O: continuously verify that stopping a transient
+                # Discord view has not removed one of Parley's persistent routes.
+                if latency_check % 10 == 0:
+                    self.bot._ensure_interaction_routing(reason="routing_watchdog")
+
+                latency_check += 1
+                if latency_check >= 30:
+                    latency_check = 0
+                    latency = float(getattr(self.bot, "latency", 0.0) or 0.0)
+                    if latency >= 2.0:
+                        log.warning("discord.gateway_latency high=%.3fs", latency)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Monitoring must never be able to kill the bot.
+                log.exception("Event-loop watchdog failed; continuing")
+                expected = time.monotonic() + EVENT_LOOP_CHECK_SECONDS
 
     # ------------------------------------------------------------ network rotation
 
@@ -230,4 +280,30 @@ class BackgroundTasks:
 
         if bot.is_ready():
             await bot.sync_listed_guilds()
-            await bot.panels.restore_panels()
+            # Re-render permanent controls every maintenance pass. Every six
+            # hours, replace the public panel messages entirely so a 24/7 bot
+            # never depends on an indefinitely old Discord component message.
+            last_panel_repost = self.last_run.get("entry_panels_reposted_monotonic")
+            monotonic_now = time.monotonic()
+            should_repost = (
+                not isinstance(last_panel_repost, float)
+                or monotonic_now - last_panel_repost >= ENTRY_PANEL_REPOST_SECONDS
+            )
+            await bot.panels.refresh_entry_panels(repost=should_repost)
+            if should_repost:
+                await bot.panels.cleanup_orphan_entry_panels()
+                self.last_run["entry_panels_reposted_monotonic"] = monotonic_now
+                self.last_run["entry_panels_reposted"] = utcnow()
+
+            # Refresh every live listing/partner control strip at least hourly.
+            # The panel service spaces Discord writes to stay below rate limits.
+            last = self.last_run.get("listing_controls_monotonic")
+            if not isinstance(last, float) or monotonic_now - last >= LISTING_CONTROL_REFRESH_SECONDS:
+                refreshed, failed = await bot.panels.refresh_active_listing_views()
+                self.last_run["listing_controls_monotonic"] = monotonic_now
+                self.last_run["listing_controls"] = utcnow()
+                log.info(
+                    "Periodic listing control refresh: %d refreshed%s",
+                    refreshed,
+                    f" ({failed} failed)" if failed else "",
+                )

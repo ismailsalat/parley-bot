@@ -21,7 +21,12 @@ log = logging.getLogger(__name__)
 
 GENERIC_ERROR = "Something went wrong on our side. Please try again in a moment."
 MENU_TIMEOUT_SECONDS = 600  # transient menus; interaction tokens last 15 minutes
-ACK_WATCHDOG_SECONDS = 1.8  # Discord requires the first interaction response within ~3 seconds
+# Leave a large safety margin under Discord's roughly three-second interaction
+# acknowledgement deadline.  The watchdog is deliberately under one second:
+# normal callbacks acknowledge immediately, so this only fires when dispatch,
+# Postgres, or Discord itself is slower than expected.
+ACK_WATCHDOG_SECONDS = 0.85
+ACK_RECOVERY_SECONDS = 7.0
 
 
 def get_bot(interaction: discord.Interaction) -> ParleyBot:
@@ -57,22 +62,95 @@ def arm_interaction_ack_watchdog(interaction: discord.Interaction) -> None:
     if interaction.id in tasks:
         return
 
+    started = asyncio.get_running_loop().time()
+
     async def _watch() -> None:
         try:
             await asyncio.sleep(ACK_WATCHDOG_SECONDS)
             if interaction.response.is_done():
                 return
             is_component = interaction.type == discord.InteractionType.component
+            data = getattr(interaction, "data", None) or {}
+            custom_id = data.get("custom_id") if isinstance(data, dict) else None
+            is_persistent_parley = is_component and isinstance(custom_id, str) and custom_id.startswith("wp:")
             await interaction.response.defer(
-                ephemeral=not is_component,
-                thinking=not is_component,
+                # Persistent public buttons recover into a private response so
+                # a watchdog can never overwrite the public directory/welcome
+                # message itself. Transient component menus keep message-update
+                # semantics for compatibility with edit_original_response().
+                ephemeral=(not is_component) or is_persistent_parley,
+                thinking=(not is_component) or is_persistent_parley,
             )
             log.warning(
-                "Interaction ack watchdog fired type=%s user_id=%s guild_id=%s",
+                "interaction.ack_watchdog type=%s user_id=%s guild_id=%s elapsed=%.3fs",
                 getattr(interaction.type, "name", interaction.type),
                 interaction.user.id,
                 getattr(interaction, "guild_id", None),
+                asyncio.get_running_loop().time() - started,
             )
+
+            # A defer prevents Discord's red timeout. Run the longer stalled-action
+            # recovery in a separate task so the acknowledgement watchdog itself
+            # is considered finished immediately after it successfully defers.
+            async def _recover_stalled() -> None:
+                try:
+                    await asyncio.sleep(max(0.0, ACK_RECOVERY_SECONDS - ACK_WATCHDOG_SECONDS))
+                    completed = getattr(bot, "_completed_interactions", set())
+                    if interaction.id in completed:
+                        return
+                    message = getattr(interaction, "message", None)
+                    channel_id = getattr(interaction, "channel_id", None)
+                    owned_panel_message = (
+                        message is not None
+                        and getattr(getattr(message, "author", None), "id", None)
+                        == getattr(getattr(bot, "user", None), "id", None)
+                        and channel_id
+                        in getattr(getattr(bot, "panels", None), "panel_channel_ids", lambda: set())()
+                    )
+                    if not (
+                        isinstance(custom_id, str)
+                        and (custom_id.startswith("wp:") or owned_panel_message)
+                    ):
+                        return
+                    try:
+                        from bot.views.welcome import action_button, persistent_view
+
+                        await interaction.edit_original_response(
+                            content=(
+                                "Parley recovered a slow button response. The original action did not finish, "
+                                "so use a fresh control below."
+                            ),
+                            embeds=[],
+                            view=persistent_view(
+                                action_button(bot, "find", row=0),
+                                action_button(bot, "home", row=0),
+                            ),
+                            allowed_mentions=safe_allowed_mentions(),
+                        )
+                        log.error(
+                            "interaction.recovered_stalled custom_id=%s user_id=%s guild_id=%s",
+                            custom_id,
+                            interaction.user.id,
+                            getattr(interaction, "guild_id", None),
+                        )
+                    except discord.HTTPException as exc:
+                        log.warning("Could not recover stalled interaction %s: %s", interaction.id, exc)
+                except asyncio.CancelledError:
+                    raise
+                finally:
+                    recoveries = getattr(bot, "_interaction_recovery_tasks", None)
+                    if recoveries is not None:
+                        recoveries.pop(interaction.id, None)
+
+            recoveries = getattr(bot, "_interaction_recovery_tasks", None)
+            if recoveries is None:
+                recoveries = {}
+                setattr(bot, "_interaction_recovery_tasks", recoveries)
+            previous = recoveries.get(interaction.id)
+            if previous is None or previous.done():
+                recoveries[interaction.id] = asyncio.create_task(
+                    _recover_stalled(), name=f"parley-interaction-recovery-{interaction.id}"
+                )
         except (discord.HTTPException, discord.InteractionResponded):
             # Another callback response won the race, or Discord no longer accepts
             # the interaction. Either case needs no user-visible second error.
@@ -83,6 +161,23 @@ def arm_interaction_ack_watchdog(interaction: discord.Interaction) -> None:
     tasks[interaction.id] = asyncio.create_task(
         _watch(), name=f"parley-interaction-ack-{interaction.id}"
     )
+
+
+def mark_interaction_complete(interaction: discord.Interaction) -> None:
+    """Tell the watchdog that a persistent interaction finished normally."""
+    if not hasattr(interaction, "id"):
+        return
+    bot = get_bot(interaction)
+    completed = getattr(bot, "_completed_interactions", None)
+    if completed is None:
+        completed = set()
+        setattr(bot, "_completed_interactions", completed)
+    completed.add(interaction.id)
+    # The set is only a short-lived race marker. Bound it so a 24/7 process
+    # cannot grow forever even under very heavy button traffic.
+    if len(completed) > 20_000:
+        completed.clear()
+        completed.add(interaction.id)
 
 
 async def reply(
@@ -145,9 +240,10 @@ async def handle_error(interaction: discord.Interaction, error: BaseException) -
         log.warning("Could not deliver error message to user %s: %s", interaction.user.id, exc)
 
 
-async def guard(interaction: discord.Interaction) -> bool:
+async def guard(interaction: discord.Interaction, *, arm_watchdog: bool = True) -> bool:
     """Runs before every command and component: spam limit + blocked users."""
-    arm_interaction_ack_watchdog(interaction)
+    if arm_watchdog:
+        arm_interaction_ack_watchdog(interaction)
     bot = get_bot(interaction)
     if not bot.click_limiter.hit(interaction.user.id):
         await reply(interaction, "You're clicking a little fast. Please wait a few seconds.")
@@ -254,8 +350,24 @@ async def acknowledge(interaction: discord.Interaction, *, thinking: bool = True
     callback that reads the database must land here first. Safe to call twice.
     Never call it before opening a modal: a modal needs a fresh interaction.
     """
+    # Arm the backup *before* the network request. Previously the watchdog was
+    # started later by guard(), which meant a hung first defer had no safety net.
+    arm_interaction_ack_watchdog(interaction)
     if not interaction.response.is_done():
-        await interaction.response.defer(ephemeral=interaction.guild is not None, thinking=thinking)
+        started = asyncio.get_running_loop().time()
+        try:
+            await interaction.response.defer(ephemeral=interaction.guild is not None, thinking=thinking)
+            interaction_type = getattr(interaction, "type", None)
+            log.debug(
+                "interaction.ack type=%s user_id=%s guild_id=%s elapsed=%.3fs",
+                getattr(interaction_type, "name", interaction_type),
+                interaction.user.id,
+                getattr(interaction, "guild_id", None),
+                asyncio.get_running_loop().time() - started,
+            )
+        except discord.InteractionResponded:
+            # The watchdog or a concurrent safe dispatcher won the race.
+            pass
 
 
 async def deliver_dms(

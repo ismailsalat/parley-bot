@@ -7,7 +7,9 @@ old panels keep working after restarts without storing anything in memory.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from types import SimpleNamespace
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
@@ -21,7 +23,17 @@ from bot.services import listings as listing_service
 from bot.services import permissions
 from bot.utils.helpers import format_duration, format_members, listing_jump_url, truncate, utcnow
 from bot.utils.mentions import safe_allowed_mentions
-from bot.views.base import OwnedView, acknowledge, get_bot, guard, handle_error, home_button, reply, edit_response
+from bot.views.base import (
+    OwnedView,
+    acknowledge,
+    get_bot,
+    guard,
+    handle_error,
+    home_button,
+    mark_interaction_complete,
+    reply,
+    edit_response,
+)
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -30,6 +42,7 @@ log = logging.getLogger(__name__)
 
 ActionHandler = Callable[[discord.Interaction], Awaitable[None]]
 _HANDLERS: dict[str, ActionHandler] = {}
+ACTION_HARD_TIMEOUT_SECONDS = 30.0
 
 
 def register_action(*names: str) -> Callable[[ActionHandler], ActionHandler]:
@@ -45,7 +58,17 @@ def registered_actions() -> set[str]:
     return set(_HANDLERS)
 
 
-class ActionButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wp:act:(?P<action>[a-z_]+)"):
+class ActionButton(discord.ui.Button):
+    """Stable top-level Parley action button.
+
+    This is intentionally a normal :class:`discord.ui.Button`, not a
+    ``DynamicItem``.  Parley registers one message-independent persistent router
+    view for every ``wp:act:*`` custom id at startup, so buttons on old messages
+    continue to work after restarts.  Keeping top-level actions out of the global
+    DynamicItem registry also avoids a discord.py edge case where stopping a
+    mixed transient view can unregister a shared DynamicItem template.
+    """
+
     def __init__(
         self,
         action: str,
@@ -56,57 +79,158 @@ class ActionButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wp:act:
         row: int | None = None,
     ) -> None:
         super().__init__(
-            discord.ui.Button(label=label or action, emoji=emoji, style=style, custom_id=f"wp:act:{action}", row=row)
+            label=label or action,
+            emoji=emoji,
+            style=style,
+            custom_id=f"wp:act:{action}",
+            row=row,
         )
         self.action = action
 
-    @classmethod
-    async def from_custom_id(
-        cls, interaction: discord.Interaction, item: discord.ui.Button, match  # type: ignore[override]
-    ) -> ActionButton:
-        return cls(match["action"], label=item.label, emoji=item.emoji, style=item.style)
+    @property
+    def item(self) -> "ActionButton":
+        """Compatibility shim for code/tests that used DynamicItem.item."""
+        return self
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        handler = _HANDLERS.get(self.action)
-        if handler is None:
-            log.warning("Unknown action button pressed: %s", self.action)
-            await reply(interaction, "That button is no longer available.")
+        bot = get_bot(interaction)
+        if not claim_action_interaction(bot, interaction, self.action, source="static_view"):
             return
-        try:
-            # Discord gives component interactions only a few seconds for the
-            # initial acknowledgement. Top-level actions often read Postgres
-            # before rendering, so acknowledge immediately and finish afterward.
-            if not interaction.response.is_done():
-                await interaction.response.defer(
-                    ephemeral=interaction.guild is not None,
-                    thinking=True,
-                )
-            if not await guard(interaction):
-                return
+        await acknowledge(interaction)
+        await dispatch_action(interaction, self.action, source="static_view")
 
-            # Prevent rapid double-clicks from running the same expensive action
-            # twice for one user. This complements the global click rate limiter
-            # and the database-level partnership/listing cooldowns.
-            bot = get_bot(interaction)
-            active = getattr(bot, "_inflight_actions", None)
-            if active is None:
-                active = set()
-                bot._inflight_actions = active
-            key = (interaction.user.id, self.action)
-            if key in active:
-                await interaction.edit_original_response(
-                    content="That action is already running. Please use the result from your first click.",
-                    embeds=[],
-                    view=None,
-                )
-                return
-            active.add(key)
-            try:
-                await handler(interaction)
-            finally:
-                active.discard(key)
-        except Exception as exc:  # noqa: BLE001 - reported to the user and logged by handle_error
-            await handle_error(interaction, exc)
+
+def action_router_view() -> discord.ui.View:
+    """Return the global restart-safe router for every top-level action.
+
+    The view is registered with ``bot.add_view`` without a message id. Discord.py
+    then uses it as a fallback for *any* message carrying one of these stable
+    custom ids, including panels created by older deployments.  Labels/styles on
+    this invisible router are irrelevant; the visible message keeps its own UI.
+    """
+    view = discord.ui.View(timeout=None)
+    for index, action in enumerate(sorted(registered_actions())):
+        view.add_item(
+            ActionButton(
+                action,
+                label=action.replace("_", " ").title(),
+                style=discord.ButtonStyle.secondary,
+                row=index // 5,
+            )
+        )
+    return view
+
+
+def claim_action_interaction(
+    bot: ParleyBot,
+    interaction: discord.Interaction,
+    action: str,
+    *,
+    source: str,
+) -> bool:
+    """Atomically claim a top-level button interaction.
+
+    Discord.py's message/global persistent View dispatcher is the normal route.
+    ``ParleyBot.on_interaction`` is an independent fallback route for the same stable custom_id. Whichever route
+    gets scheduled first claims the interaction, so there is never a double action.
+    """
+    interaction_id = getattr(interaction, "id", None)
+    if interaction_id is None:
+        return True
+    claimed = getattr(bot, "_claimed_action_interactions", None)
+    if claimed is None:
+        claimed = set()
+        setattr(bot, "_claimed_action_interactions", claimed)
+    if interaction_id in claimed:
+        return False
+    claimed.add(interaction_id)
+    if len(claimed) > 20_000:
+        claimed.clear()
+        claimed.add(interaction_id)
+    log.debug(
+        "interaction.claim action=%s source=%s interaction_id=%s user_id=%s guild_id=%s",
+        action,
+        source,
+        interaction_id,
+        interaction.user.id,
+        getattr(interaction, "guild_id", None),
+    )
+    return True
+
+
+async def dispatch_action(interaction: discord.Interaction, action: str, *, source: str) -> None:
+    """Run a top-level Parley action through one hardened dispatcher.
+
+    This function is intentionally callable from both persistent View routing and the raw
+    interaction event fallback. That makes an old public panel a disposable front
+    door: even if Discord.py loses a message-specific View route, the stable
+    ``wp:act:*`` custom_id can still reach the current action handler.
+    """
+    handler = _HANDLERS.get(action)
+    if handler is None:
+        log.warning("Unknown action button pressed: %s (source=%s)", action, source)
+        await reply(interaction, "That button is no longer available. Please use a fresh Parley panel.")
+        mark_interaction_complete(interaction)
+        return
+    started = time.monotonic()
+    try:
+        # acknowledge() arms the watchdog *before* the Discord HTTP request.
+        await acknowledge(interaction, thinking=True)
+        if not await guard(interaction):
+            return
+
+        # Prevent rapid double-clicks from running the same expensive action twice.
+        bot = get_bot(interaction)
+        active = getattr(bot, "_inflight_actions", None)
+        if active is None:
+            active = set()
+            bot._inflight_actions = active
+        key = (interaction.user.id, action)
+        if key in active:
+            await interaction.edit_original_response(
+                content="That action is already running. Please use the result from your first click.",
+                embeds=[],
+                view=None,
+            )
+            return
+        active.add(key)
+        try:
+            await asyncio.wait_for(handler(interaction), timeout=ACTION_HARD_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            log.error(
+                "interaction.handler_timeout action=%s source=%s user_id=%s guild_id=%s limit=%.1fs",
+                action,
+                source,
+                interaction.user.id,
+                getattr(interaction, "guild_id", None),
+                ACTION_HARD_TIMEOUT_SECONDS,
+            )
+            await interaction.edit_original_response(
+                content=(
+                    "Parley stopped a stuck action before it could hang indefinitely. "
+                    "Please try again using the fresh buttons below."
+                ),
+                embeds=[],
+                view=persistent_view(
+                    action_button(bot, "find", row=0),
+                    action_button(bot, "home", row=0),
+                ),
+                allowed_mentions=safe_allowed_mentions(),
+            )
+        finally:
+            active.discard(key)
+    except Exception as exc:  # noqa: BLE001 - reported to the user and logged by handle_error
+        await handle_error(interaction, exc)
+    finally:
+        mark_interaction_complete(interaction)
+        log.info(
+            "interaction.complete action=%s source=%s user_id=%s guild_id=%s elapsed=%.3fs",
+            action,
+            source,
+            interaction.user.id,
+            getattr(interaction, "guild_id", None),
+            time.monotonic() - started,
+        )
 
 
 BUTTON_STYLE_MAP = {

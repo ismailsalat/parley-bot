@@ -30,6 +30,51 @@ async def test_all_persistent_buttons_are_registered(bot):
     assert registered == set(persistent_items())
 
 
+
+
+async def test_static_action_router_is_registered_without_message_id(bot):
+    routes = bot._connection._view_store._views.get(None, {})
+    expected = {
+        (discord.ComponentType.button.value, f"wp:act:{action}")
+        for action in registered_actions()
+    }
+    assert expected <= set(routes)
+    assert bot.interaction_routing_status()["ok"] is True
+
+
+async def test_stopping_message_specific_action_view_keeps_global_router(bot):
+    from bot.views.welcome import ActionButton
+
+    view = discord.ui.View(timeout=60)
+    view.add_item(discord.ui.Button(label="Temporary", custom_id="test:temporary-action"))
+    view.add_item(ActionButton("find"))
+    bot._connection._view_store.add_view(view, message_id=123123123)
+    view.stop()
+
+    routes = bot._connection._view_store._views.get(None, {})
+    assert (discord.ComponentType.button.value, "wp:act:find") in routes
+
+
+async def test_stopping_mixed_view_cannot_unregister_dynamic_buttons(bot):
+    """Regression for the real production failure: buttons died minutes after deploy.
+
+    discord.py 2.7 may remove a shared DynamicItem template when a mixed
+    transient view stops. Parley's ViewStore guard must restore every persistent
+    template synchronously before another user can click an old message.
+    """
+    from bot.views.management import ManageButton
+
+    view = discord.ui.View(timeout=60)
+    view.add_item(discord.ui.Button(label="Temporary", custom_id="test:temporary"))
+    view.add_item(ManageButton(123456789012345678))
+    bot._connection._view_store.add_view(view, message_id=987654321)
+    view.stop()
+
+    registered = set(bot._connection._view_store._dynamic_items.values())
+    assert registered == set(persistent_items())
+    assert bot.interaction_routing_status()["ok"] is True
+
+
 async def test_every_panel_action_has_a_handler(bot):
     assert {"post", "connect", "find", "servers", "requests", "looking", "network"} <= registered_actions()
 
@@ -40,8 +85,11 @@ async def test_custom_ids_round_trip_through_templates():
     from bot.views.partnership import RequestPartnershipButton, RequestResponseButton, ViewAdButton
     from bot.views.welcome import ActionButton
 
+    action = ActionButton("post")
+    assert action.custom_id == "wp:act:post"
+    assert action.item is action
+
     samples = [
-        ActionButton("post"),
         RequestPartnershipButton(123456789012345678),
         ViewAdButton(123456789012345678),
         RequestResponseButton(42, True),

@@ -399,3 +399,22 @@ tests/           unit/ (SQLite + PostgreSQL) and integration/ (live Discord, opt
 - **Finder View Ad stays a normal blue action and resolves the latest real ad message at click time, avoiding stale links and gray link buttons mixed into the action row.**
 - **Multi-server choice screens use small embeds + one dropdown** for My Servers, List a Server, Find Partners source selection and Relist.
 - **Public directory stays minimal:** advertisements remain normal messages; Parley does not add a second large embed under them.
+
+---
+
+# Interaction reliability safeguards
+
+Parley treats public Discord panels as disposable entry points rather than trusting one message forever.
+
+- Stable `wp:*` persistent custom IDs keep old controls routable after restarts.
+- Top-level `wp:act:*` buttons have two independent dispatch paths: Discord.py DynamicItem routing and a raw interaction-event fallback.
+- Interaction acknowledgement watchdogs are armed before the first defer and fire well before Discord's response deadline.
+- A stalled persistent interaction gets a fresh recovery control instead of being left on an endless spinner.
+- Startup reposts the permanent public entry panels with fresh components and refreshes all live listing controls.
+- Gateway reconnects re-verify the permanent controls automatically.
+- Maintenance force-refreshes permanent panel components and refreshes listing/partner controls at least hourly.
+- Panel/listing refresh writes are paced to reduce Discord 429 bursts.
+- Deleted panels are recreated automatically; self-initiated panel deletes are ignored so repair cannot duplicate panels.
+- `/find` and the other slash commands remain independent fallbacks from public button panels.
+- Staff can use **Settings → Channels → Repair Panels** or `/admin repair-panels` to repost fresh controls immediately.
+- The event-loop watchdog logs scheduler stalls and high Discord gateway latency so a future timeout has a concrete cause in Railway logs.

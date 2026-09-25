@@ -17,7 +17,17 @@ from bot.services import listings as listing_service
 from bot.services import permissions
 from bot.services.errors import LISTING_GONE, NotFound, PermissionDenied, ValidationError
 from bot.utils.helpers import format_duration, format_members, format_minimum, listing_jump_url, truncate, utcnow
-from bot.views.base import ConfirmView, OwnedView, acknowledge, get_bot, guard, handle_error, home_button, reply
+from bot.views.base import (
+    ConfirmView,
+    OwnedView,
+    acknowledge,
+    get_bot,
+    guard,
+    handle_error,
+    home_button,
+    mark_interaction_complete,
+    reply,
+)
 from bot.views.listings import ListingDraft, ListingFormView
 from bot.views.welcome import action_button, invite_url, persistent_view, register_action, show_screen
 
@@ -71,12 +81,14 @@ class ManageButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wp:mana
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction)  # before guard: it reads the database
-        if not await guard(interaction):
-            return
         try:
+            if not await guard(interaction):
+                return
             await show_management(interaction, self.guild_id)
         except Exception as exc:  # noqa: BLE001
             await handle_error(interaction, exc)
+        finally:
+            mark_interaction_complete(interaction)
 
 
 class ManagementButton(
@@ -112,8 +124,6 @@ class ManagementButton(
     async def callback(self, interaction: discord.Interaction) -> None:
         if self.action not in self.MODAL_ACTIONS:
             await acknowledge(interaction)
-        if not await guard(interaction):
-            return
         handlers = {
             "edit": show_edit_menu,
             "self_post": start_self_post,
@@ -127,9 +137,13 @@ class ManagementButton(
             "remove": remove,
         }
         try:
+            if not await guard(interaction, arm_watchdog=self.action not in self.MODAL_ACTIONS):
+                return
             await handlers[self.action](interaction, self.guild_id)
         except Exception as exc:  # noqa: BLE001
             await handle_error(interaction, exc)
+        finally:
+            mark_interaction_complete(interaction)
 
 
 def manage_button(bot: ParleyBot, guild_id: int, guild_name: str, row: int | None = None) -> ManageButton:
