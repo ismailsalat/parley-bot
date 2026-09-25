@@ -22,6 +22,8 @@ PREFERRED = {
     "home": "🏠",
     "support": "💬",
     "request": "🤝",
+    "relist": "🔄",
+    "refresh": "🔄",
 }
 
 

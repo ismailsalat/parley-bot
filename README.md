@@ -127,14 +127,15 @@ The **➕ Add Parley** button that other server owners see does not include Mana
 
 Type **/setup** in the server that should be your Parley hub. Only the owner of the bot application can do this, so no other server can claim to be the hub.
 
-- **✨ Automatic Setup** creates five channels and posts the panels:
+- **✨ Automatic Setup** creates six channels and posts the panels:
   - `#start-here`
   - `#server-directory`: members can read but not post; Parley manages it.
   - `#find-partners`
+  - `#how-parley-works`: a read-only guide from Server Directory through accepted ad exchange.
   - `#support`
   - `#waypoint-logs`: staff only.
 
-  Channels that already exist are reused. Older untouched defaults (`#welcome`, `#partner-listings`, `#looking-for-partners`) are recognized; if Parley has Manage Channels, it renames those defaults to the clearer names above. Custom channel names are never changed.
+  Channels that already exist are reused. Older untouched defaults (`#welcome`, `#partner-listings`, `#looking-for-partners`, `#parley-perks`) are recognized; if Parley has Manage Channels, it renames those defaults to the clearer names above. Custom channel names are never changed.
 - **⚙️ Choose Channels** lets you pick existing channels from menus and shows ✅/❌ for each permission Parley needs.
 - **🧪 Test Setup** runs the Health Check.
 
@@ -164,7 +165,7 @@ The home has five choices; everything else is one level deeper.
 | Tools | **Test**, **Health Check**, **Mode** (🧪 Test · 🟢 Live · 🔴 Off), **Export Settings** |
 
 **Button colours follow one system:** blue for main actions, green only for approve/enable,
-red only for destructive actions, and grey for navigation or low-priority controls such as Back, Home, Directory, and Relist. Emoji must be real Discord emoji —
+red only for destructive actions, and grey for navigation or low-priority controls such as Back, Home, Directory, and 🔄 Relist. Emoji must be real Discord emoji —
 a text symbol like `←` is refused with *"That isn't a valid Discord button emoji."*
 
 Every change applies immediately, without a restart. Every section has **Reset to Defaults**, and it always asks first.
@@ -182,7 +183,7 @@ Every change applies immediately, without a restart. Every section has **Reset t
 - **Under every directory listing:** Join Server · Request Partnership
 - **Partner Board:** only servers actively looking for partners appear here; posts use View Server · Request Partnership
 
-If you manage several connected servers, **My Listing** becomes **My Servers** and uses one clean server picker. Server-choice screens use compact embeds; one-server users skip the picker entirely.
+When an action starts in the **Parley hub or DMs**, Parley asks which manageable server you want to use so it never silently chooses the wrong one. Inside your own server, that server is already the clear context. Server-choice screens only show servers where Parley is installed and you currently have **Administrator** or **Manage Server**.
 
 Partnership requests are also multi-server aware. If you can represent more than one listed server, Parley asks which server is sending the request, shows a clear **From → To** confirmation, and lets you change the source before sending. Duplicate requests name both servers so a second admin can immediately see that another admin may already have sent it. A configurable server-wide cooldown prevents two admins from firing requests too quickly.
 

@@ -274,7 +274,7 @@ def listings_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
     view = persistent_view(
         action_button(bot, "post", row=0),
         action_button(bot, "servers", row=0),
-        action_button(bot, "relist", row=1),
+        action_button(bot, "relist", row=0),
     )
     return templates.render(bot.runtime, "listings_panel"), view
 
@@ -289,10 +289,14 @@ def looking_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
 
 
 def perks_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
-    """Explain Connected before exposing Network setup."""
+    """Read-only How Parley Works guide with only the useful next actions."""
+    directory_url = _hub_channel_url(bot, bot.runtime.hub.listings_channel_id)
+    support_url = _hub_channel_url(bot, bot.runtime.hub.support_channel_id)
     view = persistent_view(
+        action_button(bot, "find", style=discord.ButtonStyle.success, row=0),
+        discord.ui.Button(label="Server Directory", url=directory_url, row=0) if directory_url else None,
         add_bot_button(bot, row=0),
-        action_button(bot, "network_help", style=discord.ButtonStyle.secondary, row=0),
+        discord.ui.Button(label="Support", url=support_url, row=1) if support_url else None,
     )
     return templates.render(bot.runtime, "perks"), view
 

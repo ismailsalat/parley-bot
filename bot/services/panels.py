@@ -66,6 +66,35 @@ class PanelService:
     def perks_channel(self) -> discord.TextChannel | None:
         return self.main_channel(self.bot.runtime.hub.perks_channel_id)
 
+    async def _refresh_how_it_works_channel(self) -> None:
+        """Rename the old Parley Perks channel in place on upgrade.
+
+        The database key stays ``perks_channel_id`` for backward compatibility,
+        but the user-facing channel is now the clearer ``#📖・how-parley-works``.
+        This runs during normal panel restoration so existing hubs upgrade without
+        requiring owners to rerun /setup.
+        """
+        channel = self.perks_channel()
+        if channel is None or channel.guild.me is None:
+            return
+        desired_name = "📖・how-parley-works"
+        desired_topic = (
+            "A simple guide to Server Directory listings, Network setup, Find Partners, "
+            "requests, Relist, and ad exchange."
+        )
+        if channel.name == desired_name and getattr(channel, "topic", None) == desired_topic:
+            return
+        permissions_for = getattr(channel, "permissions_for", None)
+        if not callable(permissions_for) or not permissions_for(channel.guild.me).manage_channels:
+            return
+        edit = getattr(channel, "edit", None)
+        if not callable(edit):
+            return
+        try:
+            await edit(name=desired_name, topic=desired_topic, reason="Parley: refresh How Parley Works channel")
+        except discord.HTTPException as exc:
+            log.info("Could not refresh How Parley Works channel %s: %s", channel.id, exc)
+
     def panel_channel_ids(self) -> set[int]:
         h = self.bot.runtime.hub
         return {
@@ -298,6 +327,7 @@ class PanelService:
         ``force_edit`` re-renders existing panels (after text or button changes in Settings).
         """
         results: dict[str, str] = {}
+        await self._refresh_how_it_works_channel()
         async with self._listings_lock:
             results[LISTINGS_PANEL] = await self.ensure_panel(LISTINGS_PANEL, keep_at_bottom=True, force_edit=force_edit)
         async with self._looking_lock:

@@ -12,8 +12,13 @@ def _labels(view):
 
 def test_public_directory_footer_is_small(db):
     bot = FakeBot(db)
-    _content, view = listings_panel(bot)
+    content, view = listings_panel(bot)
     assert _labels(view) == ["Post Server Ad", "My Server Listings", "Relist"]
+    assert content == "# 📣 Server Directory\n*Browse servers, join communities, or request partnerships.*"
+    buttons = [getattr(child, "item", child) for child in view.children]
+    relist = buttons[-1]
+    assert str(relist.emoji) == "🔄"
+    assert {button.row for button in buttons} == {0}
 
 
 def test_self_post_strip_is_not_a_second_embed(db):

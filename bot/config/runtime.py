@@ -43,8 +43,8 @@ DEFAULT_BUTTONS: dict[str, dict[str, str | None]] = {
     "partnerships": {"label": "Partnerships", "emoji": "🤝", "style": "success"},
     "preview": {"label": "View Ad", "emoji": None, "style": "primary"},
     "self_post": {"label": "Paste My Own Ad", "emoji": None, "style": "primary"},
-    "refresh": {"label": "Relist", "emoji": None, "style": "secondary"},
-    "relist": {"label": "Relist", "emoji": None, "style": "secondary"},
+    "refresh": {"label": "Relist", "emoji": "🔄", "style": "secondary"},
+    "relist": {"label": "Relist", "emoji": "🔄", "style": "secondary"},
     "publish": {"label": "Publish", "emoji": None, "style": "primary"},
     "remove": {"label": "Remove Listing", "emoji": None, "style": "danger"},
     "accept": {"label": "Accept", "emoji": "\u2705", "style": "success"},
@@ -146,10 +146,7 @@ class PanelConfig:
     listings_panel_enabled: bool = True
     listings_panel_text: str = (
         "# 📣 Server Directory\n"
-        "*Live server ads, kept simple.*\n\n"
-        "Browse a listing to **join the server** or **request a partnership** directly.\n"
-        "Want your own server here? Use **Post Server Ad**. Already listed? Use **Relist** when your cooldown is ready.\n\n"
-        "-# Your listing does not need Parley installed to stay live."
+        "*Browse servers, join communities, or request partnerships.*"
     )
     looking_panel_enabled: bool = True
     looking_panel_text: str = (
@@ -175,22 +172,21 @@ class PanelConfig:
     )
     perks_panel_enabled: bool = True
     perks_panel_text: str = (
-        "# 💎 Parley Connected\n"
-        "*Your listing works without the bot. Connected adds the automation.*\n\n"
-        "**Without Parley**\n"
-        "`✓` Keep your directory listing live\n"
-        "`✓` Edit your ad and server info\n"
-        "`✓` Relist on the standard cooldown\n"
-        "`✓` Send and receive basic partnership requests\n\n"
-        "**With Parley Connected**\n"
-        "`⚡` Faster relists\n"
-        "`🤝` Find Partners + Partner Board posts\n"
-        "`✅` One-click request handling\n"
-        "`🤖` Auto Partner tools\n"
-        "`🌐` Network channel for approved partner-ad sharing\n\n"
-        "**What is the Network?**\n"
-        "When **both servers accept a partnership** and both enable Network, Parley can place each approved ad in the other server's chosen channel. It never exchanges ads just because a server is listed.\n\n"
-        "-# To unlock Connected features: Add Parley → check your DMs → finish setup."
+        "# 📖 How Parley Works\n"
+        "*One server ad. One Network setup. Everything stays in sync.*\n\n"
+        "**1 · Add Parley**\n"
+        "Add Parley to a server you manage. The owner is not required — **Administrator** or **Manage Server** can manage Parley too.\n\n"
+        "**2 · Server Directory**\n"
+        "**Post Server Ad** creates one synced listing for that server. Posting or editing it from the Parley hub or from your own server changes the **same ad**. **Relist** moves that listing back up when the shared cooldown is ready; it does not create a duplicate.\n\n"
+        "**3 · Find Partners**\n"
+        "Press **Find Partners**. In the Parley hub, choose which server you want to use. Inside your own server, Parley already knows the server. If its ad or Network setup is missing, Parley guides you through it first.\n\n"
+        "**4 · Network**\n"
+        "Choose a **partner-ad channel** for your server. That is where ads from accepted partners are delivered. The Network is not a random ad feed and does not post anything just because a server is listed.\n\n"
+        "**5 · Partnerships**\n"
+        "Request a partnership from **Find Partners** or the **Server Directory**. When both servers accept and both are ready for Network delivery, Parley posts each server's approved ad in the other server's chosen partner-ad channel.\n\n"
+        "**6 · Manage**\n"
+        "Server managers can edit the ad, Relist, handle requests, and change Network settings. The same server state is used everywhere, so there is only one listing, one cooldown, and one Network setup per server.\n\n"
+        "-# Need help? Ask in the Support channel."
     )
 
     # Start Here may make one intentional announcement when the panel is first created.
@@ -276,14 +272,13 @@ class MessagesConfig:
         "**Parley never intentionally posts Server A into Server B unless both sides agreed to the partnership.**"
     )
     help: str = (
-        "## {bot_name}\n"
-        "Connect once. Post once. Find partners. Talk to people.\n\n"
-        "**Post Server Ad** - publish a server ad (needs Manage Server).\n"
-        "**Browse Partners** - quickly browse partnership matches.\n"
-        "**My Server Listings** - edit, view, Relist or remove server ads.\n"
-        "**My Partner Posts** - post, edit or delete what each server is looking for.\n"
-        "**Requests** - accept or decline partnership requests.\n\n"
-        "Just DM me anytime to get these buttons."
+        "## 📖 How {bot_name} Works\n"
+        "**Add Parley** to a server you manage, then use **Find Partners**. Parley checks that server's ad and Network setup and guides you through anything missing.\n\n"
+        "**Server Directory** - one synced public ad per server.\n"
+        "**Network** - choose where accepted partners' ads are delivered.\n"
+        "**Partnerships** - when both servers accept, Parley exchanges their approved ads through those chosen channels.\n"
+        "**Relist** - move the same listing back up when its shared cooldown is ready.\n\n"
+        "Server owners are not the only people who can manage Parley; **Administrator** or **Manage Server** permission works too."
     )
 
 

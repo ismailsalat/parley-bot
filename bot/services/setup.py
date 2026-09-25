@@ -1,7 +1,7 @@
 """First-run setup of the main Parley server.
 
 Automatic Setup creates (or reuses, by name) Parley's guided channel set:
-#👋・start-here, #📣・server-directory, #🤝・partner-board, #💎・parley-perks,
+#👋・start-here, #📣・server-directory, #🤝・partner-board, #📖・how-parley-works,
 #💬・support and a staff-only #🛡️・parley-logs. Legacy channel names are reused
 so upgrades never create duplicates. It needs Manage Channels; without it the
 owner picks existing channels instead. Nothing here requires Administrator.
@@ -44,9 +44,9 @@ SLOTS: tuple[ChannelSlot, ...] = (
         ("partner-board", "find-partners", "looking-for-partners"),
     ),
     ChannelSlot(
-        "perks_channel_id", "💎・parley-perks", "Parley perks", False,
-        "Learn what Parley Connected unlocks and what the Parley Network actually does.",
-        ("parley-perks",),
+        "perks_channel_id", "📖・how-parley-works", "How Parley Works", False,
+        "A simple guide to Server Directory listings, Network setup, Find Partners, requests, Relist, and ad exchange.",
+        ("💎・parley-perks", "parley-perks", "how-parley-works"),
     ),
     ChannelSlot(
         "support_channel_id", "💬・support", "Support", False,
@@ -84,6 +84,7 @@ def overwrites_for(
     """Channel permissions for a newly created channel.
 
     * start-here / server-directory: members can read but not post (the bot manages them)
+    * how-parley-works: read-only guide for members
     * parley-logs: hidden from everyone except staff roles, admins and the bot
     """
     everyone = guild.default_role

@@ -153,7 +153,7 @@ PANEL_TOGGLES = (
     ("panels.welcome_panel_enabled", "Welcome panel"),
     ("panels.listings_panel_enabled", "Listings panel"),
     ("panels.looking_panel_enabled", "Partner Board panel"),
-    ("panels.perks_panel_enabled", "Perks panel"),
+    ("panels.perks_panel_enabled", "How Parley Works panel"),
     ("panels.send_join_message", "Join message"),
 )
 

@@ -39,7 +39,7 @@ TEMPLATES: dict[str, TemplateSpec] = {
         _spec("join_message", "messages.join_message", "Bot added to a server", ("server_name",), "Sent once when Parley joins a server."),
         _spec("listings_panel", "panels.listings_panel_text", "Server Directory panel", (), "Panel under the newest directory listing."),
         _spec("looking_panel", "panels.looking_panel_text", "Partner Board panel", (), "Shown in the Partner Board channel."),
-        _spec("perks", "panels.perks_panel_text", "Parley Perks panel", (), "Shown in #parley-perks."),
+        _spec("perks", "panels.perks_panel_text", "How Parley Works panel", (), "Shown in #how-parley-works."),
         _spec("listing_created", "messages.listing_created", "Listing published", ("server_name", "jump_url"), "After a server is connected and its ad is posted."),
         _spec("listing_saved_unpublished", "messages.listing_saved_unpublished", "Listing saved (no channel)", ("server_name",), "When the listings channel isn't ready."),
         _spec("listing_pending", "messages.listing_pending", "Listing waiting for review", ("server_name",), "When approval is required."),
