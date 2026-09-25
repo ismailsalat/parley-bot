@@ -1,0 +1,6 @@
+IMPORTANT: Extract the CONTENTS of this ZIP into C:\Users\caano\Documents\parley (the project root). Do NOT extract it into the bot folder.
+
+After extracting, run:
+python -m pytest -q
+python -m pyflakes bot tests migrations
+git diff --check

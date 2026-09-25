@@ -52,7 +52,10 @@ async def _active_managed_listings(bot: ParleyBot, user_id: int) -> tuple[list[L
         rows = await repository.get_listings(session, guilds.keys())
     rows = [
         row for row in rows
-        if row.status == ListingStatus.ACTIVE and row.guild_id in guilds and permissions.is_connected(bot, row.guild_id)
+        if row.status == ListingStatus.ACTIVE
+        and row.accepting_partnerships
+        and row.guild_id in guilds
+        and permissions.is_connected(bot, row.guild_id)
     ]
     rows.sort(key=lambda row: guilds[row.guild_id].name.lower())
     return rows, guilds
@@ -64,46 +67,99 @@ async def partner_posts_action(interaction: discord.Interaction) -> None:
 
 
 async def start_partner_posts(interaction: discord.Interaction) -> None:
-    """Open the one-per-server partner-post manager, using a dropdown only when needed."""
+    """Open Partner Board management with a clear prerequisite check first."""
     bot = get_bot(interaction)
-    rows, guilds = await _active_managed_listings(bot, interaction.user.id)
+    connected = {
+        guild.id: guild
+        for guild in permissions.cached_manageable_guilds(bot, interaction.user.id)
+        if guild.id != bot.runtime.hub.main_guild_id
+    }
 
-    if not rows:
-        async with bot.db.session() as session:
-            verified_ids = set(await repository.guild_ids_connected_by(session, interaction.user.id))
-            listed = [
-                row for row in await repository.get_listings(session, verified_ids)
-                if row.status == ListingStatus.ACTIVE
-            ]
-        if listed:
-            embed = discord.Embed(
-                title="✨ Connect Parley for Partner Posts",
-                description=(
-                    "Your directory listings are still live. Partner Board posts are a **Parley Connected** perk, "
-                    "so add Parley to the server you want to post for."
-                ),
-                color=bot.runtime.bot.color_primary,
-            )
-            await show_screen(
-                interaction,
-                embed=embed,
-                view=persistent_view(add_bot_button(bot), action_button(bot, "servers"), home_button(bot)),
-            )
-        else:
-            embed = discord.Embed(
-                title="🤝 List a Server First",
-                description="Partner Board posts belong to one of your server listings. List a server to get started.",
-                color=bot.runtime.bot.color_primary,
-            )
-            await show_screen(
-                interaction,
-                embed=embed,
-                view=persistent_view(action_button(bot, "post"), home_button(bot)),
-            )
+    async with bot.db.session() as session:
+        connected_rows = await repository.get_listings(session, connected.keys()) if connected else []
+        verified_ids = set(await repository.guild_ids_connected_by(session, interaction.user.id))
+        verified_rows = await repository.get_listings(session, verified_ids) if verified_ids else []
+
+    active_connected = [
+        row for row in connected_rows
+        if row.status == ListingStatus.ACTIVE and row.guild_id in connected
+    ]
+    eligible = [row for row in active_connected if row.accepting_partnerships]
+    eligible.sort(key=lambda row: connected[row.guild_id].name.lower())
+
+    # Nothing connected: tell them exactly why the Partner Board manager cannot continue.
+    if not connected:
+        has_listing = any(row.status == ListingStatus.ACTIVE for row in verified_rows)
+        embed = discord.Embed(
+            title="⚠️ No Connected Server Found",
+            description=(
+                "Parley can't find a server you manage with the bot installed.\n\n"
+                "**To use Partner Board posts:**\n"
+                "> `1` Press **Add Parley** and choose the server you want to use.\n"
+                "> `2` Check your **DMs from Parley**.\n"
+                "> `3` Finish that server's listing setup, then come back here.\n\n"
+                + (
+                    "Your existing directory listing can stay live while disconnected — Partner Board posting is the Connected perk."
+                    if has_listing else
+                    "If you have not listed the server yet, Parley will guide you through that after it is connected."
+                )
+            ),
+            color=bot.runtime.bot.color_warning,
+        )
+        await show_screen(
+            interaction,
+            embed=embed,
+            view=persistent_view(add_bot_button(bot), action_button(bot, "post"), home_button(bot)),
+        )
         return
 
-    if len(rows) == 1:
-        await show_partner_management(interaction, rows[0].guild_id)
+    # Bot is installed somewhere, but none of those connected servers finished a live listing.
+    if not active_connected:
+        names = ", ".join(f"**{truncate(g.name, 50)}**" for g in sorted(connected.values(), key=lambda g: g.name.lower())[:4])
+        embed = discord.Embed(
+            title="📋 Finish Your Server Setup",
+            description=(
+                f"Parley is connected to {names}, but none of those servers has a live listing yet.\n\n"
+                "Check your **DMs from Parley** or press **Post Server Ad** and finish the listing first. "
+                "The Partner Board only advertises servers that already have a live directory listing."
+            ),
+            color=bot.runtime.bot.color_warning,
+        )
+        await show_screen(
+            interaction,
+            embed=embed,
+            view=persistent_view(action_button(bot, "post"), action_button(bot, "servers"), home_button(bot)),
+        )
+        return
+
+    # A listing exists, but it explicitly says it is not looking for partnerships.
+    if not eligible:
+        if len(active_connected) == 1:
+            row = active_connected[0]
+            name = connected[row.guild_id].name
+            description = (
+                f"**{name}** is listed, but **Partnerships are turned off** for that listing.\n\n"
+                "Turn Partnerships on in **My Server Listings → Partnerships**, then come back to post on the Partner Board."
+            )
+        else:
+            description = (
+                "You have connected listed servers, but **none of them is currently looking for partnerships**.\n\n"
+                "Open **My Server Listings**, choose the server you want, and turn **Partnerships** on first."
+            )
+        embed = discord.Embed(
+            title="🤝 Partnerships Are Off",
+            description=description,
+            color=bot.runtime.bot.color_warning,
+        )
+        await show_screen(
+            interaction,
+            embed=embed,
+            view=persistent_view(action_button(bot, "servers"), home_button(bot)),
+        )
+        return
+
+    if len(eligible) == 1:
+        await show_partner_management(interaction, eligible[0].guild_id)
         return
 
     from bot.views.partnership import GuildPickerView
@@ -111,9 +167,18 @@ async def start_partner_posts(interaction: discord.Interaction) -> None:
     async def picked(inter: discord.Interaction, guild_id: int) -> None:
         await show_partner_management(inter, guild_id)
 
+    options = []
+    for row in eligible:
+        guild = connected[row.guild_id]
+        category = ", ".join(row.categories) or "Other"
+        options.append((row.guild_id, guild.name, f"{category} · Partnerships on"))
+
     embed = discord.Embed(
-        title="🤝 My Partner Posts",
-        description="Choose which server post you want to manage.",
+        title="🤝 Choose Your Server",
+        description=(
+            "You manage more than one server that is ready for the Partner Board. "
+            "Choose **which server you want to post or manage**."
+        ),
         color=bot.runtime.bot.color_primary,
     )
     await show_screen(
@@ -121,9 +186,9 @@ async def start_partner_posts(interaction: discord.Interaction) -> None:
         embed=embed,
         view=GuildPickerView(
             interaction.user.id,
-            [(row.guild_id, guilds[row.guild_id].name) for row in rows],
+            options,
             picked,
-            placeholder="Select your server",
+            placeholder="Which server are you using?",
         ),
     )
 

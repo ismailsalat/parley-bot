@@ -1,10 +1,10 @@
 """First-run setup of the main Parley server.
 
-Automatic Setup creates (or reuses, by name) exactly five channels:
-#start-here, #server-directory, #find-partners, #support and a staff-only
-#waypoint-logs. Legacy channel names are reused so upgrades never create
-duplicates. It needs Manage Channels; without it the owner picks existing
-channels instead. Nothing here requires Administrator.
+Automatic Setup creates (or reuses, by name) Parley's guided channel set:
+#👋・start-here, #📣・server-directory, #🤝・partner-board, #💎・parley-perks,
+#💬・support and a staff-only #🛡️・parley-logs. Legacy channel names are reused
+so upgrades never create duplicates. It needs Manage Channels; without it the
+owner picks existing channels instead. Nothing here requires Administrator.
 """
 
 from __future__ import annotations
@@ -29,26 +29,37 @@ class ChannelSlot:
 
 SLOTS: tuple[ChannelSlot, ...] = (
     ChannelSlot(
-        "welcome_channel_id", "start-here", "Start here", True,
-        "Start here: list your server or find partners.", ("welcome",),
+        "welcome_channel_id", "👋・start-here", "Start here", True,
+        "Welcome to Parley. Start here to list a server, browse communities, and learn how partnerships work.",
+        ("start-here", "welcome"),
     ),
     ChannelSlot(
-        "listings_channel_id", "server-directory", "Server directory", True,
-        "Browse server ads. Posting is locked; use Post My Server to list yours and Relist to move it back to the top.",
-        ("partner-listings",),
+        "listings_channel_id", "📣・server-directory", "Server directory", True,
+        "Browse live server ads. Use the buttons on listings to join or request a partnership.",
+        ("server-directory", "partner-listings"),
     ),
     ChannelSlot(
-        "looking_channel_id", "find-partners", "Find partners", True,
-        "Post a partner ad or browse matches with Parley.",
-        ("looking-for-partners",),
+        "looking_channel_id", "🤝・partner-board", "Partner board", True,
+        "Servers here are actively looking for partnerships. Use Parley to find a match or manage your own partner post.",
+        ("partner-board", "find-partners", "looking-for-partners"),
     ),
     ChannelSlot(
-        "perks_channel_id", "parley-perks", "Parley perks", False,
-        "See what Parley Connected unlocks for your server.",
+        "perks_channel_id", "💎・parley-perks", "Parley perks", False,
+        "Learn what Parley Connected unlocks and what the Parley Network actually does.",
+        ("parley-perks",),
     ),
-    ChannelSlot("support_channel_id", "support", "Support", False, "Questions about Parley."),
-    ChannelSlot("log_channel_id", "parley-logs", "Staff logs", False, "Parley staff log and approvals.", ("waypoint-logs",)),
+    ChannelSlot(
+        "support_channel_id", "💬・support", "Support", False,
+        "Questions, setup help, or problems with listings and partnerships.",
+        ("support",),
+    ),
+    ChannelSlot(
+        "log_channel_id", "🛡️・parley-logs", "Staff logs", False,
+        "Parley staff logs and approvals.",
+        ("parley-logs", "waypoint-logs"),
+    ),
 )
+
 SLOT_BY_KEY = {slot.key: slot for slot in SLOTS}
 
 
@@ -73,7 +84,7 @@ def overwrites_for(
     """Channel permissions for a newly created channel.
 
     * start-here / server-directory: members can read but not post (the bot manages them)
-    * waypoint-logs: hidden from everyone except staff roles, admins and the bot
+    * parley-logs: hidden from everyone except staff roles, admins and the bot
     """
     everyone = guild.default_role
     own = listings_channel_permissions() if slot.key in ("listings_channel_id", "looking_channel_id") else bot_channel_permissions()
@@ -113,8 +124,17 @@ def find_existing(guild: discord.Guild, slot: ChannelSlot) -> discord.TextChanne
 
 
 async def _repair_reused_channel(slot: ChannelSlot, channel: discord.TextChannel, guild: discord.Guild) -> None:
-    """Apply only Parley's essential safety overwrites to a reused default channel."""
-    if guild.me is None or not channel.permissions_for(guild.me).manage_roles:
+    """Bring a reused legacy channel up to Parley's current safe defaults."""
+    if guild.me is None:
+        return
+
+    if channel.name != slot.name and channel.permissions_for(guild.me).manage_channels:
+        try:
+            await channel.edit(name=slot.name, topic=slot.topic, reason="Parley: refresh channel name and topic")
+        except discord.HTTPException as exc:
+            log.info("setup.channel_rename_failed channel=%s wanted=%s: %s", channel.name, slot.name, exc)
+
+    if not channel.permissions_for(guild.me).manage_roles:
         return
     try:
         if slot.key in ("listings_channel_id", "looking_channel_id"):
@@ -127,7 +147,7 @@ async def _repair_reused_channel(slot: ChannelSlot, channel: discord.TextChannel
                 locked.create_public_threads = False
             if hasattr(locked, "send_messages_in_threads"):
                 locked.send_messages_in_threads = False
-            await channel.set_permissions(everyone, overwrite=locked, reason="Parley: lock server directory")
+            await channel.set_permissions(everyone, overwrite=locked, reason="Parley: lock managed feed")
 
             mine = channel.overwrites_for(guild.me)
             a2, d2 = mine.pair()
@@ -136,7 +156,7 @@ async def _repair_reused_channel(slot: ChannelSlot, channel: discord.TextChannel
                 view_channel=True, send_messages=True, read_message_history=True, embed_links=True,
                 use_external_emojis=True, manage_messages=True, manage_roles=True,
             )
-            await channel.set_permissions(guild.me, overwrite=bot_ow, reason="Parley: directory permissions")
+            await channel.set_permissions(guild.me, overwrite=bot_ow, reason="Parley: managed feed permissions")
         elif slot.key in ("welcome_channel_id", "perks_channel_id"):
             everyone = guild.default_role
             current = channel.overwrites_for(everyone)

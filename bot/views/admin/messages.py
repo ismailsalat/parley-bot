@@ -152,7 +152,8 @@ class TemplatePage(Page):
 PANEL_TOGGLES = (
     ("panels.welcome_panel_enabled", "Welcome panel"),
     ("panels.listings_panel_enabled", "Listings panel"),
-    ("panels.looking_panel_enabled", "Looking panel"),
+    ("panels.looking_panel_enabled", "Partner Board panel"),
+    ("panels.perks_panel_enabled", "Perks panel"),
     ("panels.send_join_message", "Join message"),
 )
 
@@ -170,7 +171,8 @@ class AppearancePage(Page):
         self.button("Buttons", self._open(lambda: ButtonsPage(self.bot, self.owner_id, back=back)), row=0)
         self.button("Messages", self._open(lambda: MessagesPage(self.bot, self.owner_id, back=back)), row=0)
         self.button("Links", self._open(lambda: LinksPage(self.bot, self.owner_id, back=back)), row=0)
-        self.button("Theme", self._open(lambda: ThemePage(self.bot, self.owner_id, back=back)), row=0)
+        self.button("Announcements", self._open(lambda: AnnouncementsPage(self.bot, self.owner_id, back=back)), row=1)
+        self.button("Theme", self._open(lambda: ThemePage(self.bot, self.owner_id, back=back)), row=1)
         self.nav()
 
     def _open(self, factory):
@@ -181,25 +183,36 @@ class AppearancePage(Page):
 
 
 class ButtonsPage(Page):
-    """Label, emoji and colour of one button at a time."""
+    """Label, emoji and colour of every customizable button, paged under Discord's 25-option limit."""
 
     title = "Buttons"
+    PAGE_SIZE = 20
 
-    def __init__(self, bot: ParleyBot, owner_id: int, *, back) -> None:
+    def __init__(self, bot: ParleyBot, owner_id: int, *, back, page: int = 0, selected: str | None = None) -> None:
         super().__init__(bot, owner_id, back=back)
-        self.selected: str | None = None
+        self.page = max(0, page)
+        self.selected = selected
+
+    @property
+    def pages(self) -> int:
+        return max(1, (len(CUSTOMIZABLE_BUTTONS) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+
+    def _page_keys(self) -> tuple[str, ...]:
+        self.page = min(self.page, self.pages - 1)
+        start = self.page * self.PAGE_SIZE
+        return CUSTOMIZABLE_BUTTONS[start : start + self.PAGE_SIZE]
 
     def content(self) -> str:
         if not self.selected:
-            return "## Buttons\nPick a button to change its label, emoji or colour."
+            return f"## Buttons\nPick a button to change its label, emoji or colour.\n-# Page {self.page + 1} of {self.pages}"
         label, emoji = self.bot.runtime.button(self.selected)
         style = self.bot.runtime.button_style(self.selected)
-        return f"## Buttons\n**{emoji or ''} {label}** · {style}"
+        return f"## Buttons\n**{emoji or ''} {label}** · {style}\n-# Page {self.page + 1} of {self.pages}"
 
     def build(self) -> None:
         cfg = self.bot.runtime
         options = []
-        for key in CUSTOMIZABLE_BUTTONS:
+        for key in self._page_keys():
             label, emoji = cfg.button(key)
             options.append(
                 discord.SelectOption(
@@ -207,7 +220,7 @@ class ButtonsPage(Page):
                     description=f"Default: {DEFAULT_BUTTONS[key]['label']}"[:100],
                 )
             )
-        select = discord.ui.Select(placeholder="Choose a button", options=options[:25], row=0)
+        select = discord.ui.Select(placeholder="Choose a button", options=options, row=0)
 
         async def picked(interaction: discord.Interaction) -> None:
             self.selected = select.values[0]
@@ -217,7 +230,20 @@ class ButtonsPage(Page):
         self.add_item(select)
         self.button("Edit", self._edit, emoji="✏️", disabled=self.selected is None, row=1)
         self.button("Reset", self._reset, emoji="↩️", disabled=self.selected is None, row=1)
+        if self.pages > 1:
+            self.button("Previous", self._previous, style=discord.ButtonStyle.secondary, row=2, disabled=self.page <= 0)
+            self.button("Next", self._next, style=discord.ButtonStyle.secondary, row=2, disabled=self.page >= self.pages - 1)
         self.nav()
+
+    async def _previous(self, interaction: discord.Interaction) -> None:
+        self.page = max(0, self.page - 1)
+        self.selected = None
+        await self.show(interaction)
+
+    async def _next(self, interaction: discord.Interaction) -> None:
+        self.page = min(self.pages - 1, self.page + 1)
+        self.selected = None
+        await self.show(interaction)
 
     async def _saved(self, interaction: discord.Interaction, notice: str) -> None:
         await self.bot.settings_changed(refresh_panels=True)
@@ -258,6 +284,89 @@ class ButtonsPage(Page):
         async with self.bot.db.session() as session:
             await configuration.reset_button(session, self.selected, actor_id=interaction.user.id)
         await self._saved(interaction, "↩️ Button reset to default.")
+
+
+class AnnouncementsPage(Page):
+    """Control the intentional Start Here announcement ping and built-in panel art."""
+
+    title = "Announcements"
+
+    def content(self) -> str:
+        cfg = self.bot.runtime.panels
+        roles = ", ".join(f"<@&{role_id}>" for role_id in cfg.welcome_ping_role_ids) or "None"
+        return (
+            "## Announcements\n"
+            "The Start Here panel can notify members **once when it is first created**. "
+            "Repairs and restarts do not intentionally ping everyone again.\n\n"
+            f"**@everyone:** {on_off(cfg.welcome_ping_everyone)}\n"
+            f"**Ping roles:** {roles}\n"
+            f"**Panel banner images:** {on_off(cfg.panel_images_enabled)}\n"
+            "-# Panel text is edited under Appearance → Messages. Button labels/colours are edited under Appearance → Buttons."
+        )
+
+    def build(self) -> None:
+        cfg = self.bot.runtime.panels
+        self.button(
+            f"@everyone: {on_off(cfg.welcome_ping_everyone)}",
+            self._toggle_everyone,
+            style=discord.ButtonStyle.secondary,
+            row=0,
+        )
+        self.button("Edit Ping Roles", self._edit_roles, emoji="🏷️", row=0)
+        self.button(
+            f"Panel Images: {on_off(cfg.panel_images_enabled)}",
+            self._toggle_images,
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        self.nav()
+
+    async def _save(self, interaction: discord.Interaction, changes: dict) -> None:
+        await interaction.response.defer()
+        async with self.bot.db.session() as session:
+            await configuration.save(session, changes, actor_id=interaction.user.id)
+        await self.bot.settings_changed(refresh_panels=True)
+        await self.show(interaction, "✅ Announcement settings saved.")
+
+    async def _toggle_everyone(self, interaction: discord.Interaction) -> None:
+        await self._save(
+            interaction,
+            {"panels.welcome_ping_everyone": not self.bot.runtime.panels.welcome_ping_everyone},
+        )
+
+    async def _toggle_images(self, interaction: discord.Interaction) -> None:
+        await self._save(
+            interaction,
+            {"panels.panel_images_enabled": not self.bot.runtime.panels.panel_images_enabled},
+        )
+
+    async def _edit_roles(self, interaction: discord.Interaction) -> None:
+        current = ", ".join(str(role_id) for role_id in self.bot.runtime.panels.welcome_ping_role_ids)
+
+        async def submitted(inter: discord.Interaction, values: dict[str, str]) -> None:
+            raw = values["roles"].replace("<@&", "").replace(">", "")
+            parts = [part.strip() for part in raw.replace(";", ",").split(",") if part.strip()]
+            if any(not part.isdigit() for part in parts):
+                await self.show(inter, "⚠️ Use Discord role IDs separated by commas.")
+                return
+            ids = tuple(dict.fromkeys(int(part) for part in parts if int(part) > 0))[:25]
+            await self._save(inter, {"panels.welcome_ping_role_ids": ids})
+
+        await interaction.response.send_modal(
+            FieldsModal(
+                "Start Here ping roles",
+                [
+                    Field(
+                        "roles",
+                        "Role IDs (comma separated)",
+                        current,
+                        placeholder="1552864166115549224",
+                        max_length=500,
+                    )
+                ],
+                submitted,
+            )
+        )
 
 
 class LinksPage(Page):

@@ -758,13 +758,27 @@ async def start_find_flow(interaction: discord.Interaction) -> None:
         guilds = await repository.get_guilds(session, [s.guild_id for s in sources])
 
     if not sources:
-        add = add_bot_button(bot)
-        await _edit_or_reply(
-            interaction,
-            "Find Partners is a **Parley Connected** perk. Your directory listing can stay live, "
-            "but connect Parley to browse matches and use Partner Board posts.",
-            persistent_view(add, home_button(bot)),
-        )
+        connected = [
+            guild for guild in permissions.cached_manageable_guilds(bot, interaction.user.id)
+            if guild.id != bot.runtime.hub.main_guild_id
+        ]
+        if connected:
+            title = "📋 Finish Your Server Setup"
+            description = (
+                "Parley is connected to a server you manage, but it cannot find a **live listing** to use for partner matching.\n\n"
+                "Check your **DMs from Parley** or press **Post Server Ad** and finish the listing setup first."
+            )
+            view = persistent_view(action_button(bot, "post"), action_button(bot, "servers"), home_button(bot))
+        else:
+            title = "⚠️ No Connected Server Found"
+            description = (
+                "Find Partner is a **Parley Connected** perk. Your directory listing can stay live without the bot, "
+                "but partner matching needs Parley connected to the server you want to represent.\n\n"
+                "Press **Add Parley**, choose your server, then check your **DMs from Parley** and finish setup before coming back."
+            )
+            view = persistent_view(add_bot_button(bot), home_button(bot))
+        embed = discord.Embed(title=title, description=description, color=bot.runtime.bot.color_warning)
+        await _edit_or_reply(interaction, None, view, embed=embed)
         return
 
     if len(sources) > 1:

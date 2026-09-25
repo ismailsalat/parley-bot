@@ -58,16 +58,17 @@ async def test_automatic_setup_creates_only_the_recommended_channels():
     guild = SetupGuild()
     result = await setup_service.automatic_setup(guild, staff_roles=[])
     assert [name for name, _ in guild.created] == [
-        "start-here", "server-directory", "find-partners", "parley-perks", "support", "parley-logs"
+        "👋・start-here", "📣・server-directory", "🤝・partner-board",
+        "💎・parley-perks", "💬・support", "🛡️・parley-logs"
     ]
     assert result.ok and not result.failed
     assert "general" not in [name for name, _ in guild.created]
 
 
 async def test_automatic_setup_reuses_existing_channels_and_reports_failures():
-    guild = SetupGuild(existing=("start-here",), fail=("support",))
+    guild = SetupGuild(existing=("start-here",), fail=("💬・support",))
     result = await setup_service.automatic_setup(guild, staff_roles=[])
-    assert result.reused == ["start-here"] and result.failed == ["support"]
+    assert result.reused == ["start-here"] and result.failed == ["💬・support"]
     assert "support_channel_id" not in result.channels and result.ok  # support is optional
 
 
@@ -76,9 +77,9 @@ async def test_automatic_setup_reuses_legacy_channel_names_without_duplicates():
     result = await setup_service.automatic_setup(guild, staff_roles=[])
     assert {"welcome", "partner-listings", "looking-for-partners"}.issubset(set(result.reused))
     created = [name for name, _ in guild.created]
-    assert "start-here" not in created
-    assert "server-directory" not in created
-    assert "find-partners" not in created
+    assert "👋・start-here" not in created
+    assert "📣・server-directory" not in created
+    assert "🤝・partner-board" not in created
 
 
 def test_channel_permissions():

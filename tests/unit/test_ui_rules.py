@@ -20,7 +20,7 @@ PREFERRED = {
     "decline": "❌",
     "back": "⬅️",
     "home": "🏠",
-    "support": "🛟",
+    "support": "💬",
     "request": "🤝",
 }
 

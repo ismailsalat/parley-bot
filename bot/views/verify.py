@@ -137,6 +137,7 @@ class VerifyView(OwnedView):
 
 async def show_verified_servers(interaction: discord.Interaction) -> None:
     """Replace the verification card with the servers Discord verified."""
+    from bot.views.listings import open_verified_listing_form
 
     bot = get_bot(interaction)
     async with bot.db.session() as session:

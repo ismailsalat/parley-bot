@@ -60,12 +60,12 @@ async def test_start_here_panel_stays_simple_and_optional_links_still_work_elsew
     )
     # Start Here is a four-button router: perks get explained in their own channel.
     _content, view = welcome_panel(UIBot(runtime))
-    assert labels(view) == ["Server Directory", "Find Partners", "Post Server Ad", "Add Parley"]
+    assert labels(view) == ["Add Parley", "Server Directory", "Post Server Ad", "Find Partners"]
     assert len(labels(view)) <= 4
 
     # Before /setup runs there are no channel links, but the router is still usable.
     _content, bare = welcome_panel(UIBot())
-    assert labels(bare) == ["Post Server Ad", "Add Parley"]
+    assert labels(bare) == ["Add Parley", "Post Server Ad", "Find Partners"]
 
     links = optional_links(UIBot(runtime))
     assert {item.url for item in links} == {"https://discord.gg/help", "https://example.com"}

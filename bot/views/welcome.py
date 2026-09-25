@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from types import SimpleNamespace
 from collections.abc import Awaitable, Callable
+from urllib.parse import urlsplit
 from typing import TYPE_CHECKING
 
 import discord
@@ -21,7 +22,7 @@ from bot.services import listings as listing_service
 from bot.services import permissions
 from bot.utils.helpers import format_duration, format_members, listing_jump_url, truncate, utcnow
 from bot.utils.mentions import safe_allowed_mentions
-from bot.views.base import OwnedView, acknowledge, get_bot, guard, handle_error, reply
+from bot.views.base import OwnedView, acknowledge, get_bot, guard, handle_error, home_button, reply
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -125,7 +126,11 @@ PUBLIC_PERMISSIONS = discord.Permissions(
 # channel, Manage Messages and Manage Roles so "Paste My Own Ad" can open and close a
 # one-off posting window and delete anything that fails moderation.
 SETUP_PERMISSIONS = PUBLIC_PERMISSIONS | discord.Permissions(
-    manage_channels=True, manage_messages=True, manage_roles=True
+    manage_channels=True,
+    manage_messages=True,
+    manage_roles=True,
+    # Main Parley hub only: Start Here can intentionally announce @everyone / configured roles once.
+    mention_everyone=True,
 )
 
 
@@ -179,6 +184,36 @@ def persistent_view(*items: discord.ui.Item | None) -> discord.ui.View:
         if item is not None:
             view.add_item(item)
     return view
+
+
+# ---------------------------------------------------------------- public panel presentation
+
+
+def panel_banner_url(bot: ParleyBot, filename: str) -> str | None:
+    """Public URL for a built-in panel banner served by Parley's OAuth web app."""
+    if not bot.runtime.panels.panel_images_enabled:
+        return None
+    redirect = (bot.settings.oauth_redirect_uri or "").strip()
+    if not redirect:
+        return None
+    parts = urlsplit(redirect)
+    if parts.scheme not in {"https", "http"} or not parts.netloc:
+        return None
+    return f"{parts.scheme}://{parts.netloc}/assets/{filename}"
+
+
+def public_panel_embed(bot: ParleyBot, panel_type: str, text: str) -> discord.Embed:
+    """Yellow Parley card used by the three guidance channels."""
+    embed = discord.Embed(description=text, color=bot.runtime.bot.color_warning)
+    banner = {
+        "welcome": "welcome.png",
+        "looking": "partner-board.png",
+        "perks": "perks.png",
+    }.get(panel_type)
+    if banner and (url := panel_banner_url(bot, banner)):
+        embed.set_image(url=url)
+    embed.set_footer(text="Parley • Clear steps, one server at a time")
+    return embed
 
 
 # ---------------------------------------------------------------- panel builders
@@ -236,21 +271,21 @@ def listings_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
 
 
 def looking_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
-    """Partner Board controls: browse people looking now or manage your own posts."""
+    """Partner Board controls: one green discovery action and one grey management action."""
     view = persistent_view(
-        action_button(bot, "find", row=0),
-        action_button(bot, "partner_posts", row=0),
+        action_button(bot, "find", style=discord.ButtonStyle.success, row=0),
+        action_button(bot, "partner_posts", style=discord.ButtonStyle.secondary, row=0),
     )
     return templates.render(bot.runtime, "looking_panel"), view
 
 
 def perks_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
-    """One clean explanation of why a server should keep Parley connected."""
+    """Explain Connected before exposing Network setup."""
     view = persistent_view(
         add_bot_button(bot, row=0),
-        action_button(bot, "network", row=0),
+        action_button(bot, "network_help", style=discord.ButtonStyle.secondary, row=0),
     )
-    return bot.runtime.panels.perks_panel_text, view
+    return templates.render(bot.runtime, "perks"), view
 
 
 def _hub_channel_url(bot: ParleyBot, channel_id: int | None) -> str | None:
@@ -261,18 +296,38 @@ def _hub_channel_url(bot: ParleyBot, channel_id: int | None) -> str | None:
 
 
 def welcome_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
-    """Start Here is a tiny router, not another management dashboard."""
-    # Four routes, no more: the directory, partners, listing your own server,
-    # and adding Parley. Perks are explained in their own channel.
+    """Start Here: four obvious routes in the exact order a new user needs."""
     directory_url = _hub_channel_url(bot, bot.runtime.hub.listings_channel_id)
-    partner_url = _hub_channel_url(bot, bot.runtime.hub.looking_channel_id)
     view = persistent_view(
+        # top left / top right
+        add_bot_button(bot, row=0),
         discord.ui.Button(label="Server Directory", url=directory_url, row=0) if directory_url else None,
-        discord.ui.Button(label="Find Partners", url=partner_url, row=0) if partner_url else None,
+        # bottom left / bottom right
         action_button(bot, "post", row=1),
-        add_bot_button(bot, row=1),
+        action_button(bot, "find", style=discord.ButtonStyle.success, row=1),
     )
     return templates.render(bot.runtime, "welcome"), view
+
+
+@register_action("network_help")
+async def network_help(interaction: discord.Interaction) -> None:
+    """Explain the Network first; setup is a second, intentional action."""
+    bot = get_bot(interaction)
+    connected = [
+        guild for guild in permissions.cached_manageable_guilds(bot, interaction.user.id)
+        if guild.id != bot.runtime.hub.main_guild_id
+    ]
+    embed = discord.Embed(
+        description=templates.render(bot.runtime, "network_help"),
+        color=bot.runtime.bot.color_warning,
+    )
+    embed.set_footer(text="No automatic ad exchange happens without both servers agreeing.")
+    view = persistent_view(
+        action_button(bot, "network", row=0) if connected else add_bot_button(bot, row=0),
+        home_button(bot, row=1),
+    )
+    await show_screen(interaction, embed=embed, view=view)
+
 
 def join_message(bot: ParleyBot, guild: discord.Guild | None = None) -> tuple[discord.Embed, discord.ui.View]:
     """Clean first-run message sent once when Parley is added to a server."""

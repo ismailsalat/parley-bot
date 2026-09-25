@@ -42,12 +42,16 @@ async def start_network_flow(interaction: discord.Interaction) -> None:
     candidates = [g for g in permissions.cached_manageable_guilds(bot, interaction.user.id) if g.id != bot.runtime.hub.main_guild_id]
     if not candidates:
         add = add_bot_button(bot)
-        await reply(
-            interaction,
-            "Add Parley to a server where you have **Manage Server**, then press **Join Network** "
-            "(or use `/network`) inside it.",
-            view=persistent_view(add) if add else None,
+        embed = discord.Embed(
+            title="⚠️ No Connected Server Found",
+            description=(
+                "The Parley Network works **inside a server where Parley is installed**.\n\n"
+                "Press **Add Parley**, choose the server you manage, then check your **DMs from Parley** and finish setup. "
+                "After that, come back here and choose the channel that should receive approved partner ads."
+            ),
+            color=bot.runtime.bot.color_warning,
         )
+        await reply(interaction, embed=embed, view=persistent_view(add) if add else None)
         return
     if len(candidates) == 1:
         await open_network_setup(interaction, candidates[0])
@@ -61,7 +65,7 @@ async def start_network_flow(interaction: discord.Interaction) -> None:
 
     await reply(
         interaction,
-        "Which server should receive network ads?",
+        "Which connected server are you setting up the Network for?",
         view=GuildPickerView(interaction.user.id, [(g.id, g.name) for g in candidates], picked),
     )
 
@@ -114,9 +118,9 @@ class NetworkSetupView(OwnedView):
     def render(self, notice: str | None = None) -> str:
         channel = f"<#{self.channel_id}>" if self.channel_id else "choose below"
         lines = [
-            f"## Parley Network · {self.guild.name}",
-            "Confirmed partner ads and partnership requests go here. "
-            "Parley never exchanges ads until both servers agree.",
+            f"## 🌐 Network Setup · {self.guild.name}",
+            "Choose the channel where **approved partner ads** should be delivered. "
+            "Parley never exchanges ads until both servers agree to the partnership.",
             "",
             f"**Network:** {'🟢 Enabled' if self.enabled else '⚪ Off'}",
             f"**Channel:** {channel}",
@@ -133,7 +137,7 @@ class NetworkSetupView(OwnedView):
         self.clear_items()
         config = self.bot.runtime
         channel = discord.ui.ChannelSelect(
-            placeholder="Which channel should receive partnerships?",
+            placeholder="Channel for approved partner ads",
             channel_types=[discord.ChannelType.text],
             default_values=[discord.Object(id=self.channel_id)] if self.channel_id else [],
             row=0,
@@ -157,7 +161,7 @@ class NetworkSetupView(OwnedView):
             self.add_item(categories)
 
         interval = discord.ui.Select(
-            placeholder="How often",
+            placeholder="How often Parley can check for matches",
             options=[
                 discord.SelectOption(label=interval_label(v), value=str(v), default=v == self.interval)
                 for v in config.network.interval_options
@@ -169,7 +173,7 @@ class NetworkSetupView(OwnedView):
         self.add_item(interval)
 
         enable = discord.ui.Button(
-            label="Save" if self.enabled else "Enable Network", emoji="🌐", style=discord.ButtonStyle.success, row=3
+            label="Save Network" if self.enabled else "Enable Network", emoji="🌐", style=discord.ButtonStyle.success, row=3
         )
         enable.callback = self._enable  # type: ignore[method-assign]
         self.add_item(enable)

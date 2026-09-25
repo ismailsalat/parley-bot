@@ -1,0 +1,48 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: waypoint
+          POSTGRES_PASSWORD: waypoint
+          POSTGRES_DB: waypoint_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U waypoint -d waypoint_test" --health-interval 5s --health-timeout 5s --health-retries 10
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, postgres]
+    env:
+      TEST_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql://waypoint:waypoint@localhost:5432/waypoint_test' || '' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install locked dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Compile and import check
+        run: |
+          python -m compileall -q bot migrations
+          python -m pyflakes bot tests migrations
+          python -c "import bot.main, bot.core, bot.tools.live_check; from bot.core import persistent_items; persistent_items()"
+      - name: Migration check (upgrade, check, downgrade, upgrade)
+        env:
+          DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql://waypoint:waypoint@localhost:5432/waypoint_test' || 'sqlite:///ci.db' }}
+        run: |
+          alembic upgrade head
+          alembic check
+          alembic downgrade base
+          alembic upgrade head
+          alembic downgrade base
+      - name: Tests
+        run: python -m pytest -q

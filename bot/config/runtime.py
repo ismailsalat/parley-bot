@@ -25,13 +25,14 @@ DEFAULT_BUTTONS: dict[str, dict[str, str | None]] = {
     # Label, emoji and colour of every user-facing button.
     "post": {"label": "Post Server Ad", "emoji": None, "style": "primary"},
     "connect": {"label": "Connect This Server", "emoji": None, "style": "primary"},
-    "find": {"label": "Find Partners", "emoji": None, "style": "success"},
+    "find": {"label": "Find Partners", "emoji": "🤝", "style": "success"},
     "servers": {"label": "My Server Listings", "emoji": None, "style": "primary"},
     "requests": {"label": "Requests", "emoji": None, "style": "primary"},
     "looking": {"label": "Partner Board", "emoji": None, "style": "primary"},
     "partner_posts": {"label": "My Partner Posts", "emoji": None, "style": "primary"},
-    "network": {"label": "Parley Network", "emoji": "\U0001F310", "style": "primary"},
-    "perks": {"label": "Parley Perks", "emoji": "✨", "style": "success"},
+    "network": {"label": "Set Up Network", "emoji": "🌐", "style": "primary"},
+    "network_help": {"label": "How Network Works", "emoji": "🌐", "style": "primary"},
+    "perks": {"label": "Parley Perks", "emoji": "💎", "style": "success"},
     "join": {"label": "Join Server", "emoji": None, "style": "primary"},
     "request": {"label": "Request Partnership", "emoji": "🤝", "style": "primary"},
     "view_ad": {"label": "View Server", "emoji": None, "style": "primary"},
@@ -49,7 +50,7 @@ DEFAULT_BUTTONS: dict[str, dict[str, str | None]] = {
     "accept": {"label": "Accept", "emoji": "\u2705", "style": "success"},
     "decline": {"label": "Decline", "emoji": "\u274C", "style": "danger"},
     "add_bot": {"label": "Add Parley", "emoji": None, "style": "primary"},
-    "support": {"label": "Support", "emoji": "\U0001F6DF", "style": "primary"},
+    "support": {"label": "Support", "emoji": "💬", "style": "primary"},
     "rules": {"label": "Rules", "emoji": None, "style": "primary"},
     "website": {"label": "Website", "emoji": None, "style": "primary"},
     "how": {"label": "How It Works", "emoji": None, "style": "primary"},
@@ -64,7 +65,7 @@ BUTTON_STYLES = ("primary", "success", "danger", "secondary")
 # Buttons an administrator may relabel in Settings -> Appearance (custom_ids never change).
 CUSTOMIZABLE_BUTTONS = (
     "post", "connect", "find", "servers", "requests", "looking", "partner_posts",
-    "network", "perks", "join", "request", "view_ad", "next", "edit", "edit_ad", "edit_info",
+    "network", "network_help", "perks", "join", "request", "view_ad", "next", "edit", "edit_ad", "edit_info",
     "partnerships", "preview", "self_post", "refresh", "relist", "publish", "remove",
     "accept", "decline", "add_bot", "support", "rules", "website", "directory",
 )
@@ -143,26 +144,60 @@ class NetworkConfig:
 class PanelConfig:
     listings_panel_enabled: bool = True
     listings_panel_text: str = (
-        "## Server Directory\n"
-        "Post or manage a server ad."
+        "## 📣 Server Directory\n"
+        "Browse every live server listing, open a server, or request a partnership directly from its ad.\n"
+        "-# Want your own server here? Use **Post Server Ad** below."
     )
     looking_panel_enabled: bool = True
     looking_panel_text: str = (
         "## 🤝 Partner Board\n"
-        "Servers here are actively looking for partnerships. Browse matches or manage your own partner posts."
+        "Servers posted here are **actively looking for partnerships right now**.\n\n"
+        "**Before you use the board**\n"
+        "> `1` Add Parley to the server you want to represent.\n"
+        "> `2` Check your DMs from Parley and finish that server's listing setup.\n"
+        "> `3` Make sure **Partnerships** are turned on for that listing.\n\n"
+        "Use **Find Partners** to browse. Use **My Partner Posts** to advertise one of your own listed servers."
     )
     welcome_panel_enabled: bool = True
     welcome_panel_text: str = (
-        "## Welcome to Parley\n"
-        "Choose where you want to go."
+        "## 👋 Welcome to Parley\n"
+        "**Advertise your server. Discover communities. Build partnerships.**\n\n"
+        "`📣` **Server Directory** — browse live server ads and request partnerships.\n"
+        "`🤝` **Partner Board** — find servers that are actively looking for partners.\n"
+        "`💎` **Parley Connected** — unlock faster relists and partnership automation.\n\n"
+        "### 📖 Quick Start\n"
+        "> `1` **Add Parley** if you want Connected perks.\n"
+        "> `2` Check your **DMs from Parley** and finish setup for the server you added.\n"
+        "> `3` Use **Post Server Ad** to publish your listing.\n"
+        "> `4` Browse the directory or use **Find Partners**.\n\n"
+        "-# 💡 Listing a server does not require Parley to stay installed. Connected features do."
     )
     perks_panel_enabled: bool = True
     perks_panel_text: str = (
-        "## ✨ Parley Perks\n"
-        "Your directory listing can stay live without Parley. Connect Parley for faster Relists, "
-        "Find a Partner, partner posts, the Parley Network, Auto Partner and one-click requests."
+        "## 💎 Parley Perks\n"
+        "Your server can stay listed without the bot. Keeping Parley connected unlocks the tools below.\n\n"
+        "### Without Parley\n"
+        "> `📣` Keep your directory listing live\n"
+        "> `✏️` Edit your ad and server info\n"
+        "> `🔁` Relist on the standard cooldown\n"
+        "> `🤝` Send and receive basic partnership requests\n\n"
+        "### 💎 Parley Connected\n"
+        "> `⚡` **Faster relists**\n"
+        "> `🔎` **Find Partners** tools\n"
+        "> `📮` **Partner Board posts** for each listed server\n"
+        "> `✅` **One-click Accept / Decline** for requests\n"
+        "> `🤖` **Auto Partner** options\n"
+        "> `🌐` **Parley Network** for approved partner-ad sharing\n\n"
+        "### 🌐 What is the Parley Network?\n"
+        "When two servers agree to partner and both enable the Network, Parley can place each server's approved ad in the other server's chosen partner channel. **Nothing is exchanged until both sides agree.**\n\n"
+        "-# After adding Parley, check your DMs and finish setup before using Connected features."
     )
 
+    # Public start-here announcement controls. Mentions are sent only on the first panel creation,
+    # not every restart/repair, so @everyone cannot be spammed accidentally.
+    welcome_ping_everyone: bool = True
+    welcome_ping_role_ids: tuple[int, ...] = (1552864166115549224,)
+    panel_images_enabled: bool = True
     send_join_message: bool = True
     buttons: dict[str, dict[str, str]] = field(default_factory=lambda: {k: dict(v) for k, v in DEFAULT_BUTTONS.items()})
 
@@ -229,7 +264,15 @@ class MessagesConfig:
     network_footer: str = "-# 🌐 Shared by the {bot_name} network"
     maintenance: str = "{bot_name} is temporarily unavailable.\nPlease try again later."
     test_mode: str = "🧪 {bot_name} is being set up. Please try again soon."
-    support: str = "Need help with {bot_name}? Press **Support** below."
+    support: str = "Need help with {bot_name}? Tell staff what you were trying to do and include the server name if it is about a listing or partnership."
+    network_help: str = (
+        "## 🌐 How the Parley Network Works\n"
+        "The Network is **not** a random advertising feed. It is the delivery layer for partnerships that both servers approved.\n\n"
+        "`1` Two listed servers agree to partner.\n"
+        "`2` Both servers have Parley connected and choose a Network channel.\n"
+        "`3` Parley exchanges the approved server ads between those chosen channels.\n\n"
+        "**Parley never intentionally posts Server A into Server B unless both sides agreed to the partnership.**"
+    )
     help: str = (
         "## {bot_name}\n"
         "Connect once. Post once. Find partners. Talk to people.\n\n"
@@ -453,7 +496,13 @@ def sanitize(config: RuntimeConfig) -> tuple[RuntimeConfig, list[str]]:
         clean_buttons[key] = {"label": label, "emoji": emoji or None, "style": style}
     for key, base in DEFAULT_BUTTONS.items():
         clean_buttons.setdefault(key, dict(base))
-    panels = replace(config.panels, buttons=clean_buttons)
+    panels = replace(
+        config.panels,
+        buttons=clean_buttons,
+        welcome_ping_role_ids=tuple(
+            dict.fromkeys(int(role_id) for role_id in config.panels.welcome_ping_role_ids if int(role_id) > 0)
+        )[:25],
+    )
 
     if moderation.link_action not in ("review", "block", "allow"):
         notes.append("moderation.link_action must be review, block or allow; using review")

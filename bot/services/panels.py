@@ -164,6 +164,39 @@ class PanelService:
             PERKS_PANEL: self.perks_channel,
         }[panel_type]()
 
+    def _welcome_mentions(self) -> str | None:
+        """Configured announcement mentions shown above Start Here."""
+        panels = self.bot.runtime.panels
+        parts: list[str] = []
+        if panels.welcome_ping_everyone:
+            parts.append("@everyone")
+        parts.extend(f"<@&{role_id}>" for role_id in panels.welcome_ping_role_ids)
+        return " ".join(parts) or None
+
+    def _panel_payload(self, panel_type: str) -> tuple[str | None, discord.Embed | None, discord.ui.View]:
+        """Render a panel without changing the old builder API used by tests/settings."""
+        from bot.views import welcome
+
+        builder, _enabled = self._builder(panel_type)
+        text, view = builder(self.bot)
+        if panel_type in {WELCOME_PANEL, LOOKING_PANEL, PERKS_PANEL}:
+            content = self._welcome_mentions() if panel_type == WELCOME_PANEL else None
+            return content, welcome.public_panel_embed(self.bot, panel_type, text), view
+        return text, None, view
+
+    def _panel_mentions(self, panel_type: str, *, notify: bool) -> discord.AllowedMentions:
+        """Only Start Here may intentionally ping, and only on its first creation."""
+        if panel_type != WELCOME_PANEL or not notify:
+            return safe_allowed_mentions()
+        panels = self.bot.runtime.panels
+        roles = [discord.Object(id=role_id) for role_id in panels.welcome_ping_role_ids]
+        return discord.AllowedMentions(
+            everyone=panels.welcome_ping_everyone,
+            roles=roles,
+            users=False,
+            replied_user=False,
+        )
+
     async def _repost_panel(self, panel_type: str, channel: discord.TextChannel) -> discord.Message | None:
         """Delete the stored panel and post a new one at the bottom of ``channel``."""
         guild_id = channel.guild.id
@@ -172,12 +205,19 @@ class PanelService:
         if stored is not None:
             await self._delete(stored.channel_id, stored.message_id)
 
-        builder, enabled = self._builder(panel_type)
+        _builder, enabled = self._builder(panel_type)
         message: discord.Message | None = None
         if enabled:
-            content, view = builder(self.bot)
+            content, embed, view = self._panel_payload(panel_type)
+            # A public @everyone/role announcement is useful once, not on every repair.
+            notify = stored is None
             try:
-                message = await channel.send(content=content, view=view, allowed_mentions=safe_allowed_mentions())
+                message = await channel.send(
+                    content=content,
+                    embed=embed,
+                    view=view,
+                    allowed_mentions=self._panel_mentions(panel_type, notify=notify),
+                )
             except discord.HTTPException as exc:
                 log.error("Could not post the %s panel in #%s: %s", panel_type, channel.name, exc)
         async with self.bot.db.session() as session:
@@ -200,7 +240,7 @@ class PanelService:
         channel = self._channel_for(panel_type)
         if channel is None:
             return "no_channel"
-        builder, enabled = self._builder(panel_type)
+        _builder, enabled = self._builder(panel_type)
         async with self.bot.db.session() as session:
             stored = await repository.get_panel(session, channel.guild.id, panel_type)
 
@@ -222,9 +262,14 @@ class PanelService:
 
         if keep_at_bottom and not await self._is_newest(channel, message.id):
             return "moved" if await self._repost_panel(panel_type, channel) else "error"
-        content, view = builder(self.bot)
+        content, embed, view = self._panel_payload(panel_type)
         if force_edit or message.content != content:
-            await message.edit(content=content, view=view, allowed_mentions=safe_allowed_mentions())
+            await message.edit(
+                content=content,
+                embed=embed,
+                view=view,
+                allowed_mentions=self._panel_mentions(panel_type, notify=False),
+            )
             return "edited"
         return "ok"
 

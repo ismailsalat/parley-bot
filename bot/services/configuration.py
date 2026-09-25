@@ -47,14 +47,17 @@ RESETTABLE_SECTIONS: dict[str, tuple[str, ...]] = {
                  "listings.max_categories", "listings.minimum_member_options", "listings.find_page_size"),
     "partnerships": ("partnerships.",),
     "network": ("network.",),
-    "messages": ("messages.", "panels.welcome_panel_text", "panels.listings_panel_text", "panels.looking_panel_text"),
+    "messages": ("messages.", "panels.welcome_panel_text", "panels.listings_panel_text",
+                 "panels.looking_panel_text", "panels.perks_panel_text"),
     "appearance": ("panels.buttons", "bot.", "panels.listings_panel_enabled", "panels.looking_panel_enabled",
-                   "panels.welcome_panel_enabled", "panels.send_join_message"),
+                   "panels.welcome_panel_enabled", "panels.perks_panel_enabled", "panels.send_join_message",
+                   "panels.welcome_ping_everyone", "panels.welcome_ping_role_ids", "panels.panel_images_enabled"),
     "moderation": ("moderation.",),
 }
 
 HUB_CHANNEL_FIELDS = (
-    "welcome_channel_id", "listings_channel_id", "looking_channel_id", "support_channel_id", "log_channel_id"
+    "welcome_channel_id", "listings_channel_id", "looking_channel_id", "perks_channel_id",
+    "support_channel_id", "log_channel_id"
 )
 _ENV_HUB_FIELDS = ("main_guild_id", *HUB_CHANNEL_FIELDS)
 
@@ -270,7 +273,10 @@ def parse_import(raw: str, *, include_hub: bool = False) -> dict[str, Any]:
     problem = _first_error(notes, set(chosen))
     if problem:
         raise ValidationError(f"The file contains an invalid value ({problem}).")
-    for key in ("messages.", "panels.welcome_panel_text", "panels.listings_panel_text", "panels.looking_panel_text"):
+    for key in (
+        "messages.", "panels.welcome_panel_text", "panels.listings_panel_text",
+        "panels.looking_panel_text", "panels.perks_panel_text"
+    ):
         for tkey, spec in templates.TEMPLATES.items():
             if spec.config_key in chosen and spec.config_key.startswith(key):
                 try:
