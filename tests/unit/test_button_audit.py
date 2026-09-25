@@ -63,7 +63,7 @@ async def test_no_duplicate_slash_commands(db):
 def test_slow_user_buttons_acknowledge_before_database_work():
     """The flows users hit most often must acknowledge Discord before slow DB/API work."""
     checks = {
-        "bot/views/verify.py": ["async def _continue", "await acknowledge(interaction)"],
+        "bot/views/verify.py": ["async def _continue", "await acknowledge(interaction, thinking=False)"],
         "bot/views/partnership.py": ["class GuildPickerView", "await acknowledge(interaction)"],
         "bot/views/network.py": ["async def _save", "await acknowledge(interaction)"],
         "bot/views/listings.py": ["async def _verify_another", "await acknowledge(interaction)"],

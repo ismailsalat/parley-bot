@@ -120,7 +120,8 @@ async def test_without_oauth_configured_it_says_so_instead_of_demanding_the_bot(
     bot.guilds = []
     interaction = FakeInteraction(bot, ADMIN_ID)
     await start_post_flow(interaction)
-    assert "isn't set up" in interaction.response.sent[-1]["content"]
+    sent = interaction.response.sent[-1]
+    assert "not ready yet" in sent["embed"].description
 
 
 # ---------------------------------------------------------------- 3-7. state security
