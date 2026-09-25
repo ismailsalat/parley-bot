@@ -62,13 +62,24 @@ async def partner_posts_action(interaction: discord.Interaction) -> None:
 
 
 async def start_partner_posts(interaction: discord.Interaction) -> None:
-    """Open Partner Board management with a clear prerequisite check first."""
+    """Open Partner Board management with an explicit server context.
+
+    Inside a customer server, that guild is the target. In the Parley hub/DM,
+    the user always chooses which managed server they want to act for.
+    """
     bot = get_bot(interaction)
-    connected = {
-        guild.id: guild
-        for guild in await permissions.manageable_guilds(bot, interaction.user.id)
-        if guild.id != bot.runtime.hub.main_guild_id
-    }
+    context_guild = interaction.guild
+    if context_guild is not None and context_guild.id != bot.runtime.hub.main_guild_id:
+        if not await permissions.is_manager(bot, context_guild.id, interaction.user.id):
+            from bot.services.errors import MANAGE_SERVER_REQUIRED, PermissionDenied
+            raise PermissionDenied(MANAGE_SERVER_REQUIRED)
+        connected = {context_guild.id: context_guild}
+    else:
+        connected = {
+            guild.id: guild
+            for guild in await permissions.manageable_guilds(bot, interaction.user.id)
+            if guild.id != bot.runtime.hub.main_guild_id
+        }
 
     async with bot.db.session() as session:
         connected_rows = await repository.get_listings(session, connected.keys()) if connected else []
@@ -142,7 +153,14 @@ async def start_partner_posts(interaction: discord.Interaction) -> None:
         )
         return
 
-    if len(eligible) == 1:
+    # In a customer server the current guild is already explicit. In the hub/DM,
+    # always show the picker even when only one server is eligible so Parley never
+    # silently chooses a server on the user's behalf.
+    if (
+        context_guild is not None
+        and context_guild.id != bot.runtime.hub.main_guild_id
+        and len(eligible) == 1
+    ):
         await show_partner_management(interaction, eligible[0].guild_id)
         return
 
@@ -159,7 +177,7 @@ async def start_partner_posts(interaction: discord.Interaction) -> None:
 
     await show_screen(
         interaction,
-        "## Choose Your Server\nYou manage more than one server that is ready for the Partner Board. Choose which one you want to post or manage.",
+        "## Choose Your Server\nChoose which server you want to post or manage on the Partner Board.",
         view=GuildPickerView(
             interaction.user.id,
             options,

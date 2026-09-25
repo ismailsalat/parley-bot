@@ -57,20 +57,33 @@ async def start_network_flow(interaction: discord.Interaction) -> None:
         )
         await reply(interaction, embed=embed, view=persistent_view(add) if add else None)
         return
-    if len(candidates) == 1:
-        await open_network_setup(interaction, candidates[0])
-        return
-
     async def picked(inter: discord.Interaction, guild_id: int) -> None:
         chosen = bot.get_guild(guild_id)
         if chosen is None:
             raise ValidationError("Parley is no longer in that server.")
         await open_network_setup(inter, chosen, edit_message=True)
 
+    async with bot.db.session() as session:
+        settings = {
+            g.id: await repository.get_network_settings(session, g.id)
+            for g in candidates
+        }
+
+    def status(guild: discord.Guild) -> str:
+        current = settings.get(guild.id)
+        if current is not None and current.enabled and current.channel_id:
+            return "Network enabled"
+        return "Setup needed"
+
     await reply(
         interaction,
-        "Which connected server are you setting up the Network for?",
-        view=GuildPickerView(interaction.user.id, [(g.id, g.name) for g in candidates], picked),
+        "## Network Settings\nChoose the server you want to configure.",
+        view=GuildPickerView(
+            interaction.user.id,
+            [(g.id, g.name, status(g)) for g in candidates],
+            picked,
+            placeholder="Select your server",
+        ),
     )
 
 
@@ -81,6 +94,7 @@ async def open_network_setup(
     edit_message: bool = False,
     require_listing: bool = True,
     notice: str | None = None,
+    return_to_find: bool = False,
 ) -> None:
     """Open one server's Network setup.
 
@@ -126,6 +140,10 @@ async def open_network_setup(
         interval=current.interval_minutes if current else bot.runtime.network.default_interval_minutes,
         enabled=bool(current and current.enabled),
         auto_partner=bool(current and current.auto_partner),
+        allow_change_server=(
+            interaction.guild is None or interaction.guild.id == bot.runtime.hub.main_guild_id
+        ),
+        return_to_find=return_to_find,
     )
     content = view.render(notice)
     if edit_message or interaction.response.is_done():
@@ -147,6 +165,8 @@ class NetworkSetupView(OwnedView):
         enabled: bool,
         auto_partner: bool,
         advanced: bool = False,
+        allow_change_server: bool = False,
+        return_to_find: bool = False,
     ) -> None:
         super().__init__(owner_id)
         self.bot = bot
@@ -158,6 +178,8 @@ class NetworkSetupView(OwnedView):
         self.enabled = enabled
         self.auto_partner = auto_partner
         self.advanced = advanced
+        self.allow_change_server = allow_change_server
+        self.return_to_find = return_to_find
         self._build()
 
     def render(self, notice: str | None = None) -> str:
@@ -275,7 +297,21 @@ class NetworkSetupView(OwnedView):
             leave = discord.ui.Button(label="Leave Network", style=discord.ButtonStyle.danger, row=3)
             leave.callback = self._leave  # type: ignore[method-assign]
             self.add_item(leave)
+        if self.allow_change_server:
+            change = discord.ui.Button(label="Change Server", style=discord.ButtonStyle.secondary, row=4)
+            change.callback = self._change_server  # type: ignore[method-assign]
+            self.add_item(change)
         self.add_item(home_button(self.bot, row=4))
+
+    async def _change_server(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
+        self.stop()
+        if self.return_to_find:
+            from bot.views.partnership import start_find_flow
+
+            await start_find_flow(interaction)
+        else:
+            await start_network_flow(interaction)
 
     async def _rerender(self, interaction: discord.Interaction, notice: str | None = None) -> None:
         self._build()
@@ -348,11 +384,22 @@ class NetworkSetupView(OwnedView):
             notice = "You left the network."
         else:
             notice = "⏸️ Network paused."
-        await self._rerender(interaction, notice)
         await bot.log_event(
             f"🌐 **{self.guild.name}** (`{self.guild.id}`) {'enabled' if enabled else 'disabled'} network ads "
             f"({interaction.user.mention})."
         )
+        if enabled and self.return_to_find:
+            from bot.views.partnership import CategoryView
+
+            self.stop()
+            await CategoryView(
+                bot,
+                interaction.user.id,
+                source_id=self.guild.id,
+                allow_change_server=self.allow_change_server,
+            ).show(interaction)
+            return
+        await self._rerender(interaction, notice)
 
     async def _enable(self, interaction: discord.Interaction) -> None:
         await self._save(interaction, True)

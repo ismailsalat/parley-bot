@@ -95,18 +95,16 @@ async def test_emoji_warning_offers_continue_or_edit(db):
 # ---------------------------------------------------------------- my listing
 
 
-async def test_one_server_goes_straight_to_my_listing(db, config):
+async def test_hub_my_servers_always_asks_which_server(db, config):
     bot = FakeBot(db)
     async with db.session() as session:
         await make_listing(session, config, MAIN, actor_id=ADMIN_ID)
     interaction = FakeInteraction(bot, ADMIN_ID)
-    await show_my_servers(interaction)  # no "choose a server" step
+    await show_my_servers(interaction)
     message = sent(interaction)
-    assert message.get("content") is None
-    assert message["embed"].title == "🧭 Listing Manager"
-    assert labels(message["view"]) == [
-        "Edit Ad", "Server Info", "View Ad", "Partnerships", "Setup Network", "Relist", "Remove Listing", "All Listings", "Home"
-    ]
+    assert message["embed"].title == "My Servers"
+    assert isinstance(message["view"].children[0], discord.ui.Select)
+    assert message["view"].children[0].options[0].value == str(MAIN)
 
 
 async def test_my_listing_is_a_short_summary(db, config):
@@ -139,7 +137,7 @@ async def test_edit_reveals_its_options_progressively(db, config):
 # ---------------------------------------------------------------- finding partners
 
 
-async def test_find_flow_stops_at_category_picker_after_setup_is_ready(db, config):
+async def test_hub_find_flow_always_asks_which_server_even_when_one_is_ready(db, config):
     from bot.views.partnership import start_find_flow
 
     # MAIN is the represented server here; use a different id for the Parley hub.
@@ -153,10 +151,31 @@ async def test_find_flow_stops_at_category_picker_after_setup_is_ready(db, confi
     interaction = FakeInteraction(bot, ADMIN_ID)
     await start_find_flow(interaction)
     message = sent(interaction)
-    assert message["content"] == "## Find Partners\nChoose a category."
+    assert message["content"] == "## Find Partners\nWhich server are you finding a partner for?"
+    assert isinstance(message["view"].children[0], discord.ui.Select)
+    option = message["view"].children[0].options[0]
+    assert option.value == str(MAIN)
+    assert option.description == "Ready to find partners"
+
+
+async def test_find_inside_customer_server_uses_that_server_directly(db, config):
+    from bot.views.partnership import start_find_flow
+
+    bot = FakeBot(db, hub=HubConfig(main_guild_id=999))
+    async with db.session() as session:
+        await make_listing(session, config, MAIN, actor_id=ADMIN_ID)
+        await network.configure(
+            session, bot.runtime, guild_id=MAIN, channel_id=55, categories=[], interval_minutes=180,
+            enabled=True, actor_id=ADMIN_ID, now=__import__("bot.utils.helpers", fromlist=["utcnow"]).utcnow(),
+        )
+    interaction = FakeInteraction(bot, ADMIN_ID)
+    interaction.guild = bot.guild
+    await start_find_flow(interaction)
+    message = sent(interaction)
+    assert message["content"] == "## Find Partners · Parley HQ\nChoose a category."
     assert isinstance(message["view"].children[0], discord.ui.Select)
     assert message["view"].children[0].options[-1].label == "Any Category"
-    assert message["view"].children[0].options[-1].value == ANY
+    assert "Change Server" not in labels(message["view"])
 
 
 async def test_category_screen_uses_buttons_for_a_few_categories(db):
@@ -301,3 +320,45 @@ async def test_request_confirmation_shows_from_to_and_can_change_server(db, conf
     assert "**From:** Parley HQ" in message["embed"].description
     assert "**To:** Night Owls" in message["embed"].description
     assert labels(message["view"]) == ["Send Request", "Add Note", "Change Server"]
+
+# ---------------------------------------------------------------- explicit hub server selection
+
+
+async def test_hub_network_never_silently_picks_only_server(db):
+    from bot.views.network import start_network_flow
+
+    bot = FakeBot(db, hub=HubConfig(main_guild_id=999))
+    interaction = FakeInteraction(bot, ADMIN_ID)
+    await start_network_flow(interaction)
+    message = sent(interaction)
+    assert message["content"] == "## Network Settings\nChoose the server you want to configure."
+    assert isinstance(message["view"].children[0], discord.ui.Select)
+    assert message["view"].children[0].options[0].value == str(MAIN)
+
+
+async def test_hub_relist_never_silently_picks_only_server(db, config):
+    from bot.views.management import relist_from_anywhere
+
+    bot = FakeBot(db, hub=HubConfig(main_guild_id=999))
+    async with db.session() as session:
+        await make_listing(session, config, MAIN, actor_id=ADMIN_ID)
+    interaction = FakeInteraction(bot, ADMIN_ID)
+    await relist_from_anywhere(interaction)
+    message = sent(interaction)
+    assert message["embed"].title == "Relist"
+    assert isinstance(message["view"].children[0], discord.ui.Select)
+    assert message["view"].children[0].options[0].value == str(MAIN)
+
+
+async def test_hub_partner_board_never_silently_picks_only_server(db, config):
+    from bot.views.partner_posts import start_partner_posts
+
+    bot = FakeBot(db, hub=HubConfig(main_guild_id=999))
+    async with db.session() as session:
+        await make_listing(session, config, MAIN, actor_id=ADMIN_ID)
+    interaction = FakeInteraction(bot, ADMIN_ID)
+    await start_partner_posts(interaction)
+    message = sent(interaction)
+    assert message["content"].startswith("## Choose Your Server")
+    assert isinstance(message["view"].children[0], discord.ui.Select)
+    assert message["view"].children[0].options[0].value == str(MAIN)

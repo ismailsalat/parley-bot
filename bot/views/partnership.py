@@ -759,10 +759,24 @@ class RequestInboxView(OwnedView):
 
 
 async def _continue_find_for_guild(
-    interaction: discord.Interaction, guild: discord.Guild, *, edit_message: bool = True
+    interaction: discord.Interaction,
+    guild: discord.Guild,
+    *,
+    edit_message: bool = True,
+    allow_change_server: bool | None = None,
 ) -> None:
-    """Make Find Partners the single guided entry point for partnership setup."""
+    """Make Find Partners the single guided entry point for partnership setup.
+
+    ``allow_change_server`` is true for the Parley hub/DM dashboard so the user
+    can always switch the server they are acting for. Inside a customer server,
+    the current guild remains the explicit target and no redundant picker is
+    shown.
+    """
     bot = get_bot(interaction)
+    if allow_change_server is None:
+        allow_change_server = (
+            interaction.guild is None or interaction.guild.id == bot.runtime.hub.main_guild_id
+        )
     await permissions.require_manager(bot, guild.id, interaction.user.id)
     await bot.maybe_dm_manager_onboarding(guild, interaction.user)
 
@@ -796,14 +810,23 @@ async def _continue_find_for_guild(
         from bot.views.network import open_network_setup
 
         await open_network_setup(
-            interaction, guild, edit_message=edit_message or interaction.response.is_done(), require_listing=False,
+            interaction,
+            guild,
+            edit_message=edit_message or interaction.response.is_done(),
+            require_listing=False,
+            return_to_find=True,
             notice="✅ Server ad ready. Choose the channel where approved partner ads should be delivered.",
         )
         return
 
     # Step 3: setup is complete. The user only has to choose what kind of
     # partner they want; no extra setup buttons or duplicate dashboards.
-    await CategoryView(bot, interaction.user.id, source_id=guild.id).show(interaction)
+    await CategoryView(
+        bot,
+        interaction.user.id,
+        source_id=guild.id,
+        allow_change_server=allow_change_server,
+    ).show(interaction)
 
 
 @register_action("find")
@@ -836,10 +859,6 @@ async def start_find_flow(interaction: discord.Interaction) -> None:
         await _edit_or_reply(interaction, text, persistent_view(add_bot_button(bot), home_button(bot)))
         return
 
-    if len(connected) == 1:
-        await _continue_find_for_guild(interaction, connected[0])
-        return
-
     async with bot.db.session() as session:
         listings = {row.guild_id: row for row in await repository.get_listings(session, [g.id for g in connected])}
         settings_rows = {
@@ -860,7 +879,9 @@ async def start_find_flow(interaction: discord.Interaction) -> None:
         chosen = bot.get_guild(guild_id)
         if chosen is None:
             raise ValidationError("Parley is no longer in that server.")
-        await _continue_find_for_guild(inter, chosen, edit_message=True)
+        await _continue_find_for_guild(
+            inter, chosen, edit_message=True, allow_change_server=True
+        )
 
     await _edit_or_reply(
         interaction,
@@ -877,10 +898,18 @@ async def start_find_flow(interaction: discord.Interaction) -> None:
 class CategoryView(OwnedView):
     """One question: what kind of server are you looking for?"""
 
-    def __init__(self, bot: ParleyBot, owner_id: int, *, source_id: int | None) -> None:
+    def __init__(
+        self,
+        bot: ParleyBot,
+        owner_id: int,
+        *,
+        source_id: int | None,
+        allow_change_server: bool = False,
+    ) -> None:
         super().__init__(owner_id)
         self.bot = bot
         self.source_id = source_id
+        self.allow_change_server = allow_change_server
         categories = list(bot.runtime.listings.categories)
         if len(categories) <= 4:
             for name in categories:
@@ -893,6 +922,11 @@ class CategoryView(OwnedView):
             select.callback = self._selected  # type: ignore[method-assign]
             self._select = select
             self.add_item(select)
+
+        if self.allow_change_server:
+            change = discord.ui.Button(label="Change Server", style=discord.ButtonStyle.secondary, row=2)
+            change.callback = self._change_server  # type: ignore[method-assign]
+            self.add_item(change)
 
     def _add_button(self, name: str, row: int) -> None:
         label = "Any Category" if name == ANY else name
@@ -910,10 +944,25 @@ class CategoryView(OwnedView):
     async def _start(self, interaction: discord.Interaction, category: str) -> None:
         await acknowledge(interaction)
         self.stop()
-        await FinderView(self.bot, self.owner_id, category=category, source_id=self.source_id).show(interaction)
+        await FinderView(
+            self.bot,
+            self.owner_id,
+            category=category,
+            source_id=self.source_id,
+            allow_change_server=self.allow_change_server,
+        ).show(interaction)
+
+    async def _change_server(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
+        self.stop()
+        await start_find_flow(interaction)
 
     async def show(self, interaction: discord.Interaction) -> None:
-        text = "## Find Partners\nChoose a category."
+        source = self.bot.get_guild(self.source_id) if self.source_id else None
+        if source is not None:
+            text = f"## Find Partners · {source.name}\nChoose a category."
+        else:
+            text = "## Find Partners\nChoose a category."
         if interaction.response.is_done():
             await interaction.edit_original_response(content=text, embeds=[], view=self)
         elif interaction.message is not None and (interaction.guild is None or interaction.message.flags.ephemeral):
@@ -932,6 +981,7 @@ class FinderView(OwnedView):
         *,
         category: str,
         source_id: int | None,
+        allow_change_server: bool = False,
         seen: set[int] | None = None,
         include_past: bool = False,
         past_only: bool = False,
@@ -940,6 +990,7 @@ class FinderView(OwnedView):
         self.bot = bot
         self.category = category
         self.source_id = source_id
+        self.allow_change_server = allow_change_server
         self.include_past = include_past
         self.past_only = past_only
         self.past_partners: set[int] = set()
@@ -1087,6 +1138,10 @@ class FinderView(OwnedView):
         )
         if self.current_icon_url:
             embed.set_thumbnail(url=self.current_icon_url)
+        if self.source_id:
+            source = self.bot.get_guild(self.source_id)
+            if source is not None:
+                embed.set_footer(text=f"Finding for {source.name}")
         return embed
 
     def render(self, notice: str | None = None) -> str:
@@ -1117,6 +1172,10 @@ class FinderView(OwnedView):
         else:
             self.add_item(view_ad_button(self.bot, gid, label="View Server", row=0))
 
+        if self.allow_change_server:
+            change = discord.ui.Button(label="Change Server", style=discord.ButtonStyle.secondary, row=1)
+            change.callback = self._change_server  # type: ignore[method-assign]
+            self.add_item(change)
         self.add_item(home_button(self.bot, row=1))
 
     async def show(self, interaction: discord.Interaction, notice: str | None = None) -> None:
@@ -1125,6 +1184,7 @@ class FinderView(OwnedView):
             self.stop()
             await ExhaustedView(
                 self.bot, self.owner_id, category=self.category, source_id=self.source_id, seen=self.seen,
+                allow_change_server=self.allow_change_server,
                 past_partners=bool(self.past_partners) and not self.include_past,
             ).show(interaction, first=not self.seen)
             return
@@ -1153,7 +1213,17 @@ class FinderView(OwnedView):
     async def _back(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction)
         self.stop()
-        await CategoryView(self.bot, self.owner_id, source_id=self.source_id).show(interaction)
+        await CategoryView(
+            self.bot,
+            self.owner_id,
+            source_id=self.source_id,
+            allow_change_server=self.allow_change_server,
+        ).show(interaction)
+
+    async def _change_server(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
+        self.stop()
+        await start_find_flow(interaction)
 
 
 class RequestPromptView(OwnedView):
@@ -1264,6 +1334,7 @@ class ExhaustedView(OwnedView):
         category: str,
         source_id: int | None,
         seen: set[int],
+        allow_change_server: bool = False,
         past_partners: bool = False,
     ) -> None:
         super().__init__(owner_id)
@@ -1271,6 +1342,7 @@ class ExhaustedView(OwnedView):
         self.category = category
         self.source_id = source_id
         self.seen = seen
+        self.allow_change_server = allow_change_server
         self.past_partners = past_partners
         if past_partners:
             past = discord.ui.Button(label="Show Past Partners", style=discord.ButtonStyle.primary, row=0)
@@ -1283,6 +1355,10 @@ class ExhaustedView(OwnedView):
         again = discord.ui.Button(label="Show Again", style=discord.ButtonStyle.primary, row=0)
         again.callback = self._again  # type: ignore[method-assign]
         self.add_item(again)
+        if self.allow_change_server:
+            change = discord.ui.Button(label="Change Server", style=discord.ButtonStyle.secondary, row=1)
+            change.callback = self._change_server  # type: ignore[method-assign]
+            self.add_item(change)
 
     def embed(self, first: bool) -> discord.Embed:
         category = "any category" if self.category == ANY else self.category
@@ -1316,7 +1392,7 @@ class ExhaustedView(OwnedView):
         self.stop()
         await FinderView(
             self.bot, self.owner_id, category=self.category, source_id=self.source_id,
-            include_past=True, past_only=True,
+            allow_change_server=self.allow_change_server, include_past=True, past_only=True,
         ).show(interaction)
 
     async def show(self, interaction: discord.Interaction, first: bool = False) -> None:
@@ -1331,12 +1407,23 @@ class ExhaustedView(OwnedView):
     async def _another(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction)
         self.stop()
-        await CategoryView(self.bot, self.owner_id, source_id=self.source_id).show(interaction)
+        await CategoryView(
+            self.bot, self.owner_id, source_id=self.source_id,
+            allow_change_server=self.allow_change_server,
+        ).show(interaction)
+
+    async def _change_server(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
+        self.stop()
+        await start_find_flow(interaction)
 
     async def _again(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction)
         self.stop()  # reset the seen list and reshuffle
-        await FinderView(self.bot, self.owner_id, category=self.category, source_id=self.source_id).show(interaction)
+        await FinderView(
+            self.bot, self.owner_id, category=self.category, source_id=self.source_id,
+            allow_change_server=self.allow_change_server,
+        ).show(interaction)
 
 
 async def _edit_or_reply(

@@ -161,10 +161,6 @@ async def show_my_servers(interaction: discord.Interaction) -> None:
         )
         return
 
-    if len(rows) == 1:
-        await show_management(interaction, rows[0].guild_id)
-        return
-
     def name_for(guild_id: int) -> str:
         live = connected.get(guild_id)
         if live is not None:
@@ -645,10 +641,6 @@ async def relist_from_anywhere(interaction: discord.Interaction) -> None:
     if not rows:
         await reply(interaction, "You don't have a listed server yet.", view=persistent_view(action_button(bot, "post")))
         return
-    if len(rows) == 1:
-        await relist(interaction, rows[0].guild_id)
-        return
-
     from bot.views.partnership import GuildPickerView
 
     async def picked(inter: discord.Interaction, guild_id: int) -> None:

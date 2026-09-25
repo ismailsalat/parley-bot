@@ -432,7 +432,7 @@ async def open_listing_form(
             from bot.views.network import open_network_setup
 
             await open_network_setup(
-                interaction, guild, edit_message=True, require_listing=False,
+                interaction, guild, edit_message=True, require_listing=False, return_to_find=True,
                 notice="✅ Server ad ready. Now choose where approved partner ads should be delivered.",
             )
             return
@@ -464,6 +464,10 @@ async def open_listing_form(
     form = ListingFormView(
         bot, user_id, guild.id, guild.name, draft, mode="create", in_dm=interaction.guild is None,
         return_to_network=return_to_network,
+        allow_change_server=(
+            return_to_network
+            and (interaction.guild is None or interaction.guild.id == bot.runtime.hub.main_guild_id)
+        ),
     )
     if edit_message or interaction.response.is_done():
         await interaction.edit_original_response(content=form.render(), embeds=[], view=form)
@@ -551,6 +555,7 @@ class ListingFormView(OwnedView):
         connected: bool = True,
         verified=None,
         return_to_network: bool = False,
+        allow_change_server: bool = False,
     ) -> None:
         super().__init__(owner_id)
         self.bot = bot
@@ -565,6 +570,7 @@ class ListingFormView(OwnedView):
         self.connected = connected
         self.invite_changed = False
         self.return_to_network = return_to_network
+        self.allow_change_server = allow_change_server
         self._build()
 
     # ---- rendering
@@ -653,6 +659,10 @@ class ListingFormView(OwnedView):
             nxt = discord.ui.Button(label="Continue", style=discord.ButtonStyle.primary, row=4)
             nxt.callback = self._next  # type: ignore[method-assign]
             self.add_item(nxt)
+            if self.allow_change_server:
+                change = discord.ui.Button(label="Change Server", style=discord.ButtonStyle.secondary, row=4)
+                change.callback = self._change_server  # type: ignore[method-assign]
+                self.add_item(change)
         else:
             save = discord.ui.Button(label="Save", style=discord.ButtonStyle.primary, row=4)
             invite = discord.ui.Button(label="Change Invite", emoji="🔗", style=discord.ButtonStyle.primary, row=4)
@@ -689,6 +699,12 @@ class ListingFormView(OwnedView):
         notice = "Bots can't be partnership contacts." if len(chosen) != len(self._contacts.values) else None
         self.draft.contacts = [u.id for u in chosen] or [self.owner_id]
         await self._rerender(interaction, notice)
+
+    async def _change_server(self, interaction: discord.Interaction) -> None:
+        from bot.views.partnership import start_find_flow
+
+        self.stop()
+        await start_find_flow(interaction)
 
     async def _cancel(self, interaction: discord.Interaction) -> None:
         self.stop()
@@ -880,7 +896,7 @@ class ListingFormView(OwnedView):
         from bot.views.network import open_network_setup
 
         await open_network_setup(
-            interaction, guild, edit_message=True, require_listing=False,
+            interaction, guild, edit_message=True, require_listing=False, return_to_find=True,
             notice="✅ Server ad created. Last step: choose the channel for approved partner ads.",
         )
         return True
