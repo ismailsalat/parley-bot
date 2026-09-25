@@ -20,7 +20,7 @@ class ConnectCommands(commands.Cog):
     def __init__(self, bot: ParleyBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="connect", description="List this server on the Parley partner network.")
+    @app_commands.command(name="connect", description="Post or manage this server's directory ad.")
     @app_commands.allowed_installs(guilds=True, users=False)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.guild_only()

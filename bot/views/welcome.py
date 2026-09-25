@@ -126,6 +126,7 @@ SEMANTIC_BUTTON_STYLES = {
     "partner_posts": discord.ButtonStyle.success,
     "request": discord.ButtonStyle.success,
     "partnerships": discord.ButtonStyle.success,
+    "network": discord.ButtonStyle.success,
 }
 
 
@@ -304,14 +305,13 @@ def _hub_channel_url(bot: ParleyBot, channel_id: int | None) -> str | None:
 
 
 def welcome_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
-    """Start Here: four obvious routes in the exact order a new user needs."""
+    """Start Here: network first, then directory and partner discovery."""
     directory_url = _hub_channel_url(bot, bot.runtime.hub.listings_channel_id)
     view = persistent_view(
-        # top left / top right
         add_bot_button(bot, row=0),
+        action_button(bot, "network", style=discord.ButtonStyle.success, row=0),
         discord.ui.Button(label="Server Directory", url=directory_url, row=0) if directory_url else None,
-        # bottom left / bottom right
-        action_button(bot, "post", row=1),
+        action_button(bot, "post", style=discord.ButtonStyle.primary, row=1),
         action_button(bot, "find", style=discord.ButtonStyle.success, row=1),
     )
     return templates.render(bot.runtime, "welcome"), view
@@ -339,7 +339,7 @@ async def network_help(interaction: discord.Interaction) -> None:
 
 
 def join_message(bot: ParleyBot, guild: discord.Guild | None = None) -> tuple[discord.Embed, discord.ui.View]:
-    """Clean first-run message sent once when Parley is added to a server."""
+    """Network-first first-run message sent when Parley is added to a server."""
     description = templates.render(
         bot.runtime, "join_message", server_name=guild.name if guild else "This server"
     )
@@ -348,16 +348,27 @@ def join_message(bot: ParleyBot, guild: discord.Guild | None = None) -> tuple[di
         description=description,
         color=bot.runtime.bot.color_primary,
     )
-    embed.set_footer(text="Only server managers can list this server.")
+    embed.set_footer(text="Only server managers can change Network or listing settings.")
 
     view = discord.ui.View(timeout=None)
-    connect = action_button(bot, "connect", row=0)
-    connect.item.label = "List This Server"
-    connect.item.emoji = None
-    view.add_item(connect)
+    network = action_button(bot, "network", style=discord.ButtonStyle.success, row=0)
+    network.item.label = "Setup Network"
+    network.item.emoji = "🤝"
+    view.add_item(network)
+
+    post = action_button(bot, "post", style=discord.ButtonStyle.primary, row=0)
+    post.item.label = "Post Server Ad"
+    post.item.emoji = None
+    view.add_item(post)
+
+    how = action_button(bot, "network_help", style=discord.ButtonStyle.secondary, row=1)
+    how.item.label = "How It Works"
+    how.item.emoji = None
+    view.add_item(how)
+
     if not bot.runtime.hub.configured:
-        setup = action_button(bot, "setup", style=discord.ButtonStyle.success, row=0)
-        setup.item.label = "Set Up Parley"
+        setup = action_button(bot, "setup", style=discord.ButtonStyle.secondary, row=1)
+        setup.item.label = "Set Up Parley Hub"
         setup.item.emoji = None
         view.add_item(setup)
     return embed, view

@@ -103,7 +103,7 @@ async def test_one_server_goes_straight_to_my_listing(db, config):
     assert message.get("content") is None
     assert message["embed"].title == "🧭 Listing Manager"
     assert labels(message["view"]) == [
-        "Edit Ad", "Server Info", "View Ad", "Partnerships", "Relist", "Remove Listing", "All Listings", "Home"
+        "Edit Ad", "Server Info", "View Ad", "Partnerships", "Setup Network", "Relist", "Remove Listing", "All Listings", "Home"
     ]
 
 

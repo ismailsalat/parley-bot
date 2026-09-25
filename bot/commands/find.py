@@ -8,6 +8,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.services import permissions
+from bot.services.errors import MANAGE_SERVER_REQUIRED, PermissionDenied
 from bot.views.partnership import start_find_flow
 
 if TYPE_CHECKING:
@@ -21,7 +23,12 @@ class FindCommands(commands.Cog):
     @app_commands.command(name="find", description="Find servers to partner with.")
     @app_commands.allowed_installs(guilds=True, users=False)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
+    @app_commands.default_permissions(manage_guild=True)
     async def find(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is not None:
+            member = interaction.user
+            if not isinstance(member, discord.Member) or not permissions.can_manage(member.guild_permissions):
+                raise PermissionDenied(MANAGE_SERVER_REQUIRED)
         await start_find_flow(interaction)
 
 

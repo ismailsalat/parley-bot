@@ -82,7 +82,7 @@ class ManageButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wp:mana
 class ManagementButton(
     discord.ui.DynamicItem[discord.ui.Button],
     # "refresh" stays accepted so buttons on older messages keep working after upgrades.
-    template=r"wp:m:(?P<action>edit_ad|edit_info|partnerships|edit|preview|refresh|relist|remove|self_post):(?P<gid>\d+)",
+    template=r"wp:m:(?P<action>edit_ad|edit_info|partnerships|network|edit|preview|refresh|relist|remove|self_post):(?P<gid>\d+)",
 ):
     def __init__(self, action: str, guild_id: int, bot: ParleyBot | None = None, row: int | None = None) -> None:
         from bot.views.welcome import BUTTON_STYLE_MAP
@@ -120,6 +120,7 @@ class ManagementButton(
             "edit_ad": edit_ad,
             "edit_info": edit_info,
             "partnerships": partnership_settings,
+            "network": network_settings,
             "preview": preview,
             "refresh": relist,
             "relist": relist,
@@ -276,9 +277,9 @@ def management_embed(bot: ParleyBot, listing: Listing, guild: discord.Guild) -> 
     if listing.is_test:
         notes.append("🧪 TEST listing")
     if notes:
-        embed.set_footer(text=" · ".join(notes))
+        embed.set_footer(text=" · ".join([*notes, "Synced everywhere for this server"]))
     else:
-        embed.set_footer(text="Changes here affect only this server")
+        embed.set_footer(text="Synced everywhere for this server")
     return embed
 
 
@@ -299,6 +300,7 @@ def management_view(bot: ParleyBot, listing: Listing, guild: discord.Guild) -> d
         ManagementButton("edit_info", guild.id, bot, row=0),
         discord.ui.Button(label="View Ad", url=ad_url, row=0) if ad_url else ManagementButton("preview", guild.id, bot, row=0),
         ManagementButton("partnerships", guild.id, bot, row=1),
+        ManagementButton("network", guild.id, bot, row=1),
         ManagementButton("relist", guild.id, bot, row=1),
         connect,
         ManagementButton("remove", guild.id, bot, row=2),
@@ -569,6 +571,15 @@ async def preview(interaction: discord.Interaction, guild_id: int) -> None:
         await reply(interaction, embed=embed)
         return
     await reply(interaction, "This ad isn't published in the directory right now.")
+
+
+async def network_settings(interaction: discord.Interaction, guild_id: int) -> None:
+    """Open this exact server's Network settings from either server or hub management."""
+    bot = get_bot(interaction)
+    guild, _member = await permissions.require_manager(bot, guild_id, interaction.user.id)
+    from bot.views.network import open_network_setup
+
+    await open_network_setup(interaction, guild, edit_message=True)
 
 
 async def relist(interaction: discord.Interaction, guild_id: int) -> None:

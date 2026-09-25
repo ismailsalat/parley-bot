@@ -289,7 +289,7 @@ async def start_post_flow(interaction: discord.Interaction) -> None:
     guild = interaction.guild
 
     if guild is not None and guild.id != bot.runtime.hub.main_guild_id:
-        # /connect or the List This Server button inside a specific server should
+        # /connect or the Post Server Ad button inside a specific server should
         # stay direct: the server is already obvious in that context.
         if not isinstance(user, discord.Member) or not permissions.can_manage(user.guild_permissions):
             raise PermissionDenied(MANAGE_SERVER_REQUIRED)
@@ -424,11 +424,19 @@ async def open_listing_form(interaction: discord.Interaction, guild: discord.Gui
     if existing is not None and existing.status in ListingStatus.LIVE:
         from bot.views.management import manage_button  # local import: management imports this module
 
-        view = persistent_view(manage_button(bot, guild.id, guild.name))
+        manage = manage_button(bot, guild.id, guild.name)
+        manage.item.label = "Manage Existing Ad"
+        view = persistent_view(manage)
+        message = (
+            f"## Server Ad Already Exists\n"
+            f"**{guild.name}** already has a Parley ad. It is the **same listing everywhere**, whether you open it "
+            "from this server or the main Parley server.\n\n"
+            "Use **Manage Existing Ad** to edit, relist, view, or remove it. The same cooldowns apply everywhere."
+        )
         if interaction.response.is_done():
-            await interaction.edit_original_response(content="This server is already listed.", embeds=[], view=view)
+            await interaction.edit_original_response(content=message, embeds=[], view=view)
         else:
-            await reply(interaction, "This server is already listed.", view=view)
+            await reply(interaction, message, view=view)
         return
 
     draft = ListingDraft(contacts=[user_id])

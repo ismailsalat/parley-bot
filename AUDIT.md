@@ -121,7 +121,7 @@ a static button/handler audit, and rendering of every admin screen.
 
 - **Finder result:** replaced the plain text block with a compact embed showing Category, Members and an explicitly named **Partner requirement**. Finder buttons no longer use decorative emoji.
 - **Channel names:** new Automatic Setup uses `#start-here`, `#server-directory`, `#find-partners`, `#support`, `#waypoint-logs`. Legacy names are reused rather than duplicated on upgrades.
-- **Server invite onboarding:** when Parley joins a server it sends one clean **Parley is connected** embed with a single **List This Server** action. It does not claim network enrollment or post anything automatically.
+- **Server invite onboarding:** when Parley joins a server it sends one clean **Parley is connected** embed with **Setup Network** first, **Post Server Ad** second, and **How It Works**. The server owner also receives a one-time DM explaining the full partnership flow. Nothing is posted automatically just because the bot was invited.
 - **No sendable channel:** Parley falls back to DMing the guild owner with the exact View Channel / Send Messages fix and `/connect` next step.
 
 
@@ -159,7 +159,7 @@ a static button/handler audit, and rendering of every admin screen.
 - **Relist stays one-click without reposting the owner:** a Relist moves a compact one-line pointer with **View Ad / Join Server / Request Partnership** to the newest position.
 - **Public footer trimmed:** `#server-directory` now shows only **Post My Server / Find Partners / Relist**. My Listing and Add Parley live in the places that need them instead of repeating under every ad.
 - **Multiple servers:** one listed server opens My Listing immediately; multiple listings use one server dropdown instead of a grid of management buttons. DM home labels the action **My Servers** only when the user actually has multiple listed servers.
-- **Cleaner onboarding:** the join message says exactly what List This Server does, and the directory topic explains that posting is locked and Relist moves a listing back up.
+- **Cleaner onboarding:** the join message starts with Network setup, the listing action stays separate and synced everywhere, and Relist is available from management plus `/relist` for server managers.
 - **Quieter Health Check:** optional Support / Staff logs channels no longer produce warning noise when intentionally unconfigured.
 
 

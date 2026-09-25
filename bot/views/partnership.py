@@ -763,6 +763,26 @@ async def start_find_flow(interaction: discord.Interaction) -> None:
     # be deferred. acknowledge() is intentionally idempotent.
     await acknowledge(interaction)
     bot = get_bot(interaction)
+
+    # Inside a connected server, that server is the obvious source. Do not ask
+    # a manager to pick from every other server they manage. The hub/DM flow
+    # below still offers a picker when several servers are possible.
+    context_guild = interaction.guild
+    if context_guild is not None and context_guild.id != bot.runtime.hub.main_guild_id:
+        if not await permissions.is_manager(bot, context_guild.id, interaction.user.id):
+            raise PermissionDenied("You need **Manage Server** to find partnerships for this server.")
+        async with bot.db.session() as session:
+            current = await repository.get_listing(session, context_guild.id)
+        if current is None or current.status != ListingStatus.ACTIVE:
+            await _edit_or_reply(
+                interaction,
+                f"## Post Your Server Ad First\n**{context_guild.name}** needs a live server ad before it can send partnership requests.",
+                persistent_view(action_button(bot, "post"), home_button(bot)),
+            )
+            return
+        await CategoryView(bot, interaction.user.id, source_id=context_guild.id).show(interaction)
+        return
+
     async with bot.db.session() as session:
         represented = await represented_listings(bot, session, interaction.user.id)
         sources = [s for s in represented if permissions.is_connected(bot, s.guild_id)]

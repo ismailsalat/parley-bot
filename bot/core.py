@@ -520,6 +520,59 @@ class ParleyBot(commands.Bot):
                 return candidate
         return None
 
+    async def _dm_guild_onboarding(self, guild: discord.Guild) -> None:
+        """DM the server owner a one-time, network-first setup guide.
+
+        This is separate from the public join card so the manager can always find
+        the setup steps later. The audit row prevents reconnects/restarts from
+        spamming the owner.
+        """
+        async with self.db.session() as session:
+            if await repository.has_audit_action(session, "guild_onboarding.sent", guild_id=guild.id):
+                return
+
+        owner = guild.owner
+        if owner is None:
+            try:
+                owner = await guild.fetch_member(guild.owner_id)
+            except (discord.HTTPException, AttributeError):
+                owner = None
+        if owner is None:
+            log.info("Could not resolve owner for onboarding DM in guild %s", guild.id)
+            return
+
+        from bot.views.welcome import action_button, persistent_view
+
+        embed = discord.Embed(
+            title=f"Parley is ready in {guild.name}",
+            description=(
+                "**What to do first**\n"
+                "`1` **Setup Network** — choose the channel where ads from approved partners are delivered.\n"
+                "`2` **Post Server Ad** — optional, but needed if you want the server discoverable in the directory.\n"
+                "`3` **Find Partners** — send a partnership request.\n"
+                "`4` When both servers accept, Parley exchanges each server's ad in the Network channels they chose.\n\n"
+                "Your listing, cooldowns, partnership settings, and Network settings stay **in sync** whether you manage "
+                "them here or from the main Parley server. Nothing is exchanged before a partnership is accepted."
+            ),
+            color=self.runtime.bot.color_primary,
+        )
+        embed.set_footer(text="Only server managers can change these settings.")
+        view = persistent_view(
+            action_button(self, "network", style=discord.ButtonStyle.success, row=0),
+            action_button(self, "post", style=discord.ButtonStyle.primary, row=0),
+            action_button(self, "network_help", style=discord.ButtonStyle.secondary, row=1),
+        )
+        try:
+            await owner.send(embed=embed, view=view)
+        except discord.HTTPException as exc:
+            log.info("Could not DM guild owner onboarding for %s: %s", guild.id, exc)
+            return
+
+        async with self.db.session() as session:
+            await repository.add_audit(
+                session, "guild_onboarding.sent", actor_id=owner.id, guild_id=guild.id
+            )
+
     async def _dm_join_fallback(self, guild: discord.Guild) -> None:
         """Explain the next step when Parley cannot speak in any server channel."""
         owner = guild.owner
@@ -537,7 +590,7 @@ class ParleyBot(commands.Bot):
             description=(
                 f"Parley was added to **{guild.name}**, but I can't send messages in any public channel yet.\n\n"
                 "Give Parley **View Channel**, **Send Messages**, and **Read Message History** in a channel "
-                "that **@everyone can view**, then run `/connect` there. Members can stay read-only.\n\n"
+                "that **@everyone can view**, then run `/network` there to finish Network setup. Members can stay read-only.\n\n"
                 "Private staff/bot-only channels do not count. Nothing has been posted automatically."
             ),
             color=self.runtime.bot.color_warning,
@@ -550,7 +603,14 @@ class ParleyBot(commands.Bot):
     async def on_guild_join(self, guild: discord.Guild) -> None:
         log.info("Joined server %s (%s, %d members)", guild.name, guild.id, guild.member_count or 0)
         await self.log_event(f"➕ Added to **{guild.name}** (`{guild.id}`).")
-        if not self.runtime.panels.send_join_message or guild.id == self.hub.main_guild_id:
+        if guild.id == self.hub.main_guild_id:
+            return
+
+        # Always give the owner a durable one-time explanation. This is audit
+        # guarded, so reconnects and 24/7 restarts never resend it.
+        await self._dm_guild_onboarding(guild)
+
+        if not self.runtime.panels.send_join_message:
             return
         from bot.views.welcome import join_message
 

@@ -30,7 +30,7 @@ DEFAULT_BUTTONS: dict[str, dict[str, str | None]] = {
     "requests": {"label": "Requests", "emoji": None, "style": "primary"},
     "looking": {"label": "Partner Board", "emoji": None, "style": "success"},
     "partner_posts": {"label": "My Partner Posts", "emoji": None, "style": "success"},
-    "network": {"label": "Set Up Network", "emoji": "🌐", "style": "primary"},
+    "network": {"label": "Setup Network", "emoji": "🤝", "style": "success"},
     "network_help": {"label": "How Network Works", "emoji": "🌐", "style": "secondary"},
     "perks": {"label": "Parley Perks", "emoji": "💎", "style": "success"},
     "join": {"label": "Join Server", "emoji": None, "style": "primary"},
@@ -165,13 +165,13 @@ class PanelConfig:
     welcome_panel_enabled: bool = True
     welcome_panel_text: str = (
         "# 👋 Welcome to Parley\n"
-        "*List. Discover. Partner.*\n\n"
-        "**Start here**\n"
-        "`01` **Add Parley** — optional; unlocks Connected features.\n"
-        "`02` **Post Server Ad** — publish a listing, even without the bot installed.\n"
-        "`03` **Server Directory** — browse live communities.\n"
-        "`04` **Find Partners** — discover servers open to partnerships.\n\n"
-        "-# Added Parley? Check your DMs and finish setup for each server before using Connected features."
+        "*Connect. Partner. Exchange ads.*\n\n"
+        "**Simple setup**\n"
+        "`01` **Add Parley** to the server you manage.\n"
+        "`02` **Setup Network** and choose its partner-ad channel.\n"
+        "`03` **Post Server Ad** if you want it in the public directory.\n"
+        "`04` **Find Partners** and send a request.\n\n"
+        "When both servers accept, Parley exchanges their ads in the Network channels they chose."
     )
     perks_panel_enabled: bool = True
     perks_panel_text: str = (
@@ -245,8 +245,9 @@ class MessagesConfig:
     dm_home: str = "## {bot_name}\nWhat would you like to do?"
     join_message: str = (
         "**{server_name}** is connected to {bot_name}.\n\n"
-        "Press **List This Server** to choose a category and post your ad. "
-        "Nothing is posted automatically, and the server stays out of the directory until you finish."
+        "Start with **Setup Network**. Choose the channel where ads from approved partners should be delivered. "
+        "After that, use **Post Server Ad** if you want this server listed in the public directory.\n\n"
+        "Nothing is posted automatically just because Parley was invited, and nothing is exchanged until a partnership is accepted."
     )
     listing_created: str = "**{server_name}** is live. {jump_url}\nUse **My Listing** anytime to edit or Relist it."
     listing_saved_unpublished: str = "**{server_name}** is saved. It will appear once the server directory is ready."

@@ -18,3 +18,22 @@ Validation:
 
 Security:
 - .env, local database files, .git, and .venv are intentionally not included. Use Railway environment variables as before.
+
+2026-09-25 NETWORK-FIRST UX PASS
+--------------------------------
+- New-server onboarding is Network-first: Setup Network (green), Post Server Ad (blue), How It Works.
+- The server owner gets one onboarding DM per guild; an audit row prevents restart/reconnect spam.
+- Network setup opened from the Parley hub now lists channels from the selected server, not the hub.
+- Network setup defaults to a simple view: Partner Ad Channel + Enable/Save. Auto Partner filters/interval are under Advanced.
+- Existing ads are one shared guild listing everywhere. Posting again explains that it already exists and opens Manage Existing Ad.
+- Listing Manager now includes Setup Network so hub and local management use the same settings.
+- Added /relist for server managers. It uses the same per-server persistent relist cooldown as the button.
+- /find and /manage are hidden by default from ordinary guild members and re-check Manage Server live when used in a guild.
+- Find Partners inside a connected server automatically represents that server instead of asking the manager to pick it again.
+- Partnership/Network actions stay green; Post Server Ad stays blue.
+- Accepted partnerships continue to exchange both ads only when both servers have enabled Network channels.
+
+Validation in this environment:
+- python -m compileall -q bot migrations: PASS
+- pytest excluding 3 subprocess startup checks: 455 passed, 1 skipped
+- The 3 excluded startup checks spawn a clean subprocess that cannot see discord.py in this sandbox; this is an environment limitation, not a project test regression.

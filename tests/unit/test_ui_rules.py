@@ -171,7 +171,7 @@ async def test_user_screens_use_valid_emoji_and_colours(db):
             if item.emoji is not None:
                 assert is_valid_emoji(str(item.emoji))
             if item.style is discord.ButtonStyle.success:
-                assert item.label in {"Find Partners", "My Partner Posts", "Request Partnership"}
+                assert item.label in {"Setup Network", "Find Partners", "My Partner Posts", "Request Partnership"}
 
     # Product-significant colours are stable even if appearance settings drift.
     home = control_panel(bot)[1]

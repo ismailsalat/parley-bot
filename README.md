@@ -119,7 +119,7 @@ an app tick it, and Parley does not fake it. See `AUDIT.md`.
 
 The **➕ Add Parley** button that other server owners see does not include Manage Channels.
 
-**When Parley is added to another server:** it posts one small **Parley is connected** card in a sensible public channel with a single **List This Server** action. If it cannot send in any public channel, it DMs the server owner with the exact permissions to add. Nothing is posted automatically.
+**When Parley is added to another server:** it posts one small **Parley is connected** card with **Setup Network** as the main action, plus **Post Server Ad** and **How It Works**. It also sends the server owner a one-time DM explaining the full flow. Network settings use that server's own channels even when opened from the main Parley hub. If Parley cannot send in any public channel, it DMs the owner the exact permissions to add. Nothing is posted automatically just because the bot was invited.
 
 ---
 

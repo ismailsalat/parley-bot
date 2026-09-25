@@ -18,7 +18,7 @@ class NetworkCommands(commands.Cog):
     def __init__(self, bot: ParleyBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="network", description="Receive partner ads in a channel of your choice (optional).")
+    @app_commands.command(name="network", description="Set the channel used to exchange ads after approved partnerships.")
     @app_commands.allowed_installs(guilds=True, users=False)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.guild_only()

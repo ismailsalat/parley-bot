@@ -183,3 +183,40 @@ async def test_last_shown_map_and_banned_destination(db, config, listed):
         await moderation.ban_guild(session, guild_id=DEST, reason=None, moderator_id=1)
     async with db.session() as session:
         assert await network.due_destinations(session, config, NOW + timedelta(days=2)) == []
+
+
+def test_network_setup_lists_target_server_channels_not_interaction_server(db):
+    """Hub-opened setup must still show channels from the selected server."""
+    from types import SimpleNamespace
+
+    import discord
+
+    from bot.views.network import NetworkSetupView
+    from tests.fakes import FakeBot
+
+    bot = FakeBot(db)
+    target = SimpleNamespace(
+        id=987654321,
+        name="11",
+        text_channels=[
+            SimpleNamespace(id=111, name="partners", position=1),
+            SimpleNamespace(id=222, name="ads", position=2),
+        ],
+    )
+    view = NetworkSetupView(
+        bot,
+        owner_id=1,
+        guild=target,
+        channel_id=None,
+        categories=[],
+        interval=180,
+        enabled=False,
+        auto_partner=False,
+    )
+    selects = [item for item in view.children if isinstance(item, discord.ui.Select)]
+    assert len(selects) == 1  # simple view: only Partner Ad Channel
+    assert selects[0].placeholder == "Partner Ad Channel in 11"
+    assert [(option.label, option.value) for option in selects[0].options] == [
+        ("#partners", "111"),
+        ("#ads", "222"),
+    ]

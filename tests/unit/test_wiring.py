@@ -59,7 +59,7 @@ async def test_custom_ids_round_trip_through_templates():
 
 
 async def test_commands_stay_tiny(bot):
-    assert sorted(c.name for c in bot.tree.get_commands()) == ["connect", "find", "help", "manage", "network", "setup"]
+    assert sorted(c.name for c in bot.tree.get_commands()) == ["connect", "find", "help", "manage", "network", "relist", "setup"]
     main = discord.Object(id=123456789012345678)
     assert sorted(c.name for c in bot.tree.get_commands(guild=main)) == ["admin", "settings"]
     admin = bot.tree.get_command("admin", guild=main)
