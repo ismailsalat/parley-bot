@@ -204,10 +204,22 @@ async def test_posting_window_ghost_pings_only_the_person_who_opened_it(db, list
     await run(bot, FakeMessage(bot.channel, ADMIN_ID, "A clean ad"))
     assert bot.channel.sent, "the posting window should create a temporary notification"
     ping = bot.channel.sent[0]
-    assert ping["content"] == f"<@{ADMIN_ID}>"
+    assert ping["content"] == f"<@{ADMIN_ID}> post your ad here"
+    assert ping["delete_after"] == 8.0
     mentions = ping["allowed_mentions"].to_dict()
     assert mentions.get("parse") == []
     assert mentions.get("users") == [ADMIN_ID]
+
+
+async def test_partner_post_helper_ping_uses_partner_wording(db, listed):
+    bot = make_bot(db)
+    interaction = FakeInteraction(bot, ADMIN_ID)
+    interaction.edit_original_response = _noop
+    queue_message(bot, FakeMessage(bot.channel, ADMIN_ID, "Looking for partners"))
+    await self_post.run_submission(interaction, MAIN, "Parley HQ", post_title="Partner ad")
+    ping = bot.channel.sent[0]
+    assert ping["content"] == f"<@{ADMIN_ID}> post your partner ad here"
+    assert ping["delete_after"] == 8.0
 
 
 async def test_abandoned_permission_window_is_recovered_on_restart(db, listed):

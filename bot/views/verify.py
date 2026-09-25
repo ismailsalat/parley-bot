@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 TITLE = "🌟 Post Your Server"
-DESCRIPTION = "Choose the server you want to list.\n\n**No bot required.**"
+DESCRIPTION = "Pick a server to list.\n\n**No bot required.**"
 UNAVAILABLE = "Server verification is not ready yet. Please try again shortly."
 
 
@@ -137,7 +137,6 @@ class VerifyView(OwnedView):
 
 async def show_verified_servers(interaction: discord.Interaction) -> None:
     """Replace the verification card with the servers Discord verified."""
-    from bot.views.listings import open_verified_listing_form
 
     bot = get_bot(interaction)
     async with bot.db.session() as session:
@@ -157,15 +156,11 @@ async def show_verified_servers(interaction: discord.Interaction) -> None:
         )
         return
 
-    if len(guilds) == 1:
-        await open_verified_listing_form(interaction, guilds[0])
-        return
-
     view = VerifiedGuildPickerView(bot, interaction.user.id, guilds)
     embed = _decorate(
         discord.Embed(
             title="😊 Choose a Server",
-            description="Pick the server you want to list.",
+            description="Pick a server. If a new one is missing, refresh the list.",
             color=bot.runtime.bot.color_success,
         ),
         bot,
@@ -191,6 +186,18 @@ class VerifiedGuildPickerView(OwnedView):
         self._select = select
         self.add_item(select)
 
+        refresh = discord.ui.Button(
+            label="Refresh Servers", emoji="🔄", style=discord.ButtonStyle.secondary, row=1
+        )
+        refresh.callback = self._refresh  # type: ignore[method-assign]
+        self.add_item(refresh)
+
+    async def _refresh(self, interaction: discord.Interaction) -> None:
+        """Run Discord verification again so newly-created servers appear."""
+        await acknowledge(interaction, thinking=False)
+        self.stop()
+        await start_verification(interaction, force=True)
+
     async def _picked(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction, thinking=False)
         guild_id = int(self._select.values[0])
@@ -198,6 +205,7 @@ class VerifiedGuildPickerView(OwnedView):
         if chosen is None:
             await start_verification(interaction, notice="Please choose a server again.")
             return
+
         from bot.views.listings import open_verified_listing_form
 
         await open_verified_listing_form(interaction, chosen)
@@ -209,7 +217,7 @@ class NoServersView(OwnedView):
     def __init__(self, bot: ParleyBot, owner_id: int) -> None:
         super().__init__(owner_id)
         self.bot = bot
-        again = discord.ui.Button(label="Try Another Account", emoji="✨", style=discord.ButtonStyle.primary, row=0)
+        again = discord.ui.Button(label="Check Again", emoji="✨", style=discord.ButtonStyle.primary, row=0)
         again.callback = self._again  # type: ignore[method-assign]
         self.add_item(again)
         self.add_item(home_button(bot, row=1))

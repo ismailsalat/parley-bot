@@ -219,7 +219,7 @@ class PostServerPickerView(OwnedView):
 
         # Parley being installed somewhere must never be the only way to list a
         # server: any other server can still be listed through verification.
-        another = discord.ui.Button(label="Add Another Server", emoji="✨", style=discord.ButtonStyle.primary, row=2)
+        another = discord.ui.Button(label="Refresh Servers", emoji="🔄", style=discord.ButtonStyle.secondary, row=2)
         another.callback = self._verify_another  # type: ignore[method-assign]
         self.add_item(another)
 
@@ -228,7 +228,7 @@ class PostServerPickerView(OwnedView):
         from bot.views.verify import start_verification
 
         self.stop()
-        await start_verification(interaction)
+        await start_verification(interaction, force=True)
 
     def embed(self) -> discord.Embed:
         embed = discord.Embed(
@@ -269,14 +269,14 @@ class PostServerPickerView(OwnedView):
 def _verify_another_button(row: int | None = None) -> discord.ui.Button:
     """The always-available route to listing a server Parley isn't in."""
     button = discord.ui.Button(
-        label="Add Another Server", emoji="✨", style=discord.ButtonStyle.primary, row=row
+        label="Refresh Servers", emoji="🔄", style=discord.ButtonStyle.secondary, row=row
     )
 
     async def callback(interaction: discord.Interaction) -> None:
         await acknowledge(interaction, thinking=False)
         from bot.views.verify import start_verification
 
-        await start_verification(interaction)
+        await start_verification(interaction, force=True)
 
     button.callback = callback  # type: ignore[method-assign]
     return button
@@ -543,14 +543,21 @@ class ListingFormView(OwnedView):
     # ---- rendering
 
     def render(self, notice: str | None = None) -> str:
-        title = self.guild_name if self.mode == "create" else f"Edit info · {self.guild_name}"
-        helper = "Set up your listing." if self.mode == "create" else "Update your listing details."
-        lines = [f"## {title}", helper]
-        if self.mode != "create" and self.draft.accepting:
-            if self.connected:
-                lines.append("-# Choose who should receive partnership requests.")
-            else:
-                lines.append("-# Parley is disconnected. Saved partnership contacts stay unchanged until you reconnect it.")
+        if self.mode == "create":
+            lines = [
+                f"## {self.guild_name}",
+                "Choose your category and partnership settings, then press **Continue**.",
+            ]
+        else:
+            lines = [
+                f"## Edit {self.guild_name}",
+                "Change what you need, then press **Save**.",
+            ]
+            if self.draft.accepting:
+                if self.connected:
+                    lines.append("-# Partnership requests go to the people selected below.")
+                else:
+                    lines.append("-# Contacts stay unchanged while Parley is disconnected.")
         if notice:
             lines.insert(0, f"⚠️ {notice}\n")
         return "\n".join(lines)
@@ -560,7 +567,7 @@ class ListingFormView(OwnedView):
         rules = self.bot.runtime.listings
 
         category = discord.ui.Select(
-            placeholder="Category",
+            placeholder="Choose category",
             min_values=1,
             max_values=min(rules.max_categories, len(rules.categories)),
             options=[discord.SelectOption(label=c, value=c, default=c in self.draft.categories) for c in rules.categories],
@@ -571,7 +578,7 @@ class ListingFormView(OwnedView):
         self.add_item(category)
 
         partnerships = discord.ui.Select(
-            placeholder="Partnership status",
+            placeholder="Partnerships",
             options=[
                 discord.SelectOption(label="Open to partnerships", value="yes", default=self.draft.accepting),
                 discord.SelectOption(label="Not looking for partnerships", value="no", default=not self.draft.accepting),
@@ -585,7 +592,7 @@ class ListingFormView(OwnedView):
         # Minimum size and contacts only matter when partnerships are open.
         if self.draft.accepting:
             minimum = discord.ui.Select(
-                placeholder="Minimum partner size",
+                placeholder="Minimum server size",
                 options=[
                     discord.SelectOption(
                         label=("Any server size" if v <= 0 else f"{v:,}+ members"),
@@ -605,7 +612,7 @@ class ListingFormView(OwnedView):
             # understand; it remains editable later under Edit Server Info.
             if self.mode != "create" and self.connected:
                 contacts = discord.ui.UserSelect(
-                    placeholder="Requests go to",
+                    placeholder="Partnership contacts",
                     min_values=1,
                     max_values=rules.max_contacts,
                     default_values=[discord.Object(id=uid) for uid in self.draft.contacts[: rules.max_contacts]],
@@ -616,7 +623,7 @@ class ListingFormView(OwnedView):
                 self.add_item(contacts)
 
         if self.mode == "create":
-            nxt = discord.ui.Button(label="Next", style=discord.ButtonStyle.primary, row=4)
+            nxt = discord.ui.Button(label="Continue", style=discord.ButtonStyle.primary, row=4)
             nxt.callback = self._next  # type: ignore[method-assign]
             self.add_item(nxt)
         else:

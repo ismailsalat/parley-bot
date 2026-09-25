@@ -104,7 +104,7 @@ def _instructions(
         f"**Time limit:** {minutes} minute{'s' if minutes != 1 else ''}\n\n"
         f"Send your {post_title.lower()} as **one message**. As soon as you post, Parley locks your "
         "posting permission again automatically.\n"
-        "-# I also pinged only you in the channel so it is easy to find."
+        "-# A short helper ping marks the spot and disappears after a few seconds."
     )
 
 def _previous_overwrite(channel: discord.TextChannel, member: discord.Member) -> discord.PermissionOverwrite | None:
@@ -223,21 +223,27 @@ async def _delete(message: discord.Message) -> None:
         log.info("self_post.delete_failed message=%s: %s", message.id, exc)
 
 
-async def _ghost_ping(channel: discord.TextChannel, member: discord.Member) -> None:
-    """Ping only the posting member, then immediately remove the ping message.
+async def _ghost_ping(
+    channel: discord.TextChannel,
+    member: discord.Member,
+    *,
+    post_title: str = "Ad",
+    delete_after: float = 8.0,
+) -> None:
+    """Briefly point the member at the exact place to paste their post.
 
-    Parley normally suppresses every mention. This is the one intentional
-    exception: the user explicitly opened a short posting window, and the ping
-    is scoped to that exact member (never roles, @here or @everyone).
+    This is Parley's one intentional user mention. Discord keeps the helper
+    message visible for a few seconds, then deletes it automatically.
     """
     try:
-        ping = await channel.send(
-            content=f"<@{member.id}>",
+        label = (post_title or "Ad").strip().lower()
+        await channel.send(
+            content=f"<@{member.id}> post your {label} here",
             allowed_mentions=discord.AllowedMentions(
                 everyone=False, roles=False, users=[discord.Object(id=member.id)], replied_user=False
             ),
+            delete_after=delete_after,
         )
-        await _delete(ping)
     except discord.HTTPException as exc:
         # A notification helper must never break the actual posting flow.
         log.info("self_post.ghost_ping_failed channel=%s user=%s: %s", channel.id, member.id, exc)
@@ -321,7 +327,7 @@ async def run_submission(
 
         await _grant(channel, member, previous)
         granted = True
-        await _ghost_ping(channel, member)
+        await _ghost_ping(channel, member, post_title=post_title)
         await interaction.edit_original_response(
             content=_instructions(channel, seconds, interaction.user, post_title=post_title), view=None
         )

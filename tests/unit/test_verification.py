@@ -435,7 +435,7 @@ async def test_zero_managed_servers_says_so_instead_of_asking_again(db):
     sent = interaction.response.sent[-1]
     assert "No servers found" in sent["embed"].title
     assert "hasn't seen a completed verification" not in (sent["embed"].description or "")
-    assert [getattr(c, "item", c).label for c in sent["view"].children] == ["Try Another Account", "Home"]
+    assert [getattr(c, "item", c).label for c in sent["view"].children] == ["Check Again", "Home"]
 
 
 async def test_pending_verification_still_asks_to_finish_in_the_browser(db):
@@ -478,7 +478,7 @@ async def test_a_connected_server_never_hides_the_botless_route(db, config):
 
     view = interaction.response.sent[-1]["view"]
     labels = [c.label for c in view.children if getattr(c, "label", None)]
-    assert "Add Another Server" in labels
+    assert "Refresh Servers" in labels
 
 
 # ---------------------------------------------------------------- 10. the whole journey

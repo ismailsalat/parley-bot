@@ -431,7 +431,7 @@ async def show_edit_menu(interaction: discord.Interaction, guild_id: int) -> Non
         *(ManagementButton(action, guild_id, bot, row=0) for action in EDIT_ACTIONS),
         ManageButton(guild_id, label="Back", emoji=None, style=discord.ButtonStyle.secondary, row=1),
     )
-    await show_screen(interaction, f"## Edit {guild.name}\nChoose what you want to change.", view=view)
+    await show_screen(interaction, f"## Edit {guild.name}\nChoose **Ad** or **Server Info**. Nothing changes until you save.", view=view)
 
 
 # ---------------------------------------------------------------- direct-post ad replacement

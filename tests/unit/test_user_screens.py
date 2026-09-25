@@ -36,8 +36,8 @@ async def test_step_one_asks_only_what_waypoint_doesnt_know(db):
     bot = FakeBot(db)
     view = form(bot)
     placeholders = [getattr(c, "placeholder", None) for c in view.children]
-    assert "Category" in placeholders and "Partnership status" in placeholders
-    assert labels(view) == ["Next"]  # one obvious next step
+    assert "Choose category" in placeholders and "Partnerships" in placeholders
+    assert labels(view) == ["Continue"]  # one obvious next step
     assert "Rivals HQ" in view.render()
     assert len(view.render().splitlines()) <= 3  # no wall of text
 
@@ -45,22 +45,22 @@ async def test_step_one_asks_only_what_waypoint_doesnt_know(db):
 async def test_closed_partnerships_skips_minimum_and_contacts(db):
     bot = FakeBot(db)
     open_view, closed_view = form(bot, accepting=True), form(bot, accepting=False)
-    assert len(open_view.children) == 4  # category, partnerships, partner size, Next
-    assert len(closed_view.children) == 3  # category, partnerships, Next
+    assert len(open_view.children) == 4  # category, partnerships, partner size, Continue
+    assert len(closed_view.children) == 3  # category, partnerships, Continue
     assert not any(isinstance(c, discord.ui.UserSelect) for c in open_view.children)  # creator is default contact
 
 
 async def test_basics_controls_explain_themselves(db):
     bot = FakeBot(db)
     view = form(bot, accepting=True)
-    partnership = next(c for c in view.children if getattr(c, "placeholder", None) == "Partnership status")
-    minimum = next(c for c in view.children if getattr(c, "placeholder", None) == "Minimum partner size")
+    partnership = next(c for c in view.children if getattr(c, "placeholder", None) == "Partnerships")
+    minimum = next(c for c in view.children if getattr(c, "placeholder", None) == "Minimum server size")
     assert {o.label for o in partnership.options} == {"Open to partnerships", "Not looking for partnerships"}
     assert "Any server size" in {o.label for o in minimum.options}
 
     edit_view = form(bot, mode="edit", accepting=True)
     contact = next(c for c in edit_view.children if isinstance(c, discord.ui.UserSelect))
-    assert contact.placeholder == "Requests go to"
+    assert contact.placeholder == "Partnership contacts"
 
 
 async def test_ad_mode_screen_offers_two_ways(db):
