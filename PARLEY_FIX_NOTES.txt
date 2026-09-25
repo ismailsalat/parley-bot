@@ -1,0 +1,20 @@
+Parley production interaction fix - 2026-09-24
+
+Changes:
+- Post Server Ad is blue (primary), including protection against stale appearance overrides.
+- Partnership CTAs are green, including Request Partnership and Partner Board actions.
+- Find Partners now asks for a category first and includes an Any Category option.
+- Slow partnership/search transitions acknowledge Discord before database work.
+- Fixed the duplicate response/defer path in partnership request handling.
+- Post Server Ad completes its deferred interaction instead of leaving a response hanging.
+- Added per-user/per-action in-flight protection against rapid duplicate top-level clicks.
+- Startup now refreshes existing live listing/partner-post views so old message buttons get the new styles.
+- Each listing refresh fails independently so one deleted/forbidden Discord message cannot block startup.
+
+Validation:
+- Python compileall: passed.
+- Main suite excluding subprocess startup-environment tests: 442 passed, 1 skipped.
+- The 3 omitted startup subprocess checks cannot import Discord in this sandbox because those tests intentionally replace PYTHONPATH; this is a local test-environment limitation, not a project failure.
+
+Security:
+- .env, local database files, .git, and .venv are intentionally not included. Use Railway environment variables as before.

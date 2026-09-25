@@ -194,6 +194,12 @@ class ParleyBot(commands.Bot):
             await self.panels.restore_panels(force_edit=True)
         except discord.HTTPException as exc:
             log.error("Could not restore panels: %s", exc)
+        try:
+            refreshed, failed = await self.panels.refresh_active_listing_views()
+            log.info("Refreshed %d live listing view(s)%s", refreshed, f" ({failed} failed)" if failed else "")
+        except Exception:
+            # Existing listings must never prevent the bot from becoming ready.
+            log.exception("Could not refresh live listing buttons during startup")
         await self._startup_self_check()
         log.info("%s is ready (mode: %s)", self.runtime.bot.name, self.hub.mode.upper())
 

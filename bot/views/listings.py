@@ -32,7 +32,7 @@ from bot.views.base import (
     home_button,
     reply,
 )
-from bot.views.welcome import action_button, persistent_view, register_action
+from bot.views.welcome import action_button, persistent_view, register_action, show_screen
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -349,7 +349,7 @@ async def start_post_flow(interaction: discord.Interaction) -> None:
             placeholder="Choose a listing",
         )
         view.add_item(_verify_another_button())
-        await reply(interaction, embed=embed, view=view)
+        await show_screen(interaction, embed=embed, view=view)
         return
 
     if not candidates:
@@ -361,7 +361,7 @@ async def start_post_flow(interaction: discord.Interaction) -> None:
         return
 
     view = PostServerPickerView(bot, user.id, candidates, existing)
-    await reply(interaction, embed=view.embed(), view=view)
+    await show_screen(interaction, embed=view.embed(), view=view)
 
 
 async def open_verified_listing_form(interaction: discord.Interaction, verified) -> None:

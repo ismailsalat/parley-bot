@@ -137,13 +137,28 @@ async def test_edit_reveals_its_options_progressively(db, config):
 # ---------------------------------------------------------------- finding partners
 
 
+async def test_find_flow_stops_at_category_picker_before_listing_servers(db, config):
+    from bot.views.partnership import start_find_flow
+
+    bot = FakeBot(db)
+    async with db.session() as session:
+        await make_listing(session, config, MAIN, actor_id=ADMIN_ID)
+    interaction = FakeInteraction(bot, ADMIN_ID)
+    await start_find_flow(interaction)
+    message = sent(interaction)
+    assert message["content"] == "## Find Partners\nChoose a category."
+    assert isinstance(message["view"].children[0], discord.ui.Select)
+    assert message["view"].children[0].options[-1].label == "Any Category"
+    assert message["view"].children[0].options[-1].value == ANY
+
+
 async def test_category_screen_uses_buttons_for_a_few_categories(db):
     from dataclasses import replace
 
     bot = FakeBot(db)
     bot.runtime = replace(bot.runtime, listings=replace(bot.runtime.listings, categories=("Gaming", "Anime")))
     view = CategoryView(bot, ADMIN_ID, source_id=None)
-    assert labels(view) == ["Gaming", "Anime", ANY]
+    assert labels(view) == ["Gaming", "Anime", "Any Category"]
 
 
 async def test_many_categories_use_a_menu_instead_of_a_wall_of_buttons(db):

@@ -83,21 +83,54 @@ class ActionButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wp:act:
                 )
             if not await guard(interaction):
                 return
-            await handler(interaction)
+
+            # Prevent rapid double-clicks from running the same expensive action
+            # twice for one user. This complements the global click rate limiter
+            # and the database-level partnership/listing cooldowns.
+            bot = get_bot(interaction)
+            active = getattr(bot, "_inflight_actions", None)
+            if active is None:
+                active = set()
+                bot._inflight_actions = active
+            key = (interaction.user.id, self.action)
+            if key in active:
+                await interaction.edit_original_response(
+                    content="That action is already running. Please use the result from your first click.",
+                    embeds=[],
+                    view=None,
+                )
+                return
+            active.add(key)
+            try:
+                await handler(interaction)
+            finally:
+                active.discard(key)
         except Exception as exc:  # noqa: BLE001 - reported to the user and logged by handle_error
             await handle_error(interaction, exc)
 
 
 BUTTON_STYLE_MAP = {
     "primary": discord.ButtonStyle.primary,    # main actions
-    "success": discord.ButtonStyle.success,    # approve / enable only
+    "success": discord.ButtonStyle.success,    # partnership / approve / enable
     "danger": discord.ButtonStyle.danger,      # destructive only
     "secondary": discord.ButtonStyle.secondary,  # navigation only
 }
 
+# Product-significant colours are intentionally locked so a stale database
+# appearance override cannot turn the primary posting CTA grey or make
+# partnership actions look unrelated. Labels/emojis remain customizable.
+SEMANTIC_BUTTON_STYLES = {
+    "post": discord.ButtonStyle.primary,
+    "find": discord.ButtonStyle.success,
+    "looking": discord.ButtonStyle.success,
+    "partner_posts": discord.ButtonStyle.success,
+    "request": discord.ButtonStyle.success,
+    "partnerships": discord.ButtonStyle.success,
+}
+
 
 def button_style(bot: ParleyBot, key: str) -> discord.ButtonStyle:
-    return BUTTON_STYLE_MAP[bot.runtime.button_style(key)]
+    return SEMANTIC_BUTTON_STYLES.get(key, BUTTON_STYLE_MAP[bot.runtime.button_style(key)])
 
 
 def action_button(
@@ -246,10 +279,10 @@ def listings_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
 
 
 def looking_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
-    """Partner Board controls: one green discovery action and one grey management action."""
+    """Partner Board controls: partnership actions stay green everywhere."""
     view = persistent_view(
         action_button(bot, "find", style=discord.ButtonStyle.success, row=0),
-        action_button(bot, "partner_posts", style=discord.ButtonStyle.secondary, row=0),
+        action_button(bot, "partner_posts", style=discord.ButtonStyle.success, row=0),
     )
     return templates.render(bot.runtime, "looking_panel"), view
 

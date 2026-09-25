@@ -33,16 +33,11 @@ def partner_post_url(bot: ParleyBot, listing: Listing) -> str | None:
 
 def partner_post_controls(bot: ParleyBot, guild_id: int) -> discord.ui.View:
     """Actions under a partner post are intentionally different from server-directory actions."""
-    from bot.views.partnership import RequestPartnershipButton, view_ad_button
+    from bot.views.partnership import request_button, view_ad_button
 
     return persistent_view(
         view_ad_button(bot, guild_id, label="View Server"),
-        RequestPartnershipButton(
-            guild_id,
-            label="Request Partnership",
-            emoji="🤝",
-            style=discord.ButtonStyle.success,
-        ),
+        request_button(bot, guild_id),
     )
 
 

@@ -65,7 +65,7 @@ async def test_a_stored_invalid_emoji_is_never_rendered(db):
 
 def test_button_styles_can_be_customized_within_the_system():
     config = default_config()
-    assert config.button_style("post") == "secondary"
+    assert config.button_style("post") == "primary"
     assert config.button_style("accept") == "success"
     assert config.button_style("remove") == "danger"
     assert config.button_style("home") == "secondary"
@@ -125,7 +125,7 @@ def test_grey_is_navigation_only(db):
 
 
 def test_grey_buttons_are_navigation_or_intentionally_low_emphasis():
-    allowed = {"back", "home", "directory", "refresh", "relist", "post", "network_help", "add_bot"}
+    allowed = {"back", "home", "directory", "refresh", "relist", "network_help", "add_bot"}
     for key, spec in DEFAULT_BUTTONS.items():
         if spec["style"] == "secondary":
             assert key in allowed, key
@@ -171,4 +171,13 @@ async def test_user_screens_use_valid_emoji_and_colours(db):
             if item.emoji is not None:
                 assert is_valid_emoji(str(item.emoji))
             if item.style is discord.ButtonStyle.success:
-                assert item.label == "Find Partners"  # the single highlighted public CTA
+                assert item.label in {"Find Partners", "My Partner Posts", "Request Partnership"}
+
+    # Product-significant colours are stable even if appearance settings drift.
+    home = control_panel(bot)[1]
+    by_label = {item.label: item for item in buttons(home)}
+    assert by_label["Post Server Ad"].style is discord.ButtonStyle.primary
+    assert by_label["Find Partners"].style is discord.ButtonStyle.success
+    assert by_label["My Partner Posts"].style is discord.ButtonStyle.success
+    listing_buttons = buttons(listing_message_kwargs(bot, listing)["view"])
+    assert next(item for item in listing_buttons if item.label == "Request Partnership").style is discord.ButtonStyle.success

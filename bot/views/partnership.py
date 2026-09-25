@@ -121,14 +121,15 @@ class RequestPartnershipButton(discord.ui.DynamicItem[discord.ui.Button], templa
         *,
         label: str | None = None,
         emoji=None,
-        style: discord.ButtonStyle = discord.ButtonStyle.primary,  # a normal action, not an approval
+        style: discord.ButtonStyle = discord.ButtonStyle.success,
         row: int | None = None,
     ) -> None:
         super().__init__(
             discord.ui.Button(
                 label=label or "Request Partnership",
                 emoji=emoji,
-                style=style,
+                # Partnership actions are always green across every surface.
+                style=discord.ButtonStyle.success,
                 custom_id=f"wp:req:{guild_id}",
                 row=row,
             )
@@ -137,7 +138,7 @@ class RequestPartnershipButton(discord.ui.DynamicItem[discord.ui.Button], templa
 
     @classmethod
     async def from_custom_id(cls, interaction, item, match):  # type: ignore[override]
-        return cls(int(match["gid"]), label=item.label, emoji=item.emoji, style=item.style)
+        return cls(int(match["gid"]), label=item.label, emoji=item.emoji, style=discord.ButtonStyle.success)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction)  # the prompt is a view, so deferring is safe
@@ -208,7 +209,9 @@ class RequestResponseButton(
 
 def request_button(bot: ParleyBot, guild_id: int, row: int | None = None) -> RequestPartnershipButton:
     label, emoji = bot.runtime.button("request")
-    return RequestPartnershipButton(guild_id, label=label, emoji=emoji, row=row)
+    return RequestPartnershipButton(
+        guild_id, label=label, emoji=emoji, style=discord.ButtonStyle.success, row=row
+    )
 
 
 def view_ad_button(bot: ParleyBot, guild_id: int, *, label: str | None = None, row: int | None = None) -> ViewAdButton:
@@ -546,6 +549,7 @@ async def submit_request(
         nxt = discord.ui.Button(label="Next", style=discord.ButtonStyle.primary, row=0)
 
         async def continue_search(inter: discord.Interaction) -> None:
+            await acknowledge(inter)
             await finder.show(inter)
 
         nxt.callback = continue_search  # type: ignore[method-assign]
@@ -567,7 +571,10 @@ def _is_single_request_notice(message: discord.Message | None, request_id: int) 
 
 
 async def respond_to_request(interaction: discord.Interaction, request_id: int, accept: bool) -> None:
-    await interaction.response.defer(ephemeral=True, thinking=False)
+    # Dynamic request buttons already acknowledge before entering here. Keep this
+    # safe for direct callers without attempting a second response.
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True, thinking=False)
     bot = get_bot(interaction)
     user_id = interaction.user.id
 
@@ -738,6 +745,7 @@ class RequestInboxView(OwnedView):
         back = discord.ui.Button(label="Back", style=discord.ButtonStyle.secondary, row=1)
 
         async def go_back(inter: discord.Interaction) -> None:
+            await acknowledge(inter)
             await show_requests(inter)
 
         back.callback = go_back  # type: ignore[method-assign]
@@ -750,7 +758,10 @@ class RequestInboxView(OwnedView):
 
 @register_action("find")
 async def start_find_flow(interaction: discord.Interaction) -> None:
-    """Browse matches immediately; ask for a source server only when the user has several."""
+    """Choose the represented server, then category (including Any Category)."""
+    # /find can call this directly, while the persistent Find button may already
+    # be deferred. acknowledge() is intentionally idempotent.
+    await acknowledge(interaction)
     bot = get_bot(interaction)
     async with bot.db.session() as session:
         represented = await represented_listings(bot, session, interaction.user.id)
@@ -782,7 +793,7 @@ async def start_find_flow(interaction: discord.Interaction) -> None:
 
     if len(sources) > 1:
         async def picked(inter: discord.Interaction, guild_id: int) -> None:
-            await FinderView(bot, inter.user.id, category=ANY, source_id=guild_id).show(inter)
+            await CategoryView(bot, inter.user.id, source_id=guild_id).show(inter)
 
         await _edit_or_reply(
             interaction,
@@ -805,7 +816,7 @@ async def start_find_flow(interaction: discord.Interaction) -> None:
         return
 
     source_id = sources[0].guild_id if sources else None
-    await FinderView(bot, interaction.user.id, category=ANY, source_id=source_id).show(interaction)
+    await CategoryView(bot, interaction.user.id, source_id=source_id).show(interaction)
 
 class CategoryView(OwnedView):
     """One question: what kind of server are you looking for?"""
@@ -821,14 +832,15 @@ class CategoryView(OwnedView):
             self._add_button(ANY, row=1)
         else:
             options = [discord.SelectOption(label=c, value=c) for c in categories[:24]]
-            options.append(discord.SelectOption(label=ANY, value=ANY))
+            options.append(discord.SelectOption(label="Any Category", value=ANY))
             select = discord.ui.Select(placeholder="Choose a category", options=options, row=0)
             select.callback = self._selected  # type: ignore[method-assign]
             self._select = select
             self.add_item(select)
 
     def _add_button(self, name: str, row: int) -> None:
-        button = discord.ui.Button(label=name, style=discord.ButtonStyle.primary, row=row)
+        label = "Any Category" if name == ANY else name
+        button = discord.ui.Button(label=label, style=discord.ButtonStyle.primary, row=row)
 
         async def callback(interaction: discord.Interaction) -> None:
             await self._start(interaction, name)
@@ -1075,6 +1087,7 @@ class FinderView(OwnedView):
         await self.show(interaction)
 
     async def _request(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         assert self.current is not None
         if self.source_id is None:
             await start_request_flow(interaction, self.current.guild_id, finder=self)
@@ -1082,6 +1095,7 @@ class FinderView(OwnedView):
         await RequestPromptView.for_finder(self, self.current.guild_id, self.current_name).show(interaction)
 
     async def _back(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         self.stop()
         await CategoryView(self.bot, self.owner_id, source_id=self.source_id).show(interaction)
 
@@ -1177,6 +1191,7 @@ class RequestPromptView(OwnedView):
         await start_request_flow(interaction, self.target_id, finder=self.finder)
 
     async def _back(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         self.stop()
         assert self.finder is not None
         await self.finder.show(interaction)
@@ -1258,6 +1273,7 @@ class ExhaustedView(OwnedView):
             await reply(interaction, embed=embed, view=self)
 
     async def _another(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
         self.stop()
         await CategoryView(self.bot, self.owner_id, source_id=self.source_id).show(interaction)
 

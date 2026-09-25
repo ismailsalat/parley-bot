@@ -518,6 +518,55 @@ class PanelService:
         except discord.HTTPException as exc:
             log.warning("Could not update directory card for guild %s: %s", guild_id, exc)
 
+    async def refresh_active_listing_views(self) -> tuple[int, int]:
+        """Re-render persistent listing/partnership controls after a deploy.
+
+        Dynamic custom IDs make old buttons callable after a restart, but Discord
+        keeps the old label/colour until its message is edited. Refresh each live
+        listing independently so one deleted/forbidden message can never block
+        startup or the rest of the directory. The small cooperative yield keeps a
+        large directory from monopolizing the event loop.
+        """
+        include_test = self.bot.runtime.hub.mode == "test"
+        async with self.bot.db.session() as session:
+            rows = await repository.active_listings(session, include_test=include_test)
+
+        refreshed = 0
+        failed = 0
+        from bot.views.partner_posts import partner_post_controls
+
+        for index, listing in enumerate(rows, start=1):
+            try:
+                await self.update_listing_message(listing.guild_id)
+
+                # Partner-board posts use a separate action strip. Refresh that
+                # strip too so Request Partnership stays green on old posts.
+                if listing.partner_channel_id and listing.partner_controls_message_id:
+                    channel = self.bot.get_channel(listing.partner_channel_id)
+                    if channel is not None and hasattr(channel, "get_partial_message"):
+                        await channel.get_partial_message(listing.partner_controls_message_id).edit(
+                            content="-# 🤝 Partner Board actions",
+                            view=partner_post_controls(self.bot, listing.guild_id),
+                            allowed_mentions=safe_allowed_mentions(),
+                        )
+                refreshed += 1
+            except discord.NotFound:
+                # update_listing_message self-repairs directory posts; a missing
+                # partner control strip is non-fatal and can be recreated on repost.
+                failed += 1
+                log.info("listing.view_missing guild_id=%s", listing.guild_id)
+            except discord.HTTPException as exc:
+                failed += 1
+                log.warning("Could not refresh listing controls for guild %s: %s", listing.guild_id, exc)
+            except Exception:
+                failed += 1
+                log.exception("Unexpected error refreshing listing controls for guild %s", listing.guild_id)
+
+            if index % 25 == 0:
+                await asyncio.sleep(0)
+
+        return refreshed, failed
+
     async def update_listing_message(self, guild_id: int) -> None:
         """Edit the listing in place (edits don't move it). Reposts if it vanished."""
         from bot.views.partnership import listing_message_kwargs
