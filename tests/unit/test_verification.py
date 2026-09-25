@@ -76,7 +76,7 @@ async def test_post_server_ad_without_the_bot_offers_verification(db):
     assert "Post Your Server" in (embed.title or "")
     assert "No bot required" in (embed.description or "")
     labels = [getattr(c, "item", c).label for c in message["view"].children]
-    assert labels == ["Choose My Server", "Continue"]
+    assert labels == ["Choose My Server"]
 
 
 async def test_the_legacy_copy_is_gone_from_the_codebase():
@@ -435,7 +435,7 @@ async def test_zero_managed_servers_says_so_instead_of_asking_again(db):
     sent = interaction.response.sent[-1]
     assert "No servers found" in sent["embed"].title
     assert "hasn't seen a completed verification" not in (sent["embed"].description or "")
-    assert [getattr(c, "item", c).label for c in sent["view"].children] == ["Choose Again", "Home"]
+    assert [getattr(c, "item", c).label for c in sent["view"].children] == ["Try Another Account", "Home"]
 
 
 async def test_pending_verification_still_asks_to_finish_in_the_browser(db):
@@ -444,7 +444,7 @@ async def test_pending_verification_still_asks_to_finish_in_the_browser(db):
     bot = oauth_bot(db)
     interaction = FakeInteraction(bot, ADMIN_ID)
     await show_verified_servers(interaction)
-    assert "Still waiting for Discord" in interaction.response.sent[-1]["embed"].description
+    assert "hasn't finished yet" in interaction.response.sent[-1]["embed"].description
 
 
 # ---------------------------------------------------------------- always a route to a new server
@@ -520,7 +520,7 @@ async def test_journey_verify_pick_publish_and_manage_without_the_bot(db, config
     await start_post_flow(first)
     assert "Choose My Server" in [c.label for c in first.response.sent[-1]["view"].children if getattr(c, "label", None)]
 
-    # 2. OAuth completes out of band, then Continue shows the picker
+    # 2. OAuth completes out of band; the callback can refresh the same message automatically
     await _verify(db)
     second = FakeInteraction(bot, ADMIN_ID)
     await show_verified_servers(second)
@@ -621,3 +621,63 @@ async def test_the_connected_path_still_uses_the_gateway_manager_check(db, confi
         bot, ADMIN_ID, OWNED, "Connected HQ", _draft(), mode="create", in_dm=True
     )
     assert connected_form.verified is None  # so start_self_post passes authorize=None
+
+
+async def test_recent_verification_skips_the_browser_step(db):
+    """If the user already verified recently, Post Server Ad should go straight to their servers."""
+    from bot.views.verify import start_verification
+
+    bot = oauth_bot(db)
+    bot.get_guild = lambda _gid: None
+    bot.guilds = []
+    await _verify(db)
+
+    interaction = FakeInteraction(bot, ADMIN_ID)
+    await start_verification(interaction)
+
+    sent = interaction.response.sent[-1]
+    assert sent["embed"].title == "😊 Choose a Server"
+    assert any(isinstance(child, discord.ui.Select) for child in sent["view"].children)
+
+
+async def test_oauth_refresh_replaces_the_existing_discord_card(db):
+    """The browser callback can turn the live verification card into the server picker without Continue."""
+    from bot.oauth_server import OAuthServer
+    from bot.utils.helpers import utcnow
+
+    bot = oauth_bot(db)
+    bot.get_guild = lambda _gid: None
+    bot.guilds = []
+    now = utcnow()
+    async with db.session() as session:
+        row = await verification.start(session, user_id=ADMIN_ID, now=now)
+        state = row.state
+        await verification.complete(
+            session, state=state, oauth_user_id=ADMIN_ID, payloads=ALL_GUILDS, now=now
+        )
+
+    interaction = FakeInteraction(bot, ADMIN_ID)
+    await interaction.response.send_message(embed=discord.Embed(title="🌟 Post Your Server"))
+    server = OAuthServer(bot)
+    server.watch(state, interaction)
+
+    assert await server.refresh_discord(state, ADMIN_ID) is True
+    assert interaction.response.sent[-1]["embed"].title == "😊 Choose a Server"
+    assert state not in server._pending
+
+
+def test_oauth_success_page_is_branded_clean_and_animated():
+    from bot.oauth_server import _page
+
+    response = _page(
+        "You're verified",
+        "11 servers are ready.",
+        hint="Discord updated automatically. You can close this tab.",
+    )
+    body = response.text
+    assert "Parley" in body
+    assert "You&#x27;re verified" in body
+    assert "11 servers are ready." in body
+    assert "@keyframes" in body
+    assert "Discord updated automatically" in body
+    assert "Cache-Control" not in body  # header, not page clutter

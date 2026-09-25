@@ -1,9 +1,8 @@
 """“Verify My Servers”: the botless route into the listing form.
 
-Listing a server never requires installing Parley. The user proves which
-servers they manage with a read-only Discord login, picks one, and continues
-into the normal listing form. Adding Parley stays available next to it, clearly
-optional, for the Connected perks.
+Listing a server never requires installing Parley. A read-only Discord login
+proves which servers the user manages. The browser callback then refreshes the
+same Discord message automatically, so there is no extra Continue step.
 """
 
 from __future__ import annotations
@@ -24,12 +23,12 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 TITLE = "🌟 Post Your Server"
-DESCRIPTION = "List your server in a few quick steps.\n\n**No bot required.**"
+DESCRIPTION = "Choose the server you want to list.\n\n**No bot required.**"
 UNAVAILABLE = "Server verification is not ready yet. Please try again shortly."
 
 
 def _decorate(embed: discord.Embed, bot: ParleyBot) -> discord.Embed:
-    """Give the small flow cards a bit of Parley identity without extra clutter."""
+    """Give the compact flow a little Parley identity without visual clutter."""
     user = getattr(bot, "user", None)
     avatar = getattr(user, "display_avatar", None)
     url = getattr(avatar, "url", None)
@@ -38,8 +37,14 @@ def _decorate(embed: discord.Embed, bot: ParleyBot) -> discord.Embed:
     return embed
 
 
-async def _show(interaction: discord.Interaction, content: str | None = None, *, embed: discord.Embed | None = None, view: discord.ui.View | None = None) -> None:
-    """Update the current ephemeral flow after a defer; otherwise answer normally."""
+async def _show(
+    interaction: discord.Interaction,
+    content: str | None = None,
+    *,
+    embed: discord.Embed | None = None,
+    view: discord.ui.View | None = None,
+) -> None:
+    """Keep the full verification journey inside one ephemeral Discord message."""
     if interaction.response.is_done():
         kwargs = {"content": content, "view": view}
         if embed is None:
@@ -59,18 +64,34 @@ async def _show(interaction: discord.Interaction, content: str | None = None, *,
     await reply(interaction, content, embed=embed, view=view)
 
 
-async def start_verification(interaction: discord.Interaction, *, notice: str | None = None) -> None:
-    """The screen shown when Parley has nothing installed to verify against."""
+async def start_verification(
+    interaction: discord.Interaction,
+    *,
+    notice: str | None = None,
+    force: bool = False,
+) -> None:
+    """Show the one-click verification card, or reuse a recent verification."""
     bot = get_bot(interaction)
     if not bot.settings.oauth_enabled or not (bot.settings.oauth_client_id or bot.application_id):
-        # Degrade honestly rather than pretending the button works.
-        embed = _decorate(discord.Embed(
-            title=TITLE,
-            description=UNAVAILABLE,
-            color=bot.runtime.bot.color_warning,
-        ), bot)
+        embed = _decorate(
+            discord.Embed(
+                title=TITLE,
+                description=UNAVAILABLE,
+                color=bot.runtime.bot.color_warning,
+            ),
+            bot,
+        )
         await _show(interaction, embed=embed)
         return
+
+    if not force:
+        async with bot.db.session() as session:
+            recent = await verification.latest_verification(
+                session, user_id=interaction.user.id, now=utcnow()
+            )
+        if recent.completed:
+            await show_verified_servers(interaction)
+            return
 
     async with bot.db.session() as session:
         row = await verification.start(session, user_id=interaction.user.id, now=utcnow())
@@ -84,68 +105,71 @@ async def start_verification(interaction: discord.Interaction, *, notice: str | 
     view = VerifyView(bot, interaction.user.id, url)
     await _show(interaction, embed=view.embed(notice), view=view)
 
+    oauth = getattr(bot, "oauth", None)
+    watch = getattr(oauth, "watch", None)
+    if callable(watch):
+        watch(state, interaction)
+
 
 class VerifyView(OwnedView):
-    """A small, friendly first step into botless server listing."""
+    """A friendly one-button entry into botless server listing."""
 
     def __init__(self, bot: ParleyBot, owner_id: int, url: str) -> None:
         super().__init__(owner_id)
         self.bot = bot
-        # Link buttons are always Discord's link style; keep the copy friendly and obvious.
         self.add_item(discord.ui.Button(label="Choose My Server", emoji="✨", url=url, row=0))
-        cont = discord.ui.Button(label="Continue", style=discord.ButtonStyle.primary, row=0)
-        cont.callback = self._continue  # type: ignore[method-assign]
-        self.add_item(cont)
 
     def embed(self, notice: str | None = None) -> discord.Embed:
         description = DESCRIPTION
         if notice:
             description = f"{notice}\n\n{description}"
-        embed = _decorate(discord.Embed(
-            title=TITLE,
-            description=description,
-            color=self.bot.runtime.bot.color_primary,
-        ), self.bot)
-        embed.set_footer(text="Open Choose My Server, then return here and tap Continue.")
+        embed = _decorate(
+            discord.Embed(
+                title=TITLE,
+                description=description,
+                color=self.bot.runtime.bot.color_primary,
+            ),
+            self.bot,
+        )
+        embed.set_footer(text="This message updates automatically after verification.")
         return embed
-
-    async def _continue(self, interaction: discord.Interaction) -> None:
-        # This is a menu transition, so acknowledge as a message update. That keeps
-        # the whole flow in one ephemeral message instead of stacking responses.
-        await acknowledge(interaction, thinking=False)
-        await show_verified_servers(interaction)
 
 
 async def show_verified_servers(interaction: discord.Interaction) -> None:
-    """After verification: the servers Discord says this account manages."""
+    """Replace the verification card with the servers Discord verified."""
     from bot.views.listings import open_verified_listing_form
 
     bot = get_bot(interaction)
     async with bot.db.session() as session:
-        result = await verification.latest_verification(session, user_id=interaction.user.id, now=utcnow())
+        result = await verification.latest_verification(
+            session, user_id=interaction.user.id, now=utcnow()
+        )
     guilds = result.guilds
 
     if not guilds:
         if result.completed:
-            # Verification worked; Discord simply reported nothing they manage.
             await NoServersView(bot, interaction.user.id).show(interaction)
             return
         await start_verification(
             interaction,
-            notice="Still waiting for Discord. Finish the quick check, then press **Continue**.",
+            notice="Verification hasn't finished yet. Open **Choose My Server** to continue.",
+            force=True,
         )
         return
 
-    if len(guilds) == 1:  # one obvious answer: don't ask the question
+    if len(guilds) == 1:
         await open_verified_listing_form(interaction, guilds[0])
         return
 
     view = VerifiedGuildPickerView(bot, interaction.user.id, guilds)
-    embed = _decorate(discord.Embed(
-        title="😊 Choose a Server",
-        description="Pick the server you want to list.",
-        color=bot.runtime.bot.color_success,
-    ), bot)
+    embed = _decorate(
+        discord.Embed(
+            title="😊 Choose a Server",
+            description="Pick the server you want to list.",
+            color=bot.runtime.bot.color_success,
+        ),
+        bot,
+    )
     await _show(interaction, embed=embed, view=view)
 
 
@@ -185,20 +209,23 @@ class NoServersView(OwnedView):
     def __init__(self, bot: ParleyBot, owner_id: int) -> None:
         super().__init__(owner_id)
         self.bot = bot
-        again = discord.ui.Button(label="Choose Again", emoji="✨", style=discord.ButtonStyle.primary, row=0)
+        again = discord.ui.Button(label="Try Another Account", emoji="✨", style=discord.ButtonStyle.primary, row=0)
         again.callback = self._again  # type: ignore[method-assign]
         self.add_item(again)
         self.add_item(home_button(bot, row=1))
 
     def embed(self) -> discord.Embed:
-        return _decorate(discord.Embed(
-            title="😊 No servers found",
-            description=(
-                "We couldn't find a server you can manage with this Discord account.\n\n"
-                "Try another account or check your **Manage Server** permission."
+        return _decorate(
+            discord.Embed(
+                title="😊 No servers found",
+                description=(
+                    "We couldn't find a server you can manage with this Discord account.\n\n"
+                    "Try another account or check your **Manage Server** permission."
+                ),
+                color=self.bot.runtime.bot.color_warning,
             ),
-            color=self.bot.runtime.bot.color_warning,
-        ), self.bot)
+            self.bot,
+        )
 
     async def show(self, interaction: discord.Interaction) -> None:
         await _show(interaction, embed=self.embed(), view=self)
@@ -206,7 +233,7 @@ class NoServersView(OwnedView):
     async def _again(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction, thinking=False)
         self.stop()
-        await start_verification(interaction)
+        await start_verification(interaction, force=True)
 
 
 def verified_guild_info(guild: VerifiedGuild):
@@ -214,5 +241,8 @@ def verified_guild_info(guild: VerifiedGuild):
     from bot.services.listings import GuildInfo
 
     return GuildInfo(
-        guild_id=guild.id, name=guild.name, icon_url=guild.icon_url, member_count=guild.member_count
+        guild_id=guild.id,
+        name=guild.name,
+        icon_url=guild.icon_url,
+        member_count=guild.member_count,
     )
