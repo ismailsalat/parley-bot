@@ -23,7 +23,7 @@ HARD_MIN_NETWORK_INTERVAL_MINUTES = 15
 
 DEFAULT_BUTTONS: dict[str, dict[str, str | None]] = {
     # Label, emoji and colour of every user-facing button.
-    "post": {"label": "Post Server Ad", "emoji": None, "style": "primary"},
+    "post": {"label": "Post Server Ad", "emoji": None, "style": "secondary"},
     "connect": {"label": "Connect This Server", "emoji": None, "style": "primary"},
     "find": {"label": "Find Partners", "emoji": "🤝", "style": "success"},
     "servers": {"label": "My Server Listings", "emoji": None, "style": "primary"},
@@ -31,7 +31,7 @@ DEFAULT_BUTTONS: dict[str, dict[str, str | None]] = {
     "looking": {"label": "Partner Board", "emoji": None, "style": "primary"},
     "partner_posts": {"label": "My Partner Posts", "emoji": None, "style": "primary"},
     "network": {"label": "Set Up Network", "emoji": "🌐", "style": "primary"},
-    "network_help": {"label": "How Network Works", "emoji": "🌐", "style": "primary"},
+    "network_help": {"label": "How Network Works", "emoji": "🌐", "style": "secondary"},
     "perks": {"label": "Parley Perks", "emoji": "💎", "style": "success"},
     "join": {"label": "Join Server", "emoji": None, "style": "primary"},
     "request": {"label": "Request Partnership", "emoji": "🤝", "style": "primary"},
@@ -49,7 +49,7 @@ DEFAULT_BUTTONS: dict[str, dict[str, str | None]] = {
     "remove": {"label": "Remove Listing", "emoji": None, "style": "danger"},
     "accept": {"label": "Accept", "emoji": "\u2705", "style": "success"},
     "decline": {"label": "Decline", "emoji": "\u274C", "style": "danger"},
-    "add_bot": {"label": "Add Parley", "emoji": None, "style": "primary"},
+    "add_bot": {"label": "Add Parley", "emoji": None, "style": "secondary"},
     "support": {"label": "Support", "emoji": "💬", "style": "primary"},
     "rules": {"label": "Rules", "emoji": None, "style": "primary"},
     "website": {"label": "Website", "emoji": None, "style": "primary"},
@@ -81,10 +81,11 @@ class BotConfig:
     support_url: str = ""
     rules_url: str = ""
     website_url: str = ""
-    color_primary: int = 0x5865F2
-    color_success: int = 0x57F287
+    # Parley uses a cooler violet accent instead of the generic Discord blurple/yellow-card look.
+    color_primary: int = 0x7C5CFC
+    color_success: int = 0x22C55E
     color_danger: int = 0xED4245
-    color_warning: int = 0xFEE75C
+    color_warning: int = 0xA78BFA
 
 
 @dataclass(frozen=True)
@@ -144,60 +145,59 @@ class NetworkConfig:
 class PanelConfig:
     listings_panel_enabled: bool = True
     listings_panel_text: str = (
-        "## 📣 Server Directory\n"
-        "Browse every live server listing, open a server, or request a partnership directly from its ad.\n"
-        "-# Want your own server here? Use **Post Server Ad** below."
+        "# 📣 Server Directory\n"
+        "*Live server ads, kept simple.*\n\n"
+        "Browse a listing to **join the server** or **request a partnership** directly.\n"
+        "Want your own server here? Use **Post Server Ad**. Already listed? Use **Relist** when your cooldown is ready.\n\n"
+        "-# Your listing does not need Parley installed to stay live."
     )
     looking_panel_enabled: bool = True
     looking_panel_text: str = (
-        "## 🤝 Partner Board\n"
-        "Servers posted here are **actively looking for partnerships right now**.\n\n"
-        "**Before you use the board**\n"
-        "> `1` Add Parley to the server you want to represent.\n"
-        "> `2` Check your DMs from Parley and finish that server's listing setup.\n"
-        "> `3` Make sure **Partnerships** are turned on for that listing.\n\n"
-        "Use **Find Partners** to browse. Use **My Partner Posts** to advertise one of your own listed servers."
+        "# 🤝 Partner Board\n"
+        "*For servers actively looking for a partnership right now.*\n\n"
+        "**Before you post**\n"
+        "`01` Add Parley to the server you want to represent.\n"
+        "`02` Check your **DMs from Parley** and finish that server's setup.\n"
+        "`03` Make sure **Partnerships** are turned on for that listing.\n\n"
+        "**Find Partners** browses the board. **My Partner Posts** lets you choose which of your servers to advertise.\n\n"
+        "-# Manage several servers? Parley always asks which server you want to use."
     )
     welcome_panel_enabled: bool = True
     welcome_panel_text: str = (
-        "## 👋 Welcome to Parley\n"
-        "**Advertise your server. Discover communities. Build partnerships.**\n\n"
-        "`📣` **Server Directory** — browse live server ads and request partnerships.\n"
-        "`🤝` **Partner Board** — find servers that are actively looking for partners.\n"
-        "`💎` **Parley Connected** — unlock faster relists and partnership automation.\n\n"
-        "### 📖 Quick Start\n"
-        "> `1` **Add Parley** if you want Connected perks.\n"
-        "> `2` Check your **DMs from Parley** and finish setup for the server you added.\n"
-        "> `3` Use **Post Server Ad** to publish your listing.\n"
-        "> `4` Browse the directory or use **Find Partners**.\n\n"
-        "-# 💡 Listing a server does not require Parley to stay installed. Connected features do."
+        "# 👋 Welcome to Parley\n"
+        "*List. Discover. Partner.*\n\n"
+        "**Start here**\n"
+        "`01` **Add Parley** — optional; unlocks Connected features.\n"
+        "`02` **Post Server Ad** — publish a listing, even without the bot installed.\n"
+        "`03` **Server Directory** — browse live communities.\n"
+        "`04` **Find Partners** — discover servers open to partnerships.\n\n"
+        "-# Added Parley? Check your DMs and finish setup for each server before using Connected features."
     )
     perks_panel_enabled: bool = True
     perks_panel_text: str = (
-        "## 💎 Parley Perks\n"
-        "Your server can stay listed without the bot. Keeping Parley connected unlocks the tools below.\n\n"
-        "### Without Parley\n"
-        "> `📣` Keep your directory listing live\n"
-        "> `✏️` Edit your ad and server info\n"
-        "> `🔁` Relist on the standard cooldown\n"
-        "> `🤝` Send and receive basic partnership requests\n\n"
-        "### 💎 Parley Connected\n"
-        "> `⚡` **Faster relists**\n"
-        "> `🔎` **Find Partners** tools\n"
-        "> `📮` **Partner Board posts** for each listed server\n"
-        "> `✅` **One-click Accept / Decline** for requests\n"
-        "> `🤖` **Auto Partner** options\n"
-        "> `🌐` **Parley Network** for approved partner-ad sharing\n\n"
-        "### 🌐 What is the Parley Network?\n"
-        "When two servers agree to partner and both enable the Network, Parley can place each server's approved ad in the other server's chosen partner channel. **Nothing is exchanged until both sides agree.**\n\n"
-        "-# After adding Parley, check your DMs and finish setup before using Connected features."
+        "# 💎 Parley Connected\n"
+        "*Your listing works without the bot. Connected adds the automation.*\n\n"
+        "**Without Parley**\n"
+        "`✓` Keep your directory listing live\n"
+        "`✓` Edit your ad and server info\n"
+        "`✓` Relist on the standard cooldown\n"
+        "`✓` Send and receive basic partnership requests\n\n"
+        "**With Parley Connected**\n"
+        "`⚡` Faster relists\n"
+        "`🤝` Find Partners + Partner Board posts\n"
+        "`✅` One-click request handling\n"
+        "`🤖` Auto Partner tools\n"
+        "`🌐` Network channel for approved partner-ad sharing\n\n"
+        "**What is the Network?**\n"
+        "When **both servers accept a partnership** and both enable Network, Parley can place each approved ad in the other server's chosen channel. It never exchanges ads just because a server is listed.\n\n"
+        "-# To unlock Connected features: Add Parley → check your DMs → finish setup."
     )
 
-    # Public start-here announcement controls. Mentions are sent only on the first panel creation,
-    # not every restart/repair, so @everyone cannot be spammed accidentally.
+    # Start Here may make one intentional announcement when the panel is first created.
     welcome_ping_everyone: bool = True
     welcome_ping_role_ids: tuple[int, ...] = (1552864166115549224,)
-    panel_images_enabled: bool = True
+    # Kept only so older saved settings continue to load. Public panels no longer render banner art.
+    panel_images_enabled: bool = False
     send_join_message: bool = True
     buttons: dict[str, dict[str, str]] = field(default_factory=lambda: {k: dict(v) for k, v in DEFAULT_BUTTONS.items()})
 

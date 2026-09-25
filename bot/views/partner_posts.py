@@ -90,25 +90,21 @@ async def start_partner_posts(interaction: discord.Interaction) -> None:
     # Nothing connected: tell them exactly why the Partner Board manager cannot continue.
     if not connected:
         has_listing = any(row.status == ListingStatus.ACTIVE for row in verified_rows)
-        embed = discord.Embed(
-            title="⚠️ No Connected Server Found",
-            description=(
-                "Parley can't find a server you manage with the bot installed.\n\n"
-                "**To use Partner Board posts:**\n"
-                "> `1` Press **Add Parley** and choose the server you want to use.\n"
-                "> `2` Check your **DMs from Parley**.\n"
-                "> `3` Finish that server's listing setup, then come back here.\n\n"
-                + (
-                    "Your existing directory listing can stay live while disconnected — Partner Board posting is the Connected perk."
-                    if has_listing else
-                    "If you have not listed the server yet, Parley will guide you through that after it is connected."
-                )
-            ),
-            color=bot.runtime.bot.color_warning,
+        text = (
+            "## Connect a Server First\n"
+            "Partner Board posting is a **Connected** feature. Parley cannot find a connected server you manage yet.\n\n"
+            "`01` **Add Parley** to the server you want to use.\n"
+            "`02` Check your **DMs from Parley**.\n"
+            "`03` Finish that server's setup, then come back here.\n\n"
+            + (
+                "-# Your existing directory listing stays live while disconnected."
+                if has_listing else
+                "-# No listing yet? You can publish one after connecting, or use Post Server Ad without installing the bot."
+            )
         )
         await show_screen(
             interaction,
-            embed=embed,
+            text,
             view=persistent_view(add_bot_button(bot), action_button(bot, "post"), home_button(bot)),
         )
         return
@@ -116,18 +112,15 @@ async def start_partner_posts(interaction: discord.Interaction) -> None:
     # Bot is installed somewhere, but none of those connected servers finished a live listing.
     if not active_connected:
         names = ", ".join(f"**{truncate(g.name, 50)}**" for g in sorted(connected.values(), key=lambda g: g.name.lower())[:4])
-        embed = discord.Embed(
-            title="📋 Finish Your Server Setup",
-            description=(
-                f"Parley is connected to {names}, but none of those servers has a live listing yet.\n\n"
-                "Check your **DMs from Parley** or press **Post Server Ad** and finish the listing first. "
-                "The Partner Board only advertises servers that already have a live directory listing."
-            ),
-            color=bot.runtime.bot.color_warning,
+        text = (
+            "## Finish Your Listing\n"
+            f"Parley is connected to {names}, but none of those servers has a **live listing** yet.\n\n"
+            "Check your **DMs from Parley** or use **Post Server Ad** to finish setup. "
+            "A server needs a live directory listing before it can post on the Partner Board."
         )
         await show_screen(
             interaction,
-            embed=embed,
+            text,
             view=persistent_view(action_button(bot, "post"), action_button(bot, "servers"), home_button(bot)),
         )
         return
@@ -146,14 +139,10 @@ async def start_partner_posts(interaction: discord.Interaction) -> None:
                 "You have connected listed servers, but **none of them is currently looking for partnerships**.\n\n"
                 "Open **My Server Listings**, choose the server you want, and turn **Partnerships** on first."
             )
-        embed = discord.Embed(
-            title="🤝 Partnerships Are Off",
-            description=description,
-            color=bot.runtime.bot.color_warning,
-        )
+        text = "## Partnerships Are Off\n" + description
         await show_screen(
             interaction,
-            embed=embed,
+            text,
             view=persistent_view(action_button(bot, "servers"), home_button(bot)),
         )
         return
@@ -173,17 +162,9 @@ async def start_partner_posts(interaction: discord.Interaction) -> None:
         category = ", ".join(row.categories) or "Other"
         options.append((row.guild_id, guild.name, f"{category} · Partnerships on"))
 
-    embed = discord.Embed(
-        title="🤝 Choose Your Server",
-        description=(
-            "You manage more than one server that is ready for the Partner Board. "
-            "Choose **which server you want to post or manage**."
-        ),
-        color=bot.runtime.bot.color_primary,
-    )
     await show_screen(
         interaction,
-        embed=embed,
+        "## Choose Your Server\nYou manage more than one server that is ready for the Partner Board. Choose which one you want to post or manage.",
         view=GuildPickerView(
             interaction.user.id,
             options,

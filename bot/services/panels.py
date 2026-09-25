@@ -174,14 +174,13 @@ class PanelService:
         return " ".join(parts) or None
 
     def _panel_payload(self, panel_type: str) -> tuple[str | None, discord.Embed | None, discord.ui.View]:
-        """Render a panel without changing the old builder API used by tests/settings."""
-        from bot.views import welcome
-
+        """Render public panels as clean Discord-native markdown, never decorative image embeds."""
         builder, _enabled = self._builder(panel_type)
         text, view = builder(self.bot)
-        if panel_type in {WELCOME_PANEL, LOOKING_PANEL, PERKS_PANEL}:
-            content = self._welcome_mentions() if panel_type == WELCOME_PANEL else None
-            return content, welcome.public_panel_embed(self.bot, panel_type, text), view
+        if panel_type == WELCOME_PANEL:
+            mentions = self._welcome_mentions()
+            if mentions:
+                text = f"{mentions}\n{text}"
         return text, None, view
 
     def _panel_mentions(self, panel_type: str, *, notify: bool) -> discord.AllowedMentions:

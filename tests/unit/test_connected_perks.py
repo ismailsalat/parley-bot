@@ -136,8 +136,9 @@ async def test_find_a_partner_needs_a_connected_source(db, config):
     interaction = FakeInteraction(bot, ADMIN_ID)
     await start_find_flow(interaction)
     message = interaction.response.sent[-1]
-    assert "Parley Connected" in (message["embed"].description or "")
-    assert "listing can stay live" in (message["embed"].description or "")
+    assert message.get("embed") is None
+    assert "Connected feature" in (message.get("content") or "")
+    assert "listing can stay live" in (message.get("content") or "")
     assert "Add Parley" in labels(message["view"])
 
 

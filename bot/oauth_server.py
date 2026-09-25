@@ -12,7 +12,6 @@ import html
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
@@ -33,13 +32,6 @@ TOKEN_URL = "https://discord.com/api/v10/oauth2/token"
 API_BASE = "https://discord.com/api/v10"
 CALLBACK_PATH = "/oauth/discord/callback"
 _PENDING_TTL = timedelta(minutes=12)
-_ASSET_DIR = Path(__file__).resolve().parent / "assets"
-_ASSETS = {
-    "welcome.png": _ASSET_DIR / "welcome.png",
-    "partner-board.png": _ASSET_DIR / "partner-board.png",
-    "perks.png": _ASSET_DIR / "perks.png",
-}
-
 
 @dataclass
 class PendingDiscordRefresh:
@@ -273,22 +265,11 @@ class OAuthServer:
             log.exception("oauth.discord_auto_refresh_failed user_id=%s", user_id)
             return False
 
-    async def handle_asset(self, request: web.Request) -> web.StreamResponse:
-        """Serve the small built-in panel banners from Parley's own public Railway domain."""
-        path = _ASSETS.get(request.match_info.get("name", ""))
-        if path is None or not path.is_file():
-            raise web.HTTPNotFound()
-        return web.FileResponse(
-            path,
-            headers={"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff"},
-        )
-
     async def start(self) -> None:
         if not self.enabled or self._runner is not None:
             return
         app = web.Application()
         app.router.add_get(CALLBACK_PATH, self.handle_callback)
-        app.router.add_get("/assets/{name}", self.handle_asset)
         app.router.add_get("/healthz", lambda _request: web.Response(text="ok"))
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()

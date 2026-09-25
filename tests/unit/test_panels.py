@@ -305,3 +305,26 @@ async def test_publishing_normally_clears_the_owner_posted_state(db, config, bot
     assert listing.self_posted is False and listing.controls_message_id is None
     assert owner_message.id not in channel.messages and controls_id not in channel.messages
     assert channel.ids() == [listing.message_id, (await stored_panel(db)).message_id]
+
+
+def test_public_guidance_panels_are_discord_native_text(db):
+    """Start Here / Partner Board / Perks should not need decorative embed art."""
+    from bot.services.panels import PanelService, WELCOME_PANEL, LOOKING_PANEL, PERKS_PANEL
+    from tests.fakes import FakeBot
+
+    bot = FakeBot(db)
+    bot.application_id = 123456789012345678
+    service = PanelService(bot)
+    for panel_type in (WELCOME_PANEL, LOOKING_PANEL, PERKS_PANEL):
+        content, embed, view = service._panel_payload(panel_type)
+        assert content
+        assert embed is None
+        assert view is not None
+
+
+def test_verify_view_has_no_stale_listing_import():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[2] / "bot/views/verify.py").read_text(encoding="utf-8")
+    marker = 'async def show_verified_servers(interaction: discord.Interaction) -> None:'
+    body = source.split(marker, 1)[1].split('async def ', 1)[0]
+    assert body.count('from bot.views.listings import open_verified_listing_form') <= 1

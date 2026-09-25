@@ -763,36 +763,30 @@ async def start_find_flow(interaction: discord.Interaction) -> None:
             if guild.id != bot.runtime.hub.main_guild_id
         ]
         if connected:
-            title = "📋 Finish Your Server Setup"
-            description = (
+            text = (
+                "## Finish Your Listing\n"
                 "Parley is connected to a server you manage, but it cannot find a **live listing** to use for partner matching.\n\n"
-                "Check your **DMs from Parley** or press **Post Server Ad** and finish the listing setup first."
+                "Check your **DMs from Parley** or use **Post Server Ad** to finish setup first."
             )
             view = persistent_view(action_button(bot, "post"), action_button(bot, "servers"), home_button(bot))
         else:
-            title = "⚠️ No Connected Server Found"
-            description = (
-                "Find Partner is a **Parley Connected** perk. Your directory listing can stay live without the bot, "
-                "but partner matching needs Parley connected to the server you want to represent.\n\n"
-                "Press **Add Parley**, choose your server, then check your **DMs from Parley** and finish setup before coming back."
+            text = (
+                "## Connect a Server First\n"
+                "**Find Partners** is a Connected feature. Your directory listing can stay live without the bot, "
+                "but matching needs Parley connected to the server you want to represent.\n\n"
+                "Add Parley → check your DMs → finish setup → come back here."
             )
             view = persistent_view(add_bot_button(bot), home_button(bot))
-        embed = discord.Embed(title=title, description=description, color=bot.runtime.bot.color_warning)
-        await _edit_or_reply(interaction, None, view, embed=embed)
+        await _edit_or_reply(interaction, text, view)
         return
 
     if len(sources) > 1:
         async def picked(inter: discord.Interaction, guild_id: int) -> None:
             await FinderView(bot, inter.user.id, category=ANY, source_id=guild_id).show(inter)
 
-        embed = discord.Embed(
-            title="🔎 Find Partners",
-            description="Which of your connected servers are you finding partners for?",
-            color=bot.runtime.bot.color_primary,
-        )
         await _edit_or_reply(
             interaction,
-            None,
+            "## Find Partners\nWhich of your connected servers are you finding partners for?",
             GuildPickerView(
                 interaction.user.id,
                 [
@@ -807,7 +801,6 @@ async def start_find_flow(interaction: discord.Interaction) -> None:
                 picked,
                 placeholder="Select your server",
             ),
-            embed=embed,
         )
         return
 

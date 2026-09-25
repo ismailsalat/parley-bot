@@ -65,7 +65,7 @@ async def test_a_stored_invalid_emoji_is_never_rendered(db):
 
 def test_button_styles_can_be_customized_within_the_system():
     config = default_config()
-    assert config.button_style("post") == "primary"
+    assert config.button_style("post") == "secondary"
     assert config.button_style("accept") == "success"
     assert config.button_style("remove") == "danger"
     assert config.button_style("home") == "secondary"
@@ -124,10 +124,11 @@ def test_grey_is_navigation_only(db):
                 assert item.label in ALLOWED_SECONDARY, (type(page).__name__, item.label)
 
 
-def test_no_built_in_button_is_grey_unless_it_navigates():
+def test_grey_buttons_are_navigation_or_intentionally_low_emphasis():
+    allowed = {"back", "home", "directory", "refresh", "relist", "post", "network_help", "add_bot"}
     for key, spec in DEFAULT_BUTTONS.items():
         if spec["style"] == "secondary":
-            assert key in ("back", "home", "directory", "refresh", "relist"), key
+            assert key in allowed, key
 
 
 def test_destructive_staff_actions_are_red():

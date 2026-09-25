@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 from types import SimpleNamespace
 from collections.abc import Awaitable, Callable
-from urllib.parse import urlsplit
 from typing import TYPE_CHECKING
 
 import discord
@@ -188,32 +187,8 @@ def persistent_view(*items: discord.ui.Item | None) -> discord.ui.View:
 
 # ---------------------------------------------------------------- public panel presentation
 
-
-def panel_banner_url(bot: ParleyBot, filename: str) -> str | None:
-    """Public URL for a built-in panel banner served by Parley's OAuth web app."""
-    if not bot.runtime.panels.panel_images_enabled:
-        return None
-    redirect = (bot.settings.oauth_redirect_uri or "").strip()
-    if not redirect:
-        return None
-    parts = urlsplit(redirect)
-    if parts.scheme not in {"https", "http"} or not parts.netloc:
-        return None
-    return f"{parts.scheme}://{parts.netloc}/assets/{filename}"
-
-
-def public_panel_embed(bot: ParleyBot, panel_type: str, text: str) -> discord.Embed:
-    """Yellow Parley card used by the three guidance channels."""
-    embed = discord.Embed(description=text, color=bot.runtime.bot.color_warning)
-    banner = {
-        "welcome": "welcome.png",
-        "looking": "partner-board.png",
-        "perks": "perks.png",
-    }.get(panel_type)
-    if banner and (url := panel_banner_url(bot, banner)):
-        embed.set_image(url=url)
-    embed.set_footer(text="Parley • Clear steps, one server at a time")
-    return embed
+# Public navigation panels intentionally use normal Discord markdown instead of
+# decorative embeds. This keeps them compact, theme-native and easy to customize.
 
 
 # ---------------------------------------------------------------- panel builders
@@ -311,22 +286,23 @@ def welcome_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
 
 @register_action("network_help")
 async def network_help(interaction: discord.Interaction) -> None:
-    """Explain the Network first; setup is a second, intentional action."""
+    """Explain the Network before offering setup."""
     bot = get_bot(interaction)
     connected = [
         guild for guild in permissions.cached_manageable_guilds(bot, interaction.user.id)
         if guild.id != bot.runtime.hub.main_guild_id
     ]
-    embed = discord.Embed(
-        description=templates.render(bot.runtime, "network_help"),
-        color=bot.runtime.bot.color_warning,
-    )
-    embed.set_footer(text="No automatic ad exchange happens without both servers agreeing.")
+    text = templates.render(bot.runtime, "network_help")
+    if not connected:
+        text += (
+            "\n\n**Ready to use it?**\n"
+            "Add Parley to the server you want to represent, then check your DMs and finish setup first."
+        )
     view = persistent_view(
         action_button(bot, "network", row=0) if connected else add_bot_button(bot, row=0),
         home_button(bot, row=1),
     )
-    await show_screen(interaction, embed=embed, view=view)
+    await show_screen(interaction, text, view=view)
 
 
 def join_message(bot: ParleyBot, guild: discord.Guild | None = None) -> tuple[discord.Embed, discord.ui.View]:

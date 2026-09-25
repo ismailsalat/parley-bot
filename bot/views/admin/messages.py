@@ -287,7 +287,7 @@ class ButtonsPage(Page):
 
 
 class AnnouncementsPage(Page):
-    """Control the intentional Start Here announcement ping and built-in panel art."""
+    """Control the intentional Start Here announcement ping."""
 
     title = "Announcements"
 
@@ -300,7 +300,6 @@ class AnnouncementsPage(Page):
             "Repairs and restarts do not intentionally ping everyone again.\n\n"
             f"**@everyone:** {on_off(cfg.welcome_ping_everyone)}\n"
             f"**Ping roles:** {roles}\n"
-            f"**Panel banner images:** {on_off(cfg.panel_images_enabled)}\n"
             "-# Panel text is edited under Appearance → Messages. Button labels/colours are edited under Appearance → Buttons."
         )
 
@@ -313,12 +312,6 @@ class AnnouncementsPage(Page):
             row=0,
         )
         self.button("Edit Ping Roles", self._edit_roles, emoji="🏷️", row=0)
-        self.button(
-            f"Panel Images: {on_off(cfg.panel_images_enabled)}",
-            self._toggle_images,
-            style=discord.ButtonStyle.secondary,
-            row=1,
-        )
         self.nav()
 
     async def _save(self, interaction: discord.Interaction, changes: dict) -> None:
@@ -332,12 +325,6 @@ class AnnouncementsPage(Page):
         await self._save(
             interaction,
             {"panels.welcome_ping_everyone": not self.bot.runtime.panels.welcome_ping_everyone},
-        )
-
-    async def _toggle_images(self, interaction: discord.Interaction) -> None:
-        await self._save(
-            interaction,
-            {"panels.panel_images_enabled": not self.bot.runtime.panels.panel_images_enabled},
         )
 
     async def _edit_roles(self, interaction: discord.Interaction) -> None:
