@@ -67,6 +67,22 @@ def _noop():
     return runner()
 
 
+async def test_manager_onboarding_dm_is_sent_once_per_manager_per_server(db):
+    from bot.core import ParleyBot
+
+    bot = FakeBot(db)
+    user = bot.users[ADMIN_ID]
+    await ParleyBot.maybe_dm_manager_onboarding(bot, bot.guild, user)
+    await ParleyBot.maybe_dm_manager_onboarding(bot, bot.guild, user)
+
+    assert len(user.dms) == 1
+    assert "Find Partners" in (user.dms[0]["embed"].description or "")
+    async with db.session() as session:
+        assert await repository.has_audit_action(
+            session, "manager_onboarding.sent", guild_id=MAIN, actor_id=ADMIN_ID
+        )
+
+
 # ---------------------------------------------------------------- 4-5. listing manager state
 
 
@@ -137,8 +153,8 @@ async def test_find_a_partner_needs_a_connected_source(db, config):
     await start_find_flow(interaction)
     message = interaction.response.sent[-1]
     assert message.get("embed") is None
-    assert "Connected feature" in (message.get("content") or "")
-    assert "listing can stay live" in (message.get("content") or "")
+    assert "Connect a Server First" in (message.get("content") or "")
+    assert "guide you through" in (message.get("content") or "")
     assert "Add Parley" in labels(message["view"])
 
 

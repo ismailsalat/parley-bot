@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import discord
 
 from bot.database import repository
+from bot.database.models import ListingStatus
 from bot.services import network, permissions
 from bot.services.errors import MANAGE_SERVER_REQUIRED, PermissionDenied, ValidationError, ParleyError
 from bot.utils.helpers import format_duration, utcnow
@@ -70,11 +71,49 @@ async def start_network_flow(interaction: discord.Interaction) -> None:
     )
 
 
-async def open_network_setup(interaction: discord.Interaction, guild: discord.Guild, *, edit_message: bool = False) -> None:
+async def open_network_setup(
+    interaction: discord.Interaction,
+    guild: discord.Guild,
+    *,
+    edit_message: bool = False,
+    require_listing: bool = True,
+    notice: str | None = None,
+) -> None:
+    """Open one server's Network setup.
+
+    Partnership Network setup always has a live server ad behind it. If the ad
+    is missing, the user is sent straight into the ad wizard and returned here
+    automatically after the ad is created.
+    """
     bot = get_bot(interaction)
     await permissions.require_manager(bot, guild.id, interaction.user.id)
+    await bot.maybe_dm_manager_onboarding(guild, interaction.user)
+
     async with bot.db.session() as session:
+        listing = await repository.get_listing(session, guild.id)
         current = await repository.get_network_settings(session, guild.id)
+
+    if require_listing and (listing is None or listing.status != ListingStatus.ACTIVE):
+        if listing is not None and listing.status == ListingStatus.PENDING:
+            text = (
+                f"## Partnership Setup · {guild.name}\n"
+                "Your server ad is waiting for review. The Network can be enabled as soon as that ad is live.\n\n"
+                "You do not need to create another ad."
+            )
+            view = persistent_view(home_button(bot))
+            if edit_message or interaction.response.is_done():
+                await interaction.edit_original_response(content=text, embeds=[], view=view)
+            else:
+                await reply(interaction, text, view=view)
+            return
+
+        from bot.views.listings import open_listing_form
+
+        await open_listing_form(
+            interaction, guild, edit_message=edit_message or interaction.response.is_done(), return_to_network=True
+        )
+        return
+
     view = NetworkSetupView(
         bot,
         interaction.user.id,
@@ -85,10 +124,11 @@ async def open_network_setup(interaction: discord.Interaction, guild: discord.Gu
         enabled=bool(current and current.enabled),
         auto_partner=bool(current and current.auto_partner),
     )
+    content = view.render(notice)
     if edit_message or interaction.response.is_done():
-        await interaction.edit_original_response(content=view.render(), view=view)
+        await interaction.edit_original_response(content=content, embeds=[], view=view)
     else:
-        await reply(interaction, view.render(), view=view)
+        await reply(interaction, content, view=view)
 
 
 class NetworkSetupView(OwnedView):
@@ -120,12 +160,12 @@ class NetworkSetupView(OwnedView):
     def render(self, notice: str | None = None) -> str:
         channel = f"<#{self.channel_id}>" if self.channel_id else "choose below"
         lines = [
-            f"## 🤝 Network Setup · {self.guild.name}",
-            "Choose the **Partner Ad Channel** for this server. When two servers accept a partnership, "
-            "Parley posts each server's ad in the other server's chosen channel.",
+            f"## 🤝 Partnership Setup · {self.guild.name}",
+            "Your server ad is ready. Choose the **Partner Ad Channel** where approved partner ads should be delivered.",
             "",
-            f"**Network:** {'🟢 Enabled' if self.enabled else '⚪ Off'}",
+            "**Server Ad:** ✅ Ready",
             f"**Partner Ad Channel:** {channel}",
+            f"**Network:** {'🟢 Enabled' if self.enabled else '⚪ Off'}",
         ]
         if self.advanced:
             lines.extend(
@@ -276,6 +316,10 @@ class NetworkSetupView(OwnedView):
             if enabled:
                 self._check_channel()
             async with bot.db.session() as session:
+                if enabled:
+                    listing = await repository.get_listing(session, self.guild.id)
+                    if listing is None or listing.status != ListingStatus.ACTIVE:
+                        raise ValidationError("Your server ad must be live before the Partnership Network can be enabled.")
                 await network.configure(
                     session,
                     bot.runtime,

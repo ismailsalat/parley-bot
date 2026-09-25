@@ -168,10 +168,10 @@ class PanelConfig:
         "*Connect. Partner. Exchange ads.*\n\n"
         "**Simple setup**\n"
         "`01` **Add Parley** to the server you manage.\n"
-        "`02` **Setup Network** and choose its partner-ad channel.\n"
-        "`03` **Post Server Ad** if you want it in the public directory.\n"
-        "`04` **Find Partners** and send a request.\n\n"
-        "When both servers accept, Parley exchanges their ads in the Network channels they chose."
+        "`02` Press **Find Partners**. Parley checks that server's ad and Network setup for you.\n"
+        "`03` Choose a server and send a partnership request.\n\n"
+        "When both servers accept, Parley exchanges their ads in the partner-ad channels they chose.\n"
+        "-# **Post Server Ad** is also available if you only want to manage your public directory ad."
     )
     perks_panel_enabled: bool = True
     perks_panel_text: str = (
@@ -245,9 +245,10 @@ class MessagesConfig:
     dm_home: str = "## {bot_name}\nWhat would you like to do?"
     join_message: str = (
         "**{server_name}** is connected to {bot_name}.\n\n"
-        "Start with **Setup Network**. Choose the channel where ads from approved partners should be delivered. "
-        "After that, use **Post Server Ad** if you want this server listed in the public directory.\n\n"
-        "Nothing is posted automatically just because Parley was invited, and nothing is exchanged until a partnership is accepted."
+        "Press **Find Partners** to get started. Parley will automatically walk you through anything missing: "
+        "your server ad first, then the partner-ad channel for this server.\n\n"
+        "Nothing is posted automatically just because Parley was invited, and nothing is exchanged until both servers accept a partnership. "
+        "**Post Server Ad** is still available separately for ad management."
     )
     listing_created: str = "**{server_name}** is live. {jump_url}\nUse **My Listing** anytime to edit or Relist it."
     listing_saved_unpublished: str = "**{server_name}** is saved. It will appear once the server directory is ready."

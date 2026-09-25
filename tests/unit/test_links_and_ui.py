@@ -58,14 +58,16 @@ async def test_start_here_panel_stays_simple_and_optional_links_still_work_elsew
             main_guild_id=1, welcome_channel_id=1, listings_channel_id=2, looking_channel_id=3, perks_channel_id=4
         ),
     )
-    # Start Here puts Network setup first, while keeping directory/listing routes obvious.
+    # Start Here has one green partnership CTA; Find Partners guides missing setup.
     _content, view = welcome_panel(UIBot(runtime))
-    assert labels(view) == ["Add Parley", "Setup Network", "Server Directory", "Post Server Ad", "Find Partners"]
+    assert labels(view) == ["Add Parley", "Find Partners", "Server Directory", "Post Server Ad"]
+    green = [getattr(c, "item", c).label for c in view.children if getattr(c, "item", c).style is discord.ButtonStyle.success]
+    assert green == ["Find Partners"]
     assert len(labels(view)) <= 5
 
     # Before /setup runs there is no directory channel link, but Network setup still works.
     _content, bare = welcome_panel(UIBot())
-    assert labels(bare) == ["Add Parley", "Setup Network", "Post Server Ad", "Find Partners"]
+    assert labels(bare) == ["Add Parley", "Find Partners", "Post Server Ad"]
 
     links = optional_links(UIBot(runtime))
     assert {item.url for item in links} == {"https://discord.gg/help", "https://example.com"}
@@ -78,10 +80,10 @@ async def test_join_message_is_a_simple_connected_card():
     assert embed.title == "Parley is connected"
     assert "connected to Parley" in (embed.description or "")
     assert "Nothing is posted automatically" in (embed.description or "")
-    assert labels(view) == ["Setup Network", "Post Server Ad", "How It Works"]
+    assert labels(view) == ["Find Partners", "Post Server Ad", "How It Works"]
 
     _embed, fresh = join_message(UIBot())  # fresh owner can set up the main hub here
-    assert labels(fresh) == ["Setup Network", "Post Server Ad", "How It Works", "Set Up Parley Hub"]
+    assert labels(fresh) == ["Find Partners", "Post Server Ad", "How It Works", "Set Up Parley Hub"]
     assert "setup" in [getattr(c, "item", c).custom_id.split(":")[-1] for c in fresh.children]
 
 

@@ -411,9 +411,12 @@ async def open_verified_listing_form(interaction: discord.Interaction, verified)
         await reply(interaction, form.render(), view=form)
 
 
-async def open_listing_form(interaction: discord.Interaction, guild: discord.Guild, *, edit_message: bool = False) -> None:
+async def open_listing_form(
+    interaction: discord.Interaction, guild: discord.Guild, *, edit_message: bool = False, return_to_network: bool = False
+) -> None:
     bot = get_bot(interaction)
     user_id = interaction.user.id
+    await bot.maybe_dm_manager_onboarding(guild, interaction.user)
     # A hidden bot-only channel cannot be used to qualify for the partnership directory.
     permissions.require_public_bot_channel(guild)
 
@@ -422,6 +425,14 @@ async def open_listing_form(interaction: discord.Interaction, guild: discord.Gui
         existing = await repository.get_listing(session, guild.id)
 
     if existing is not None and existing.status in ListingStatus.LIVE:
+        if return_to_network:
+            from bot.views.network import open_network_setup
+
+            await open_network_setup(
+                interaction, guild, edit_message=True, require_listing=False,
+                notice="✅ Server ad ready. Now choose where approved partner ads should be delivered.",
+            )
+            return
         from bot.views.management import manage_button  # local import: management imports this module
 
         manage = manage_button(bot, guild.id, guild.name)
@@ -447,7 +458,10 @@ async def open_listing_form(interaction: discord.Interaction, guild: discord.Gui
         draft.ad_text = existing.advertisement_text
         draft.invite_url = existing.invite_url
 
-    form = ListingFormView(bot, user_id, guild.id, guild.name, draft, mode="create", in_dm=interaction.guild is None)
+    form = ListingFormView(
+        bot, user_id, guild.id, guild.name, draft, mode="create", in_dm=interaction.guild is None,
+        return_to_network=return_to_network,
+    )
     if edit_message or interaction.response.is_done():
         await interaction.edit_original_response(content=form.render(), embeds=[], view=form)
     else:
@@ -533,6 +547,7 @@ class ListingFormView(OwnedView):
         in_dm: bool,
         connected: bool = True,
         verified=None,
+        return_to_network: bool = False,
     ) -> None:
         super().__init__(owner_id)
         self.bot = bot
@@ -546,6 +561,7 @@ class ListingFormView(OwnedView):
         self.in_dm = in_dm
         self.connected = connected
         self.invite_changed = False
+        self.return_to_network = return_to_network
         self._build()
 
     # ---- rendering
@@ -839,11 +855,32 @@ class ListingFormView(OwnedView):
             return
 
         self.stop()
+        if await self._continue_network_setup(interaction):
+            return
         # One obvious place to fix/relist the new server, plus Home.
         await interaction.edit_original_response(
             content=note,
             view=persistent_view(action_button(self.bot, "servers"), home_button(self.bot)),
         )
+
+    async def _continue_network_setup(self, interaction: discord.Interaction) -> bool:
+        """After partnership setup creates a live ad, continue straight to Network setup."""
+        if not self.return_to_network or self.verified is not None:
+            return False
+        async with self.bot.db.session() as session:
+            listing = await repository.get_listing(session, self.guild_id)
+        if listing is None or listing.status != ListingStatus.ACTIVE:
+            return False
+        guild = self.bot.get_guild(self.guild_id)
+        if guild is None:
+            return False
+        from bot.views.network import open_network_setup
+
+        await open_network_setup(
+            interaction, guild, edit_message=True, require_listing=False,
+            notice="✅ Server ad created. Last step: choose the channel for approved partner ads.",
+        )
+        return True
 
     async def publish(self, interaction: discord.Interaction) -> None:
         """Create the listing and post it. Only reports success after Discord confirms."""
@@ -860,6 +897,10 @@ class ListingFormView(OwnedView):
             await interaction.edit_original_response(content=self.render(GENERIC_ERROR), view=self)
             return
         self.stop()
+        if await self._continue_network_setup(interaction):
+            return
+        if self.return_to_network:
+            result += "\n\n-# Once the ad is live, press **Find Partners** again to finish Network setup."
         await interaction.edit_original_response(content=result, view=persistent_view(home_button(self.bot)))
 
     async def create_only(self, interaction: discord.Interaction):

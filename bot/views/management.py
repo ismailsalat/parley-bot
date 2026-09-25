@@ -695,6 +695,8 @@ async def remove(interaction: discord.Interaction, guild_id: int) -> None:
     await load_managed_listing(bot, guild_id, done.user.id)
     async with bot.db.session() as session:
         listing = await listing_service.remove_listing(session, guild_id=guild_id, actor_id=done.user.id, now=utcnow())
+        from bot.services import network as network_service
+        await network_service.disable(session, guild_id=guild_id, reason="Server ad was removed")
     await bot.panels.take_down_listing(listing)
     await bot.log_event(f"**{guild.name}** (`{guild_id}`) removed its listing ({done.user.mention}).")
     await done.edit_original_response(content=f"The listing for **{guild.name}** was removed.", view=None)

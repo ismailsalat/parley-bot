@@ -426,6 +426,8 @@ async def exchange_partner_ads(bot: ParleyBot, source_id: int, target_id: int) -
         target_net = await repository.get_network_settings(session, target_id)
     if not source or not target or not source_net or not target_net:
         return False
+    if source.status != ListingStatus.ACTIVE or target.status != ListingStatus.ACTIVE:
+        return False
     if not source_net.enabled or not target_net.enabled or not source_net.channel_id or not target_net.channel_id:
         return False
     source_channel = _network_channel(bot, source_net.channel_id, source_id)
@@ -756,87 +758,121 @@ class RequestInboxView(OwnedView):
 # ---------------------------------------------------------------- find partners
 
 
+async def _continue_find_for_guild(
+    interaction: discord.Interaction, guild: discord.Guild, *, edit_message: bool = True
+) -> None:
+    """Make Find Partners the single guided entry point for partnership setup."""
+    bot = get_bot(interaction)
+    await permissions.require_manager(bot, guild.id, interaction.user.id)
+    await bot.maybe_dm_manager_onboarding(guild, interaction.user)
+
+    async with bot.db.session() as session:
+        listing = await repository.get_listing(session, guild.id)
+        settings = await repository.get_network_settings(session, guild.id)
+
+    # Step 1: every partnership needs the shared server ad. Reuse the exact same
+    # listing wizard/cooldowns as Post Server Ad, then continue to Network setup.
+    if listing is None or listing.status != ListingStatus.ACTIVE:
+        if listing is not None and listing.status == ListingStatus.PENDING:
+            await _edit_or_reply(
+                interaction,
+                (
+                    f"## Partnership Setup · {guild.name}\n"
+                    "Your server ad is waiting for review. Once it is live, press **Find Partners** again. "
+                    "You do not need to create another ad."
+                ),
+                persistent_view(home_button(bot)),
+            )
+            return
+        from bot.views.listings import open_listing_form
+
+        await open_listing_form(
+            interaction, guild, edit_message=edit_message or interaction.response.is_done(), return_to_network=True
+        )
+        return
+
+    # Step 2: a live ad exists, so make sure this server has a delivery channel.
+    if settings is None or not settings.enabled or not settings.channel_id:
+        from bot.views.network import open_network_setup
+
+        await open_network_setup(
+            interaction, guild, edit_message=edit_message or interaction.response.is_done(), require_listing=False,
+            notice="✅ Server ad ready. Choose the channel where approved partner ads should be delivered.",
+        )
+        return
+
+    # Step 3: setup is complete. The user only has to choose what kind of
+    # partner they want; no extra setup buttons or duplicate dashboards.
+    await CategoryView(bot, interaction.user.id, source_id=guild.id).show(interaction)
+
+
 @register_action("find")
 async def start_find_flow(interaction: discord.Interaction) -> None:
-    """Choose the represented server, then category (including Any Category)."""
-    # /find can call this directly, while the persistent Find button may already
-    # be deferred. acknowledge() is intentionally idempotent.
+    """Find Partners is the single, guided partnership entry point."""
+    # /find can call this directly, while persistent buttons may already be deferred.
     await acknowledge(interaction)
     bot = get_bot(interaction)
 
-    # Inside a connected server, that server is the obvious source. Do not ask
-    # a manager to pick from every other server they manage. The hub/DM flow
-    # below still offers a picker when several servers are possible.
+    # Inside a connected server, always act on that server.
     context_guild = interaction.guild
     if context_guild is not None and context_guild.id != bot.runtime.hub.main_guild_id:
         if not await permissions.is_manager(bot, context_guild.id, interaction.user.id):
             raise PermissionDenied("You need **Manage Server** to find partnerships for this server.")
-        async with bot.db.session() as session:
-            current = await repository.get_listing(session, context_guild.id)
-        if current is None or current.status != ListingStatus.ACTIVE:
-            await _edit_or_reply(
-                interaction,
-                f"## Post Your Server Ad First\n**{context_guild.name}** needs a live server ad before it can send partnership requests.",
-                persistent_view(action_button(bot, "post"), home_button(bot)),
-            )
-            return
-        await CategoryView(bot, interaction.user.id, source_id=context_guild.id).show(interaction)
+        await _continue_find_for_guild(interaction, context_guild)
+        return
+
+    # In DMs / the main Parley server, show every connected server the person
+    # can actually manage. Listing and Network readiness are handled after pick.
+    connected = [
+        guild for guild in permissions.cached_manageable_guilds(bot, interaction.user.id)
+        if guild.id != bot.runtime.hub.main_guild_id
+    ]
+    if not connected:
+        text = (
+            "## Connect a Server First\n"
+            "Add Parley to the server you manage, then press **Find Partners** again. "
+            "Parley will guide you through the server ad and partner-ad channel automatically."
+        )
+        await _edit_or_reply(interaction, text, persistent_view(add_bot_button(bot), home_button(bot)))
+        return
+
+    if len(connected) == 1:
+        await _continue_find_for_guild(interaction, connected[0])
         return
 
     async with bot.db.session() as session:
-        represented = await represented_listings(bot, session, interaction.user.id)
-        sources = [s for s in represented if permissions.is_connected(bot, s.guild_id)]
-        guilds = await repository.get_guilds(session, [s.guild_id for s in sources])
+        listings = {row.guild_id: row for row in await repository.get_listings(session, [g.id for g in connected])}
+        settings_rows = {
+            g.id: await repository.get_network_settings(session, g.id)
+            for g in connected
+        }
 
-    if not sources:
-        connected = [
-            guild for guild in permissions.cached_manageable_guilds(bot, interaction.user.id)
-            if guild.id != bot.runtime.hub.main_guild_id
-        ]
-        if connected:
-            text = (
-                "## Finish Your Listing\n"
-                "Parley is connected to a server you manage, but it cannot find a **live listing** to use for partner matching.\n\n"
-                "Check your **DMs from Parley** or use **Post Server Ad** to finish setup first."
-            )
-            view = persistent_view(action_button(bot, "post"), action_button(bot, "servers"), home_button(bot))
-        else:
-            text = (
-                "## Connect a Server First\n"
-                "**Find Partners** is a Connected feature. Your directory listing can stay live without the bot, "
-                "but matching needs Parley connected to the server you want to represent.\n\n"
-                "Add Parley → check your DMs → finish setup → come back here."
-            )
-            view = persistent_view(add_bot_button(bot), home_button(bot))
-        await _edit_or_reply(interaction, text, view)
-        return
+    def status(guild: discord.Guild) -> str:
+        listing = listings.get(guild.id)
+        net = settings_rows.get(guild.id)
+        if listing is None or listing.status != ListingStatus.ACTIVE:
+            return "Setup needed · server ad"
+        if net is None or not net.enabled or not net.channel_id:
+            return "Setup needed · partner-ad channel"
+        return "Ready to find partners"
 
-    if len(sources) > 1:
-        async def picked(inter: discord.Interaction, guild_id: int) -> None:
-            await CategoryView(bot, inter.user.id, source_id=guild_id).show(inter)
+    async def picked(inter: discord.Interaction, guild_id: int) -> None:
+        chosen = bot.get_guild(guild_id)
+        if chosen is None:
+            raise ValidationError("Parley is no longer in that server.")
+        await _continue_find_for_guild(inter, chosen, edit_message=True)
 
-        await _edit_or_reply(
-            interaction,
-            "## Find Partners\nWhich of your connected servers are you finding partners for?",
-            GuildPickerView(
-                interaction.user.id,
-                [
-                    (
-                        s.guild_id,
-                        display_guild_name(bot, guilds, s.guild_id),
-                        f"{', '.join(s.categories) or 'Other'} · "
-                        f"{format_members(guilds[s.guild_id].member_count if s.guild_id in guilds else 0)}",
-                    )
-                    for s in sources
-                ],
-                picked,
-                placeholder="Select your server",
-            ),
-        )
-        return
+    await _edit_or_reply(
+        interaction,
+        "## Find Partners\nWhich server are you finding a partner for?",
+        GuildPickerView(
+            interaction.user.id,
+            [(g.id, g.name, status(g)) for g in connected],
+            picked,
+            placeholder="Select your server",
+        ),
+    )
 
-    source_id = sources[0].guild_id if sources else None
-    await CategoryView(bot, interaction.user.id, source_id=source_id).show(interaction)
 
 class CategoryView(OwnedView):
     """One question: what kind of server are you looking for?"""

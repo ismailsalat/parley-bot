@@ -76,6 +76,7 @@ class FakeBot:
         message_content: bool = False,
     ) -> None:
         self.db = db
+        self.application_id = None
         self.intents = build_intents(message_content)
         self.panels = SimpleNamespace(listings_channel=lambda: None)
         base = runtime or default_config()
@@ -90,6 +91,9 @@ class FakeBot:
             USER_ID: member(USER_ID),
         })
         self.guilds = [self.guild]
+
+    async def maybe_dm_manager_onboarding(self, guild, user) -> None:
+        return None
 
     async def is_owner(self, user) -> bool:
         return user.id == OWNER_ID

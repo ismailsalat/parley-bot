@@ -547,12 +547,14 @@ async def add_audit(
 
 
 async def has_audit_action(
-    session: AsyncSession, action: str, *, guild_id: int | None = None
+    session: AsyncSession, action: str, *, guild_id: int | None = None, actor_id: int | None = None
 ) -> bool:
-    """Return whether an audit action exists, optionally scoped to one server."""
+    """Return whether an audit action exists, optionally scoped to one server/person."""
     query = select(AuditLog.id).where(AuditLog.action == action)
     if guild_id is not None:
         query = query.where(AuditLog.guild_id == guild_id)
+    if actor_id is not None:
+        query = query.where(AuditLog.actor_id == actor_id)
     return await session.scalar(query.limit(1)) is not None
 
 

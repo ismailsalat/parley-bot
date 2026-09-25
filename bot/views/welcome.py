@@ -305,14 +305,13 @@ def _hub_channel_url(bot: ParleyBot, channel_id: int | None) -> str | None:
 
 
 def welcome_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
-    """Start Here: network first, then directory and partner discovery."""
+    """Start Here: one obvious partnership CTA, with directory tools secondary."""
     directory_url = _hub_channel_url(bot, bot.runtime.hub.listings_channel_id)
     view = persistent_view(
         add_bot_button(bot, row=0),
-        action_button(bot, "network", style=discord.ButtonStyle.success, row=0),
+        action_button(bot, "find", style=discord.ButtonStyle.success, row=0),
         discord.ui.Button(label="Server Directory", url=directory_url, row=0) if directory_url else None,
         action_button(bot, "post", style=discord.ButtonStyle.primary, row=1),
-        action_button(bot, "find", style=discord.ButtonStyle.success, row=1),
     )
     return templates.render(bot.runtime, "welcome"), view
 
@@ -351,10 +350,10 @@ def join_message(bot: ParleyBot, guild: discord.Guild | None = None) -> tuple[di
     embed.set_footer(text="Only server managers can change Network or listing settings.")
 
     view = discord.ui.View(timeout=None)
-    network = action_button(bot, "network", style=discord.ButtonStyle.success, row=0)
-    network.item.label = "Setup Network"
-    network.item.emoji = "🤝"
-    view.add_item(network)
+    find = action_button(bot, "find", style=discord.ButtonStyle.success, row=0)
+    find.item.label = "Find Partners"
+    find.item.emoji = "🤝"
+    view.add_item(find)
 
     post = action_button(bot, "post", style=discord.ButtonStyle.primary, row=0)
     post.item.label = "Post Server Ad"

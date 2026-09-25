@@ -5,6 +5,8 @@ from __future__ import annotations
 import discord
 
 from bot.database import repository
+from bot.config.runtime import HubConfig
+from bot.services import network
 from bot.views.listings import AdModeView, EmojiWarningView, ListingDraft, ListingFormView, PreviewView, preview_content
 from bot.views.management import show_management, show_my_servers
 from bot.views.partnership import ANY, CategoryView, ExhaustedView, FinderView, RequestPromptView
@@ -137,12 +139,17 @@ async def test_edit_reveals_its_options_progressively(db, config):
 # ---------------------------------------------------------------- finding partners
 
 
-async def test_find_flow_stops_at_category_picker_before_listing_servers(db, config):
+async def test_find_flow_stops_at_category_picker_after_setup_is_ready(db, config):
     from bot.views.partnership import start_find_flow
 
-    bot = FakeBot(db)
+    # MAIN is the represented server here; use a different id for the Parley hub.
+    bot = FakeBot(db, hub=HubConfig(main_guild_id=999))
     async with db.session() as session:
         await make_listing(session, config, MAIN, actor_id=ADMIN_ID)
+        await network.configure(
+            session, bot.runtime, guild_id=MAIN, channel_id=55, categories=[], interval_minutes=180,
+            enabled=True, actor_id=ADMIN_ID, now=__import__("bot.utils.helpers", fromlist=["utcnow"]).utcnow(),
+        )
     interaction = FakeInteraction(bot, ADMIN_ID)
     await start_find_flow(interaction)
     message = sent(interaction)

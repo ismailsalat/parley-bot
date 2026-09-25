@@ -119,7 +119,7 @@ an app tick it, and Parley does not fake it. See `AUDIT.md`.
 
 The **➕ Add Parley** button that other server owners see does not include Manage Channels.
 
-**When Parley is added to another server:** it posts one small **Parley is connected** card with **Setup Network** as the main action, plus **Post Server Ad** and **How It Works**. It also sends the server owner a one-time DM explaining the full flow. Network settings use that server's own channels even when opened from the main Parley hub. If Parley cannot send in any public channel, it DMs the owner the exact permissions to add. Nothing is posted automatically just because the bot was invited.
+**When Parley is added to another server:** it posts one small **Parley is connected** card with one main green action: **Find Partners**. That button is guided setup: if the server has no live ad, it opens the same synced ad wizard; when the ad is ready, it asks for the server's own partner-ad channel; then it opens partner discovery. **Post Server Ad** stays available separately for directory management. The server owner receives a one-time DM, and any server manager who actually uses Parley also receives one concise one-time DM for that server. Nothing is posted automatically just because the bot was invited.
 
 ---
 
@@ -186,7 +186,11 @@ If you manage several connected servers, **My Listing** becomes **My Servers** a
 
 Partnership requests are also multi-server aware. If you can represent more than one listed server, Parley asks which server is sending the request, shows a clear **From → To** confirmation, and lets you change the source before sending. Duplicate requests name both servers so a second admin can immediately see that another admin may already have sent it. A configurable server-wide cooldown prevents two admins from firing requests too quickly.
 
-**A server owner connects in three steps:**
+**A server manager gets partnership-ready in one guided flow:**
+
+Press **Find Partners**. Parley checks the prerequisites in order: a live synced server ad, then an enabled partner-ad channel, then partner discovery. The same ad and cooldowns are used whether setup starts from the connected server, DMs, or the main Parley hub.
+
+**The server-ad wizard itself has three short steps:**
 
 1. **Basics** — category and partnership status. If partnerships are open, choose the minimum partner size. Requests go to the person posting by default; contacts can be changed later under **Edit Server Info**.
 2. **Your ad** — **Paste My Own Ad** opens a 3-minute window so you post the real message in `#server-directory`; **Simple Ad Builder** lets Parley write it for you.

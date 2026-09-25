@@ -546,19 +546,18 @@ class ParleyBot(commands.Bot):
         embed = discord.Embed(
             title=f"Parley is ready in {guild.name}",
             description=(
-                "**What to do first**\n"
-                "`1` **Setup Network** — choose the channel where ads from approved partners are delivered.\n"
-                "`2` **Post Server Ad** — optional, but needed if you want the server discoverable in the directory.\n"
-                "`3` **Find Partners** — send a partnership request.\n"
-                "`4` When both servers accept, Parley exchanges each server's ad in the Network channels they chose.\n\n"
-                "Your listing, cooldowns, partnership settings, and Network settings stay **in sync** whether you manage "
-                "them here or from the main Parley server. Nothing is exchanged before a partnership is accepted."
+                "**Start with Find Partners.** Parley checks this server and guides you through anything missing: "
+                "the **server ad** first, then the **partner-ad channel**.\n\n"
+                "After setup, choose a partner and send a request. When both servers accept, Parley exchanges their ads "
+                "in the channels they chose.\n\n"
+                "Your ad, cooldowns, partnership settings, and Network settings stay **in sync** whether you manage them "
+                "here or from the main Parley server."
             ),
             color=self.runtime.bot.color_primary,
         )
         embed.set_footer(text="Only server managers can change these settings.")
         view = persistent_view(
-            action_button(self, "network", style=discord.ButtonStyle.success, row=0),
+            action_button(self, "find", style=discord.ButtonStyle.success, row=0),
             action_button(self, "post", style=discord.ButtonStyle.primary, row=0),
             action_button(self, "network_help", style=discord.ButtonStyle.secondary, row=1),
         )
@@ -571,6 +570,48 @@ class ParleyBot(commands.Bot):
         async with self.db.session() as session:
             await repository.add_audit(
                 session, "guild_onboarding.sent", actor_id=owner.id, guild_id=guild.id
+            )
+
+    async def maybe_dm_manager_onboarding(self, guild: discord.Guild, user: discord.abc.User) -> None:
+        """Send each manager who actually uses Parley one concise setup DM per server.
+
+        Owners still get the install-time DM. This covers moderators/partnership staff
+        who do the day-to-day work without spamming them on every button click.
+        """
+        if user.bot:
+            return
+        async with self.db.session() as session:
+            if await repository.has_audit_action(
+                session, "manager_onboarding.sent", guild_id=guild.id, actor_id=user.id
+            ):
+                return
+
+        from bot.views.welcome import action_button, persistent_view
+
+        embed = discord.Embed(
+            title=f"Managing Parley for {guild.name}",
+            description=(
+                "**Find Partners** is the easiest place to start. Parley checks the setup for this server and guides you "
+                "through anything missing: the **server ad**, then the **partner-ad channel**.\n\n"
+                "Everything stays **in sync** with the main Parley server, including the ad, Network settings, and cooldowns. "
+                "When both servers accept a partnership, Parley exchanges their ads in the channels they chose."
+            ),
+            color=self.runtime.bot.color_primary,
+        )
+        embed.set_footer(text="Sent once per manager for this server.")
+        view = persistent_view(
+            action_button(self, "find", style=discord.ButtonStyle.success, row=0),
+            action_button(self, "post", style=discord.ButtonStyle.primary, row=0),
+        )
+        try:
+            await user.send(embed=embed, view=view)
+        except discord.HTTPException as exc:
+            log.info("Could not DM manager onboarding for guild %s user %s: %s", guild.id, user.id, exc)
+            return
+
+        async with self.db.session() as session:
+            await repository.add_audit(
+                session, "manager_onboarding.sent", actor_id=user.id, guild_id=guild.id
             )
 
     async def _dm_join_fallback(self, guild: discord.Guild) -> None:
