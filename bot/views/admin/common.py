@@ -16,6 +16,7 @@ import discord
 
 from bot.services import permissions
 from bot.services.errors import ParleyError
+from bot.utils.emoji import is_valid_emoji
 from bot.utils.mentions import safe_allowed_mentions
 from bot.views.base import OwnedView, handle_error, reply
 
@@ -67,7 +68,12 @@ class Page(OwnedView):
         row: int | None = None,
         disabled: bool = False,
     ) -> discord.ui.Button:
-        item = discord.ui.Button(label=label, emoji=emoji, style=style, row=row, disabled=disabled)
+        # Discord returns HTTP 400 for plain Unicode symbols (for example "✓" or "＋")
+        # passed as a component emoji. Admin pages should never be able to break an
+        # interaction because of decoration, so silently omit anything that is not a
+        # real Discord-compatible emoji.
+        safe_emoji = emoji if emoji is None or is_valid_emoji(emoji) else None
+        item = discord.ui.Button(label=label, emoji=safe_emoji, style=style, row=row, disabled=disabled)
 
         async def run(interaction: discord.Interaction) -> None:
             try:

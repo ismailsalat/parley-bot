@@ -183,3 +183,40 @@ async def test_user_screens_use_valid_emoji_and_colours(db):
     assert by_label["My Partner Posts"].style is discord.ButtonStyle.success
     listing_buttons = buttons(listing_message_kwargs(bot, listing)["view"])
     assert next(item for item in listing_buttons if item.label == "Request Partnership").style is discord.ButtonStyle.success
+
+
+def test_admin_page_button_drops_invalid_component_emoji(db):
+    """A decorative text symbol must never turn an admin click into Discord 50035."""
+    from bot.views.admin.common import Page
+
+    bot = FakeBot(db)
+    page = Page(bot, 1)
+
+    async def noop(_interaction):
+        return None
+
+    button = page.button("Safe button", noop, emoji="✓")
+    assert button.emoji is None
+
+
+def test_perks_placement_action_emojis_are_discord_safe(db):
+    """Regression for the live Parley Perks settings 400/Invalid emoji failure."""
+    from bot.views.admin.common import Page
+    from bot.views.admin.setup import PerksPlacementPage
+
+    from types import SimpleNamespace
+
+    bot = FakeBot(db)
+    bot.guild.get_channel = lambda _channel_id: None
+    bot.guild.me = SimpleNamespace(guild_permissions=SimpleNamespace(manage_channels=True))
+    page = PerksPlacementPage(
+        bot,
+        1,
+        bot.guild,
+        done=lambda: Page(bot, 1),
+        allow_skip=False,
+    )
+    page.build()
+    for item in buttons(page):
+        if item.emoji is not None:
+            assert is_valid_emoji(str(item.emoji)), (item.label, item.emoji)

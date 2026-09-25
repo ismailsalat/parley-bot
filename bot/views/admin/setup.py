@@ -398,12 +398,12 @@ class PerksPlacementPage(Page):
         select.callback = self._select_callback(select)  # type: ignore[method-assign]
         self.add_item(select)
         self.button(
-            "Use Selected Channel", self._use_selected, emoji="✓",
+            "Use Selected Channel", self._use_selected, emoji="✅",
             style=discord.ButtonStyle.success, disabled=not bool(current), row=1,
         )
         can_create = bool(self.guild.me and self.guild.me.guild_permissions.manage_channels)
         self.button(
-            "Create New Perks Channel", self._create_new, emoji="＋",
+            "Create New Perks Channel", self._create_new, emoji="➕",
             style=discord.ButtonStyle.primary, disabled=not can_create, row=1,
         )
         if self.allow_skip:
