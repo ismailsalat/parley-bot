@@ -473,12 +473,19 @@ async def start_self_post(interaction: discord.Interaction, guild_id: int) -> No
             )
         await bot.panels.adopt_self_post(guild_id, message)
 
+    # A disconnected listing was already authorized by ``load_managed_listing``
+    # above. Re-check that stored delegation inside the posting flow instead of
+    # requiring a live Discord guild that no longer exists for Parley.
+    async def authorize_listing_manager(_bot: ParleyBot, target_guild_id: int, user_id: int) -> None:
+        await load_managed_listing(bot, target_guild_id, user_id)
+
     note = await self_post_service.run_submission(
         interaction,
         guild_id,
         guild.name,
         on_accept=accepted_edit,
         on_review=held_for_review,
+        authorize=(authorize_listing_manager if not permissions.is_connected(bot, guild_id) else None),
     )
     await interaction.edit_original_response(
         content=note,

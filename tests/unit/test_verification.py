@@ -604,6 +604,42 @@ async def test_paste_my_own_ad_works_without_the_bot(db, config):
         assert (await repository.get_listing(session, OWNED)) is not None
 
 
+async def test_disconnected_self_posted_ad_can_be_edited_without_reinstalling_parley(db, config):
+    """Editing a self-posted listing must keep working after Parley is removed."""
+    from bot.services import listings as listing_service
+    from bot.views.management import start_self_post
+    from bot.views.verify import verified_guild_info
+
+    bot = _botless_bot(db)
+    verified = VerifiedGuild(id=OWNED, name="Botless HQ", member_count=1234)
+    async with db.session() as session:
+        listing = await listing_service.create_listing(
+            session, config, guild=verified_guild_info(verified), actor_id=ADMIN_ID,
+            data=listing_input(contact_ids=[ADMIN_ID]), now=NOW,
+        )
+        listing.self_posted = True
+
+    captured: dict = {}
+
+    async def fake_run_submission(interaction, guild_id, guild_name, **kwargs):
+        captured["authorize"] = kwargs.get("authorize")
+        assert captured["authorize"] is not None
+        await captured["authorize"](bot, guild_id, interaction.user.id)
+        return "Edit window opened"
+
+    import bot.views.self_post as self_post_module
+
+    original = self_post_module.run_submission
+    self_post_module.run_submission = fake_run_submission
+    try:
+        interaction = FakeInteraction(bot, ADMIN_ID)
+        await start_self_post(interaction, OWNED)
+    finally:
+        self_post_module.run_submission = original
+
+    assert captured["authorize"] is not None
+
+
 async def test_the_connected_path_still_uses_the_gateway_manager_check(db, config):
     """Injecting authorization must not have loosened the normal path."""
     import inspect

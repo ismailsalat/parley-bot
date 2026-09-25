@@ -137,6 +137,7 @@ class VerifyView(OwnedView):
 
 async def show_verified_servers(interaction: discord.Interaction) -> None:
     """Replace the verification card with the servers Discord verified."""
+    from bot.views.listings import open_verified_listing_form
 
     bot = get_bot(interaction)
     async with bot.db.session() as session:
@@ -205,7 +206,6 @@ class VerifiedGuildPickerView(OwnedView):
         if chosen is None:
             await start_verification(interaction, notice="Please choose a server again.")
             return
-
         from bot.views.listings import open_verified_listing_form
 
         await open_verified_listing_form(interaction, chosen)
