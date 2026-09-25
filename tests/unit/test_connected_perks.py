@@ -478,3 +478,19 @@ async def test_post_server_keeps_existing_disconnected_listings_reachable(db, co
     chooser = next(c for c in sent["view"].children if isinstance(c, discord.ui.Select))
     assert [option.value for option in chooser.options] == [str(OTHER)]  # the listing is one click away
     assert "Refresh Servers" in labels(sent["view"])  # and so is a brand new one
+
+async def test_disconnected_verified_manager_can_represent_multiple_listings(db, config):
+    from bot.views.partnership import represented_listings
+
+    bot = FakeBot(db)
+    first = 990000000000000001
+    second = 990000000000000002
+    bot.guilds = []
+    bot.get_guild = lambda _gid: None
+    async with db.session() as session:
+        await make_listing(session, config, first, actor_id=ADMIN_ID)
+        await make_listing(session, config, second, actor_id=ADMIN_ID)
+
+    async with db.session() as session:
+        rows = await represented_listings(bot, session, ADMIN_ID)
+    assert {row.guild_id for row in rows} >= {first, second}

@@ -44,7 +44,7 @@ def test_permissions_are_minimal():
 async def test_dm_home_is_simple_for_users_and_has_settings_for_staff():
     bot = UIBot()
     _content, view = control_panel(bot)
-    assert labels(view) == ["Post Server Ad", "Browse Partners", "My Server Listings", "My Partner Posts", "Requests"]
+    assert labels(view) == ["Post Server Ad", "Find Partners", "My Server Listings", "My Partner Posts", "Requests"]
     _content, staff_view = control_panel(bot, staff=True)
     assert "Settings" in labels(staff_view)
 

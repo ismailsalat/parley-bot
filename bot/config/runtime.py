@@ -25,20 +25,20 @@ DEFAULT_BUTTONS: dict[str, dict[str, str | None]] = {
     # Label, emoji and colour of every user-facing button.
     "post": {"label": "Post Server Ad", "emoji": None, "style": "primary"},
     "connect": {"label": "Connect This Server", "emoji": None, "style": "primary"},
-    "find": {"label": "Browse Partners", "emoji": None, "style": "success"},
+    "find": {"label": "Find Partners", "emoji": None, "style": "success"},
     "servers": {"label": "My Server Listings", "emoji": None, "style": "primary"},
     "requests": {"label": "Requests", "emoji": None, "style": "primary"},
-    "looking": {"label": "Post Partner Ad", "emoji": None, "style": "primary"},
+    "looking": {"label": "Partner Board", "emoji": None, "style": "primary"},
     "partner_posts": {"label": "My Partner Posts", "emoji": None, "style": "primary"},
     "network": {"label": "Parley Network", "emoji": "\U0001F310", "style": "primary"},
     "perks": {"label": "Parley Perks", "emoji": "✨", "style": "success"},
     "join": {"label": "Join Server", "emoji": None, "style": "primary"},
     "request": {"label": "Request Partnership", "emoji": "🤝", "style": "primary"},
-    "view_ad": {"label": "View Server Ad", "emoji": None, "style": "primary"},
-    "next": {"label": "Next Match", "emoji": None, "style": "primary"},
+    "view_ad": {"label": "View Server", "emoji": None, "style": "primary"},
+    "next": {"label": "Next", "emoji": None, "style": "primary"},
     "edit": {"label": "Edit", "emoji": None, "style": "primary"},
     "edit_ad": {"label": "Edit Ad", "emoji": None, "style": "primary"},
-    "edit_info": {"label": "Edit Server Info", "emoji": None, "style": "primary"},
+    "edit_info": {"label": "Server Info", "emoji": None, "style": "primary"},
     "partnerships": {"label": "Partnerships", "emoji": "🤝", "style": "primary"},
     "preview": {"label": "View Ad", "emoji": None, "style": "primary"},
     "self_post": {"label": "Paste My Own Ad", "emoji": None, "style": "primary"},
@@ -55,7 +55,7 @@ DEFAULT_BUTTONS: dict[str, dict[str, str | None]] = {
     "how": {"label": "How It Works", "emoji": None, "style": "primary"},
     "back": {"label": "Back", "emoji": "⬅️", "style": "secondary"},
     "home": {"label": "Home", "emoji": "🏠", "style": "secondary"},
-    "directory": {"label": "Directory Overview", "emoji": None, "style": "secondary"},
+    "directory": {"label": "All Listings", "emoji": None, "style": "secondary"},
     "settings": {"label": "Settings", "emoji": "\u2699\uFE0F", "style": "primary"},
 }
 
@@ -111,6 +111,8 @@ class ListingConfig:
 @dataclass(frozen=True)
 class PartnershipConfig:
     request_cooldown_seconds: int = 120
+    # Shared by every admin representing the same server, so two admins cannot spam at once.
+    server_request_cooldown_seconds: int = 300
     max_pending_requests: int = 5
     enforce_minimum_members: bool = True
     max_message_length: int = 300
@@ -146,8 +148,8 @@ class PanelConfig:
     )
     looking_panel_enabled: bool = True
     looking_panel_text: str = (
-        "## Find a Partner\n"
-        "Post what your server is looking for or browse matches."
+        "## 🤝 Partner Board\n"
+        "Servers here are actively looking for partnerships. Browse matches or manage your own partner posts."
     )
     welcome_panel_enabled: bool = True
     welcome_panel_text: str = (
@@ -221,7 +223,7 @@ class MessagesConfig:
     edit_rejected: str = "Your changes to **{server_name}** were not approved. Your previous ad is still live."
     refresh_success: str = "**{server_name}** was Relisted and is back at the top of the directory. {jump_url}"
     request_received: str = "**{requester_server}** wants to partner with **{target_server}**."
-    request_sent: str = "Request sent to **{target_server}**. Their contacts can answer any time. I'll DM you when they do."
+    request_sent: str = "Request sent: **{requester_server}** → **{target_server}**. Their contacts can answer any time. I'll DM you when they do."
     request_accepted: str = "## Partnership accepted ✅\n**{requester_server}** 🤝 **{target_server}**\nYou can contact each other here:"
     request_declined: str = "Thanks for reaching out. **{target_server}** isn't able to partner with **{requester_server}** right now."
     network_footer: str = "-# 🌐 Shared by the {bot_name} network"
@@ -383,6 +385,7 @@ def sanitize(config: RuntimeConfig) -> tuple[RuntimeConfig, list[str]]:
     partnerships = replace(
         config.partnerships,
         request_cooldown_seconds=max(0, config.partnerships.request_cooldown_seconds),
+        server_request_cooldown_seconds=max(0, config.partnerships.server_request_cooldown_seconds),
         max_pending_requests=max(1, config.partnerships.max_pending_requests),
         max_message_length=_clamp(config.partnerships.max_message_length, 0, 1000),
         decline_cooldown_hours=max(0, config.partnerships.decline_cooldown_hours),

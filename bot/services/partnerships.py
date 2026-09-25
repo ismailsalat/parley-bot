@@ -19,7 +19,31 @@ from bot.utils.helpers import format_duration
 
 log = logging.getLogger(__name__)
 
-ALREADY_PENDING = "You already have a pending request."
+ALREADY_PENDING = "A partnership request between these servers is already pending."
+
+
+async def _pair_names(session: AsyncSession, source_guild_id: int, target_guild_id: int) -> tuple[str, str]:
+    guilds = await repository.get_guilds(session, [source_guild_id, target_guild_id])
+    source = guilds.get(source_guild_id)
+    target = guilds.get(target_guild_id)
+    return (
+        source.name if source else f"Server {source_guild_id}",
+        target.name if target else f"Server {target_guild_id}",
+    )
+
+
+def _same_pending_message(source_name: str, target_name: str) -> str:
+    return (
+        f"**{source_name}** already has a pending partnership request for **{target_name}**. "
+        "Another admin may have sent it already. Check **Partnership Requests** before sending another."
+    )
+
+
+def _reverse_pending_message(source_name: str, target_name: str) -> str:
+    return (
+        f"**{target_name}** already sent **{source_name}** a partnership request. "
+        "Check **Partnership Requests** to accept or decline it instead of sending a second request."
+    )
 
 
 @dataclass
@@ -66,10 +90,11 @@ async def create_request(
             raise ValidationError(f"Your message is too long (limit {rules.max_message_length} characters).")
         moderation.ensure_clean(text, config)
 
+    source_name, target_name = await _pair_names(session, source_guild_id, target_guild_id)
     if await repository.pending_request_between(session, target_guild_id, source_guild_id):
-        raise Conflict("That server already sent your server a request. Check **Partnership Requests** to answer it.")
+        raise Conflict(_reverse_pending_message(source_name, target_name))
     if await repository.pending_request_between(session, source_guild_id, target_guild_id):
-        raise Conflict(ALREADY_PENDING)
+        raise Conflict(_same_pending_message(source_name, target_name))
 
     paired = await cooldowns.remaining(
         session, cooldowns.SCOPE_PARTNER_PAIR, cooldowns.unordered_pair_key(source_guild_id, target_guild_id), now
@@ -89,6 +114,14 @@ async def create_request(
     if waiting:
         raise CooldownActive(f"Please wait {format_duration(waiting)} before sending another request.", waiting)
 
+    server_waiting = await cooldowns.remaining(session, cooldowns.SCOPE_REQUEST_SERVER, source_guild_id, now)
+    if server_waiting:
+        raise CooldownActive(
+            f"**{source_name}** just sent a partnership request. Another admin may have sent it. "
+            f"Try again in {format_duration(server_waiting)}.",
+            server_waiting,
+        )
+
     if await repository.count_pending_outgoing(session, source_guild_id) >= rules.max_pending_requests:
         raise ValidationError(
             f"Your server already has {rules.max_pending_requests} pending requests. Wait for some replies first."
@@ -106,11 +139,15 @@ async def create_request(
     try:
         await session.flush()
     except IntegrityError as exc:
-        # The partial unique index caught a race between two identical requests.
-        raise Conflict(ALREADY_PENDING) from exc
+        # The partial unique index caught two admins sending the same pair at the same moment.
+        raise Conflict(_same_pending_message(source_name, target_name)) from exc
 
     await cooldowns.start(
         session, cooldowns.SCOPE_REQUEST_USER, requester_id, now, timedelta(seconds=rules.request_cooldown_seconds)
+    )
+    await cooldowns.start(
+        session, cooldowns.SCOPE_REQUEST_SERVER, source_guild_id, now,
+        timedelta(seconds=rules.server_request_cooldown_seconds),
     )
     await repository.add_audit(
         session,

@@ -48,4 +48,4 @@ def test_directory_overview_is_a_multi_server_management_dashboard(db):
 
     select = next(item for item in view.children if getattr(item, "placeholder", None) == "Choose a listing to manage")
     assert {option.label for option in select.options} == {"Alpha", "Beta"}
-    assert _labels(view)[-3:] == ["Post Server Ad", "Browse Partners", "Home"]
+    assert _labels(view)[-3:] == ["Post Server Ad", "Find Partners", "Home"]

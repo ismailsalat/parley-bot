@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import discord
 
+from bot.database import repository
 from bot.views.listings import AdModeView, EmojiWarningView, ListingDraft, ListingFormView, PreviewView, preview_content
 from bot.views.management import show_management, show_my_servers
 from bot.views.partnership import ANY, CategoryView, ExhaustedView, FinderView, RequestPromptView
@@ -102,7 +103,7 @@ async def test_one_server_goes_straight_to_my_listing(db, config):
     assert message.get("content") is None
     assert message["embed"].title == "🧭 Listing Manager"
     assert labels(message["view"]) == [
-        "Edit Ad", "Edit Server Info", "View Ad", "Partnerships", "Relist", "Remove Listing", "All Listings", "Home"
+        "Edit Ad", "Server Info", "View Ad", "Partnerships", "Relist", "Remove Listing", "All Listings", "Home"
     ]
 
 
@@ -130,7 +131,7 @@ async def test_edit_reveals_its_options_progressively(db, config):
     interaction = FakeInteraction(bot, ADMIN_ID)
     await show_edit_menu(interaction, MAIN)
     message = sent(interaction)
-    assert labels(message["view"]) == ["Edit Ad", "Edit Server Info", "Back"]
+    assert labels(message["view"]) == ["Edit Ad", "Server Info", "Back"]
 
 
 # ---------------------------------------------------------------- finding partners
@@ -164,7 +165,7 @@ async def test_one_result_at_a_time(db, config):
     interaction = FakeInteraction(bot, ADMIN_ID)
     await view.show(interaction)
     message = sent(interaction)
-    assert labels(message["view"]) == ["Send Partner Request", "Next Match", "View Server Ad", "Home"]
+    assert labels(message["view"]) == ["Request Partnership", "Next", "View Server", "Home"]
     assert message.get("content") is None
     assert message["embed"].title == "Server 1"
     assert "Gaming • 742 members" in message["embed"].description
@@ -196,11 +197,11 @@ async def test_request_prompt_does_not_require_a_message(db):
     bot = FakeBot(db)
     finder = FinderView(bot, ADMIN_ID, category=ANY, source_id=MAIN)
     view = RequestPromptView.for_finder(finder, 5, "Night Owls")
-    assert labels(view) == ["Send Request", "Add Message", "Back"]
+    assert labels(view) == ["Send Request", "Add Note", "Back"]
 
     # From a public listing there is nothing to go back to, so Back is dropped.
     from_listing = RequestPromptView(bot, ADMIN_ID, MAIN, 5, "Night Owls")
-    assert labels(from_listing) == ["Send Request", "Add Message"]
+    assert labels(from_listing) == ["Send Request", "Add Note"]
 
 
 async def test_multiple_servers_use_one_picker_not_button_grid(db, config):
@@ -222,3 +223,59 @@ async def test_multiple_servers_use_one_picker_not_button_grid(db, config):
     assert message["embed"].title == "My Servers"
     assert len(message["view"].children) == 1
     assert isinstance(message["view"].children[0], discord.ui.Select)
+
+async def test_partnership_request_with_multiple_servers_uses_one_clear_source_picker(db, config):
+    from bot.views.partnership import start_request_flow
+    from tests.fakes import member
+
+    bot = FakeBot(db)
+    second_id = MAIN + 99
+    target_id = MAIN + 199
+    second = type(bot.guild)(second_id, members={ADMIN_ID: member(ADMIN_ID, admin=True)})
+    second.name = "Side Quest"
+    bot.guilds.append(second)
+    bot.get_guild = lambda gid: next((g for g in bot.guilds if g.id == gid), None)
+
+    async with db.session() as session:
+        await make_listing(session, config, MAIN, actor_id=ADMIN_ID, members=530)
+        await make_listing(session, config, second_id, actor_id=ADMIN_ID, members=220)
+        await make_listing(session, config, target_id, actor_id=9999, members=900)
+        target = await repository.get_guild(session, target_id)
+        target.name = "Night Owls"
+
+    interaction = FakeInteraction(bot, ADMIN_ID)
+    await start_request_flow(interaction, target_id)
+    message = sent(interaction)
+    assert message["embed"].title == "🤝 Choose Your Server"
+    assert "Night Owls" in message["embed"].description
+    assert len(message["view"].children) == 1
+    select = message["view"].children[0]
+    assert isinstance(select, discord.ui.Select)
+    assert {option.label for option in select.options} == {"Parley HQ", "Side Quest"}
+    assert all(option.description for option in select.options)
+
+
+async def test_request_confirmation_shows_from_to_and_can_change_server(db, config):
+    from bot.views.partnership import RequestPromptView
+    from tests.fakes import member
+
+    bot = FakeBot(db)
+    second_id = MAIN + 98
+    target_id = MAIN + 198
+    second = type(bot.guild)(second_id, members={ADMIN_ID: member(ADMIN_ID, admin=True)})
+    second.name = "Side Quest"
+    bot.guilds.append(second)
+    bot.get_guild = lambda gid: next((g for g in bot.guilds if g.id == gid), None)
+
+    async with db.session() as session:
+        await make_listing(session, config, MAIN, actor_id=ADMIN_ID)
+        await make_listing(session, config, second_id, actor_id=ADMIN_ID)
+        await make_listing(session, config, target_id, actor_id=9999)
+
+    view = RequestPromptView(bot, ADMIN_ID, MAIN, target_id, "Night Owls")
+    interaction = FakeInteraction(bot, ADMIN_ID)
+    await view.show(interaction)
+    message = sent(interaction)
+    assert "**From:** Parley HQ" in message["embed"].description
+    assert "**To:** Night Owls" in message["embed"].description
+    assert labels(message["view"]) == ["Send Request", "Add Note", "Change Server"]

@@ -9,13 +9,13 @@ import discord
 
 from bot.database import repository
 from bot.database.models import Listing, ListingStatus
-from bot.services import permissions
+from bot.services import partnerships, permissions
 from bot.services.errors import LISTING_GONE, NotFound, ValidationError
 from bot.utils.helpers import listing_jump_url, truncate, utcnow
 from bot.utils.mentions import safe_allowed_mentions
 from bot.views import self_post
 from bot.views.base import ConfirmView, OwnedView, acknowledge, get_bot, handle_error, home_button, reply
-from bot.views.welcome import action_button, persistent_view, register_action, show_screen
+from bot.views.welcome import action_button, add_bot_button, persistent_view, register_action, show_screen
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -36,10 +36,10 @@ def partner_post_controls(bot: ParleyBot, guild_id: int) -> discord.ui.View:
     from bot.views.partnership import RequestPartnershipButton, view_ad_button
 
     return persistent_view(
-        view_ad_button(bot, guild_id, label="View Server Ad"),
+        view_ad_button(bot, guild_id, label="View Server"),
         RequestPartnershipButton(
             guild_id,
-            label="Send Partner Request",
+            label="Request Partnership",
             emoji="🤝",
             style=discord.ButtonStyle.success,
         ),
@@ -69,11 +69,37 @@ async def start_partner_posts(interaction: discord.Interaction) -> None:
     rows, guilds = await _active_managed_listings(bot, interaction.user.id)
 
     if not rows:
-        await reply(
-            interaction,
-            "List a server first, then you can post what that server is looking for.",
-            view=persistent_view(action_button(bot, "post"), home_button(bot)),
-        )
+        async with bot.db.session() as session:
+            verified_ids = set(await repository.guild_ids_connected_by(session, interaction.user.id))
+            listed = [
+                row for row in await repository.get_listings(session, verified_ids)
+                if row.status == ListingStatus.ACTIVE
+            ]
+        if listed:
+            embed = discord.Embed(
+                title="✨ Connect Parley for Partner Posts",
+                description=(
+                    "Your directory listings are still live. Partner Board posts are a **Parley Connected** perk, "
+                    "so add Parley to the server you want to post for."
+                ),
+                color=bot.runtime.bot.color_primary,
+            )
+            await show_screen(
+                interaction,
+                embed=embed,
+                view=persistent_view(add_bot_button(bot), action_button(bot, "servers"), home_button(bot)),
+            )
+        else:
+            embed = discord.Embed(
+                title="🤝 List a Server First",
+                description="Partner Board posts belong to one of your server listings. List a server to get started.",
+                color=bot.runtime.bot.color_primary,
+            )
+            await show_screen(
+                interaction,
+                embed=embed,
+                view=persistent_view(action_button(bot, "post"), home_button(bot)),
+            )
         return
 
     if len(rows) == 1:
@@ -86,18 +112,18 @@ async def start_partner_posts(interaction: discord.Interaction) -> None:
         await show_partner_management(inter, guild_id)
 
     embed = discord.Embed(
-        title="My Partner Posts",
-        description="Choose which server you want to manage.",
+        title="🤝 My Partner Posts",
+        description="Choose which server post you want to manage.",
         color=bot.runtime.bot.color_primary,
     )
-    await reply(
+    await show_screen(
         interaction,
         embed=embed,
         view=GuildPickerView(
             interaction.user.id,
             [(row.guild_id, guilds[row.guild_id].name) for row in rows],
             picked,
-            placeholder="Choose a server",
+            placeholder="Select your server",
         ),
     )
 
@@ -119,19 +145,19 @@ class PartnerPostManager(OwnedView):
     def _build(self) -> None:
         live = bool(self.listing.partner_message_id and self.listing.partner_channel_id)
         if live:
-            edit = discord.ui.Button(label="Edit Partner Ad", style=discord.ButtonStyle.primary, row=0)
+            edit = discord.ui.Button(label="Edit Post", style=discord.ButtonStyle.primary, row=0)
             edit.callback = self._edit  # type: ignore[method-assign]
             self.add_item(edit)
 
             url = partner_post_url(self.bot, self.listing)
             if url:
-                self.add_item(discord.ui.Button(label="View Live Post", url=url, row=0))
+                self.add_item(discord.ui.Button(label="View Post", url=url, row=0))
 
-            delete = discord.ui.Button(label="Delete Partner Post", style=discord.ButtonStyle.danger, row=1)
+            delete = discord.ui.Button(label="Delete Post", style=discord.ButtonStyle.danger, row=1)
             delete.callback = self._delete  # type: ignore[method-assign]
             self.add_item(delete)
         else:
-            post = discord.ui.Button(label="Post Partner Ad", style=discord.ButtonStyle.success, row=0)
+            post = discord.ui.Button(label="Post to Partner Board", style=discord.ButtonStyle.success, row=0)
             post.callback = self._post  # type: ignore[method-assign]
             self.add_item(post)
 
@@ -159,8 +185,8 @@ class PartnerPostManager(OwnedView):
 def partner_management_embed(bot: ParleyBot, guild: discord.Guild, listing: Listing) -> discord.Embed:
     live = bool(listing.partner_message_id and listing.partner_channel_id)
     embed = discord.Embed(
-        title="🤝 Partner Post",
-        description=f"**{guild.name}**\n{'🟢 Live in #find-partners' if live else '⚪ No partner post yet'}",
+        title="🤝 Partner Board Post",
+        description=f"**{guild.name}**\n{'🟢 Live on the Partner Board' if live else '⚪ No Partner Board post yet'}",
         color=bot.runtime.bot.color_primary,
     )
     if listing.partner_ad_text:
@@ -171,7 +197,7 @@ def partner_management_embed(bot: ParleyBot, guild: discord.Guild, listing: List
         )
     if guild.icon:
         embed.set_thumbnail(url=guild.icon.url)
-    embed.set_footer(text="Each server has its own partner post. Posting one opens partnership requests for that server.")
+    embed.set_footer(text="Each listed server has its own post. People can request a partnership directly from it.")
     return embed
 
 
@@ -203,7 +229,7 @@ async def _adopt_partner_post(
 ) -> None:
     channel = bot.panels.looking_channel()
     if channel is None or message.channel.id != channel.id:
-        raise ValidationError("The find-partners channel changed while you were posting. Try again.")
+        raise ValidationError("The Partner Board channel changed while you were posting. Try again.")
 
     async with bot.db.session() as session:
         listing = await repository.get_listing(session, guild_id)
@@ -214,30 +240,47 @@ async def _adopt_partner_post(
         old_controls = listing.partner_controls_message_id
 
     controls = await channel.send(
-        content="-# Partner actions",
+        content="-# 🤝 Partner Board actions",
         view=partner_post_controls(bot, guild_id),
         allowed_mentions=safe_allowed_mentions(),
     )
 
     now = utcnow()
-    async with bot.db.session() as session:
-        current = await repository.get_listing(session, guild_id)
-        if current is None:
-            raise NotFound(LISTING_GONE)
-        current.partner_ad_text = text
-        current.partner_channel_id = channel.id
-        current.partner_message_id = message.id
-        current.partner_controls_message_id = controls.id
-        current.partner_posted_at = now
-        current.accepting_partnerships = True
-        current.updated_at = now
-        await repository.add_audit(
-            session,
-            "partner_post.saved",
-            actor_id=actor_id,
-            guild_id=guild_id,
-            details={"message_id": message.id},
-        )
+    try:
+        async with bot.db.session() as session:
+            # The configured cooldown is per server, so another admin cannot immediately
+            # repost the same community and flood the Partner Board.
+            await partnerships.claim_looking_post(
+                session,
+                bot.runtime,
+                source_guild_id=guild_id,
+                actor_id=actor_id,
+                message=text,
+                now=now,
+            )
+            current = await repository.get_listing(session, guild_id)
+            if current is None:
+                raise NotFound(LISTING_GONE)
+            current.partner_ad_text = text
+            current.partner_channel_id = channel.id
+            current.partner_message_id = message.id
+            current.partner_controls_message_id = controls.id
+            current.partner_posted_at = now
+            current.accepting_partnerships = True
+            current.updated_at = now
+            await repository.add_audit(
+                session,
+                "partner_post.saved",
+                actor_id=actor_id,
+                guild_id=guild_id,
+                details={"message_id": message.id},
+            )
+    except Exception:
+        try:
+            await controls.delete()
+        except discord.HTTPException:
+            pass
+        raise
 
     if old_message and old_message != message.id:
         await bot.panels.delete_listing_message(old_channel, old_message)
@@ -254,7 +297,7 @@ async def open_partner_post_window(interaction: discord.Interaction, guild_id: i
     guild, _listing = await _load(bot, guild_id, interaction.user.id)
     channel = bot.panels.looking_channel()
     if channel is None:
-        raise ValidationError("The find-partners channel isn't set up yet.")
+        raise ValidationError("The Partner Board channel isn't set up yet.")
 
     async def accepted(text: str, message: discord.Message) -> None:
         await _adopt_partner_post(bot, guild_id, text, message, interaction.user.id)
@@ -269,7 +312,7 @@ async def open_partner_post_window(interaction: discord.Interaction, guild_id: i
         allow_review=False,
         respect_approval_required=False,
         on_accept=accepted,
-        success_text="## Partner ad posted\nYour server is now visible in **Find a Partner**.",
+        success_text="## Posted to Partner Board ✅\nYour server is now visible to people actively looking for partners.",
     )
     await interaction.edit_original_response(
         content=note,
@@ -306,7 +349,7 @@ async def delete_partner_post(interaction: discord.Interaction, guild_id: int) -
         await show_partner_management(interaction, guild_id)
         return
 
-    confirm = ConfirmView(interaction.user.id, confirm_label="Delete Partner Post")
+    confirm = ConfirmView(interaction.user.id, confirm_label="Delete Post")
     await reply(interaction, f"Delete the partner post for **{guild.name}**?", view=confirm)
     await confirm.wait()
     if not confirm.confirmed or confirm.interaction is None:
@@ -345,7 +388,7 @@ async def handle_direct_edit(bot: ParleyBot, before: discord.Message, after: dis
     try:
         await after.author.send(
             "Your partner post was edited directly, so Parley removed it so changes cannot bypass moderation.\n\n"
-            "Use **My Partner Posts → Edit Partner Ad** to post the replacement.",
+            "Use **My Partner Posts → Edit Post** to post the replacement.",
             view=persistent_view(action_button(bot, "partner_posts")),
         )
     except discord.HTTPException:

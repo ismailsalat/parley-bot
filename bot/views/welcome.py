@@ -236,11 +236,10 @@ def listings_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
 
 
 def looking_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
-    """Find-a-Partner controls: deliberately different from Server Directory."""
+    """Partner Board controls: browse people looking now or manage your own posts."""
     view = persistent_view(
         action_button(bot, "find", row=0),
-        action_button(bot, "looking", row=0),
-        action_button(bot, "partner_posts", row=1),
+        action_button(bot, "partner_posts", row=0),
     )
     return templates.render(bot.runtime, "looking_panel"), view
 

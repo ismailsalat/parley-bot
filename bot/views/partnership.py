@@ -45,22 +45,38 @@ log = logging.getLogger(__name__)
 
 
 async def represented_listings(bot: ParleyBot, session: AsyncSession, user_id: int) -> list[Listing]:
-    """Active listings the user may speak for: partnership contact or current manager."""
+    """Every active listing the user may speak for, including disconnected verified listings.
+
+    A person can represent many servers. Live servers use Discord's current
+    permissions; disconnected servers keep the manager who originally verified
+    the listing plus any partnership contacts.
+    """
     contact_ids = set(await repository.guild_ids_where_contact(session, user_id))
-    manager_ids = {guild.id for guild in permissions.cached_manageable_guilds(bot, user_id)}
-    rows = await repository.get_listings(session, contact_ids | manager_ids)
+    live_manager_ids = {guild.id for guild in permissions.cached_manageable_guilds(bot, user_id)}
+    verified_ids = set(await repository.guild_ids_connected_by(session, user_id))
+    disconnected_manager_ids = {gid for gid in verified_ids if not permissions.is_connected(bot, gid)}
+    rows = await repository.get_listings(session, contact_ids | live_manager_ids | disconnected_manager_ids)
     return [row for row in rows if row.status == ListingStatus.ACTIVE]
 
 
 async def can_represent(bot: ParleyBot, session: AsyncSession, guild_id: int, user_id: int) -> bool:
     if await repository.is_contact(session, guild_id, user_id):
         return True
-    return await permissions.is_manager(bot, guild_id, user_id)
+    if permissions.is_connected(bot, guild_id):
+        return await permissions.is_manager(bot, guild_id, user_id)
+    stored = await repository.get_guild(session, guild_id)
+    return bool(stored and stored.connected_by == user_id)
 
 
 def guild_name(guilds: dict[int, Guild], guild_id: int) -> str:
     row = guilds.get(guild_id)
     return row.name if row else f"Server {guild_id}"
+
+
+def display_guild_name(bot: ParleyBot, guilds: dict[int, Guild], guild_id: int) -> str:
+    """Prefer Discord's live name when Parley is connected; fall back to stored listing metadata."""
+    live = bot.get_guild(guild_id)
+    return live.name if live is not None else guild_name(guilds, guild_id)
 
 
 def describe(guilds: dict[int, Guild], listing: Listing | None, guild_id: int) -> str:
@@ -229,16 +245,27 @@ class GuildPickerView(OwnedView):
     def __init__(
         self,
         owner_id: int,
-        options: Sequence[tuple[int, str]],
+        options: Sequence[tuple[int, str] | tuple[int, str, str]],
         on_pick: Callable[[discord.Interaction, int], Awaitable[None]],
         *,
         placeholder: str = "Choose a server",
     ) -> None:
         super().__init__(owner_id)
         self._on_pick = on_pick
+        select_options: list[discord.SelectOption] = []
+        for option in options[:25]:
+            gid, name = option[0], option[1]
+            description = option[2] if len(option) > 2 else None
+            select_options.append(
+                discord.SelectOption(
+                    label=truncate(name, 100),
+                    value=str(gid),
+                    description=truncate(description, 100) if description else None,
+                )
+            )
         select = discord.ui.Select(
             placeholder=placeholder,
-            options=[discord.SelectOption(label=truncate(name, 100), value=str(gid)) for gid, name in options[:25]],
+            options=select_options,
         )
         select.callback = self._picked  # type: ignore[method-assign]
         self._select = select
@@ -252,44 +279,70 @@ class GuildPickerView(OwnedView):
 # ---------------------------------------------------------------- request flow
 
 
-async def start_request_flow(interaction: discord.Interaction, target_id: int) -> None:
-    """Request a partnership from a public listing.
+async def start_request_flow(
+    interaction: discord.Interaction, target_id: int, *, finder: "FinderView | None" = None
+) -> None:
+    """Start a request and make the represented server explicit.
 
-    The first screen is a view, never a modal, so the button can acknowledge
-    Discord straight away and do its database work afterwards.
+    One listed server goes straight to confirmation. Multiple listed servers get
+    one dropdown so admins never accidentally request from the wrong community.
     """
     bot = get_bot(interaction)
     async with bot.db.session() as session:
         target = listing_service.require_visible(await repository.get_listing(session, target_id))
         if not target.accepting_partnerships:
-            raise ValidationError("This server is not accepting partnerships.")
+            raise ValidationError("This server isn't accepting partnership requests right now.")
         sources = [s for s in await represented_listings(bot, session, interaction.user.id) if s.guild_id != target_id]
         guilds = await repository.get_guilds(session, [target_id, *(s.guild_id for s in sources)])
 
-    target_name = guild_name(guilds, target_id)
+    target_name = display_guild_name(bot, guilds, target_id)
     if not sources:
-        await reply(
+        embed = discord.Embed(
+            title="🤝 List a Server First",
+            description=(
+                f"Partnership requests to **{target_name}** need to come from one of your own listed servers.\n\n"
+                "List a server, then come back and try again."
+            ),
+            color=bot.runtime.bot.color_primary,
+        )
+        await _edit_or_reply(
             interaction,
-            "To request a partnership, your server needs a Parley listing first, "
-            "and you need **Manage Server** there or be one of its partnership contacts.",
-            view=persistent_view(action_button(bot, "post")),
+            None,
+            persistent_view(action_button(bot, "post"), home_button(bot)),
+            embed=embed,
         )
         return
 
+    def source_row(listing: Listing) -> tuple[int, str, str]:
+        row = guilds.get(listing.guild_id)
+        name = display_guild_name(bot, guilds, listing.guild_id)
+        category = ", ".join(listing.categories) or "Other"
+        members = format_members(row.member_count if row else 0)
+        return listing.guild_id, name, f"{category} · {members}"
+
+    async def open_prompt(inter: discord.Interaction, source_id: int) -> None:
+        if finder is not None:
+            finder.source_id = source_id
+        await RequestPromptView(
+            bot, inter.user.id, source_id, target_id, target_name, finder=finder
+        ).show(inter)
+
     if len(sources) == 1:
-        await RequestPromptView(bot, interaction.user.id, sources[0].guild_id, target_id, target_name).show(interaction)
+        await open_prompt(interaction, sources[0].guild_id)
         return
 
-    async def picked(inter: discord.Interaction, source_id: int) -> None:
-        await RequestPromptView(bot, inter.user.id, source_id, target_id, target_name).show(inter)
-
-    options = [(s.guild_id, guild_name(guilds, s.guild_id)) for s in sources]
-    await reply(
-        interaction,
-        f"Which of your servers wants to partner with **{target_name}**?",
-        view=GuildPickerView(interaction.user.id, options, picked, placeholder="Your server"),
+    embed = discord.Embed(
+        title="🤝 Choose Your Server",
+        description=f"Which of your listed servers should request a partnership with **{target_name}**?",
+        color=bot.runtime.bot.color_primary,
     )
-
+    options = [source_row(s) for s in sorted(sources, key=lambda row: display_guild_name(bot, guilds, row.guild_id).lower())]
+    await _edit_or_reply(
+        interaction,
+        None,
+        GuildPickerView(interaction.user.id, options, open_prompt, placeholder="Select your server"),
+        embed=embed,
+    )
 
 def request_embed(
     bot: ParleyBot,
@@ -301,22 +354,27 @@ def request_embed(
     connected: bool = True,
 ) -> discord.Embed:
     source_row = guilds.get(request.source_guild_id)
-    server_name = guild_name(guilds, request.source_guild_id)
+    source_name = guild_name(guilds, request.source_guild_id)
+    target_name = guild_name(guilds, request.target_guild_id)
     category = ", ".join(source.categories) if source else "Other"
     members = format_members(source_row.member_count if source_row else 0)
     requester = user_label(bot, request.requester_user_id)
-    description = f"{requester} sent you a partnership request.\n\n**{server_name}**\n{category} · {members}"
+    description = (
+        f"{requester} sent you a partnership request.\n\n"
+        f"**{source_name}** → **{target_name}**\n"
+        f"{category} · {members}"
+    )
     if not connected:
         description += (
-            f"\n\nDM {requester} to start the conversation."
-            "\n\n**✨ ADD PARLEY FOR EASY ONE-CLICK PARTNERSHIP ACCESS.**"
+            f"\n\nDM {requester} to start the conversation. "
+            "Parley isn't connected to this server, so the request is handled through DMs. "
+            "Add Parley for one-click Accept / Decline next time."
         )
     embed = discord.Embed(title="🤝 Partnership Request", description=description, color=bot.runtime.bot.color_primary)
     if request.message:
-        embed.add_field(name="Message", value=truncate(request.message, 500), inline=False)
-    embed.set_footer(text=f"Request #{request.id}")
+        embed.add_field(name="Note", value=truncate(request.message, 500), inline=False)
+    embed.set_footer(text=f"Request #{request.id} · {source_name} → {target_name}")
     return embed
-
 
 def request_actions(bot: ParleyBot, request: PartnershipRequest) -> discord.ui.View:
     _label, emoji = bot.runtime.button("view_ad")
@@ -485,7 +543,7 @@ async def submit_request(
         # Keep discovering: the next server is one press away.
         finder.seen.add(target_id)
         view = discord.ui.View(timeout=MENU_TIMEOUT_SECONDS)
-        nxt = discord.ui.Button(label="Next Server", style=discord.ButtonStyle.primary, row=0)
+        nxt = discord.ui.Button(label="Next", style=discord.ButtonStyle.primary, row=0)
 
         async def continue_search(inter: discord.Interaction) -> None:
             await finder.show(inter)
@@ -495,7 +553,7 @@ async def submit_request(
         view.add_item(home_button(bot, row=1))
         await _edit_or_reply(interaction, "Request sent ✓", view)
         return
-    await reply(interaction, text, view=persistent_view(home_button(bot)))
+    await _edit_or_reply(interaction, text, persistent_view(home_button(bot)))
 
 
 # ---------------------------------------------------------------- answering requests
@@ -619,8 +677,9 @@ async def show_requests(interaction: discord.Interaction) -> None:
     if outgoing:
         lines = []
         for request in outgoing[:5]:
+            source = guild_name(guilds, request.source_guild_id)
             target = guild_name(guilds, request.target_guild_id)
-            lines.append(f"{target} · {discord.utils.format_dt(request.created_at, 'R')}")
+            lines.append(f"{source} → {target} · {discord.utils.format_dt(request.created_at, 'R')}")
         extra = len(outgoing) - len(lines)
         if extra > 0:
             lines.append(f"+{extra} more pending")
@@ -700,11 +759,11 @@ async def start_find_flow(interaction: discord.Interaction) -> None:
 
     if not sources:
         add = add_bot_button(bot)
-        await reply(
+        await _edit_or_reply(
             interaction,
-            "Find a Partner is a **Parley Connected** perk. Your directory listing can stay live, "
-            "but connect Parley to browse matches and use partner posts.",
-            view=persistent_view(add, home_button(bot)),
+            "Find Partners is a **Parley Connected** perk. Your directory listing can stay live, "
+            "but connect Parley to browse matches and use Partner Board posts.",
+            persistent_view(add, home_button(bot)),
         )
         return
 
@@ -713,19 +772,28 @@ async def start_find_flow(interaction: discord.Interaction) -> None:
             await FinderView(bot, inter.user.id, category=ANY, source_id=guild_id).show(inter)
 
         embed = discord.Embed(
-            title="Browse Partners",
-            description="Which server are you finding a partner for?",
+            title="🔎 Find Partners",
+            description="Which of your connected servers are you finding partners for?",
             color=bot.runtime.bot.color_primary,
         )
-        await reply(
+        await _edit_or_reply(
             interaction,
-            embed=embed,
-            view=GuildPickerView(
+            None,
+            GuildPickerView(
                 interaction.user.id,
-                [(s.guild_id, guild_name(guilds, s.guild_id)) for s in sources],
+                [
+                    (
+                        s.guild_id,
+                        display_guild_name(bot, guilds, s.guild_id),
+                        f"{', '.join(s.categories) or 'Other'} · "
+                        f"{format_members(guilds[s.guild_id].member_count if s.guild_id in guilds else 0)}",
+                    )
+                    for s in sources
+                ],
                 picked,
-                placeholder="Choose your server",
+                placeholder="Select your server",
             ),
+            embed=embed,
         )
         return
 
@@ -956,11 +1024,11 @@ class FinderView(OwnedView):
         assert self.current is not None
         gid = self.current.guild_id
 
-        request = discord.ui.Button(label="Send Partner Request", style=discord.ButtonStyle.success, row=0)
+        request = discord.ui.Button(label="Request Partnership", style=discord.ButtonStyle.success, row=0)
         request.callback = self._request  # type: ignore[method-assign]
         self.add_item(request)
 
-        nxt = discord.ui.Button(label="Next Match", style=discord.ButtonStyle.primary, row=0)
+        nxt = discord.ui.Button(label="Next", style=discord.ButtonStyle.primary, row=0)
         nxt.callback = self._next  # type: ignore[method-assign]
         self.add_item(nxt)
 
@@ -972,7 +1040,7 @@ class FinderView(OwnedView):
         if partner_url:
             self.add_item(discord.ui.Button(label="View Partner Post", url=partner_url, row=0))
         else:
-            self.add_item(view_ad_button(self.bot, gid, label="View Server Ad", row=0))
+            self.add_item(view_ad_button(self.bot, gid, label="View Server", row=0))
 
         self.add_item(home_button(self.bot, row=1))
 
@@ -1002,11 +1070,7 @@ class FinderView(OwnedView):
     async def _request(self, interaction: discord.Interaction) -> None:
         assert self.current is not None
         if self.source_id is None:
-            await reply(
-                interaction,
-                "To request a partnership, list your own server first.",
-                view=persistent_view(action_button(self.bot, "post")),
-            )
+            await start_request_flow(interaction, self.current.guild_id, finder=self)
             return
         await RequestPromptView.for_finder(self, self.current.guild_id, self.current_name).show(interaction)
 
@@ -1016,7 +1080,7 @@ class FinderView(OwnedView):
 
 
 class RequestPromptView(OwnedView):
-    """A message is optional, so sending is one press."""
+    """Final confirmation: always show exactly which two servers are involved."""
 
     def __init__(
         self,
@@ -1034,13 +1098,15 @@ class RequestPromptView(OwnedView):
         self.finder = finder
         self.target_id = target_id
         self.target_name = target_name
-        send = discord.ui.Button(label="Send Request", style=discord.ButtonStyle.primary, row=0)
-        add = discord.ui.Button(label="Add Message", style=discord.ButtonStyle.primary, row=0)
+        self._change_added = False
+
+        send = discord.ui.Button(label="Send Request", emoji="🤝", style=discord.ButtonStyle.success, row=0)
+        add = discord.ui.Button(label="Add Note", style=discord.ButtonStyle.secondary, row=0)
         send.callback = self._send_plain  # type: ignore[method-assign]
         add.callback = self._add_message  # type: ignore[method-assign]
         self.add_item(send)
         self.add_item(add)
-        if finder is not None:  # nothing to go back to when it came from a listing
+        if finder is not None:
             back = discord.ui.Button(label="Back", style=discord.ButtonStyle.secondary, row=1)
             back.callback = self._back  # type: ignore[method-assign]
             self.add_item(back)
@@ -1050,8 +1116,32 @@ class RequestPromptView(OwnedView):
         assert finder.source_id is not None
         return cls(finder.bot, finder.owner_id, finder.source_id, target_id, target_name, finder=finder)
 
+    async def _source_name_and_count(self) -> tuple[str, int]:
+        async with self.bot.db.session() as session:
+            guilds = await repository.get_guilds(session, [self.source_id])
+            sources = [
+                row for row in await represented_listings(self.bot, session, self.owner_id)
+                if row.guild_id != self.target_id
+            ]
+        return display_guild_name(self.bot, guilds, self.source_id), len(sources)
+
     async def show(self, interaction: discord.Interaction) -> None:
-        await _edit_or_reply(interaction, f"## Partner with {self.target_name}\nAdd a message?", self)
+        source_name, source_count = await self._source_name_and_count()
+        if source_count > 1 and not self._change_added:
+            change = discord.ui.Button(label="Change Server", style=discord.ButtonStyle.secondary, row=1)
+            change.callback = self._change_server  # type: ignore[method-assign]
+            self.add_item(change)
+            self._change_added = True
+        embed = discord.Embed(
+            title="🤝 Partnership Request",
+            description=(
+                f"**From:** {source_name}\n"
+                f"**To:** {self.target_name}\n\n"
+                "Send it now, or add a short optional note."
+            ),
+            color=self.bot.runtime.bot.color_primary,
+        )
+        await _edit_or_reply(interaction, None, self, embed=embed)
 
     async def _send(self, interaction: discord.Interaction, message: str) -> None:
         self.stop()
@@ -1067,12 +1157,17 @@ class RequestPromptView(OwnedView):
         await interaction.response.send_modal(
             ShortMessageModal(
                 title=f"Partner with {truncate(self.target_name, 30)}",
-                label="Message (optional)",
-                placeholder="We're interested in partnering!",
+                label="Optional note",
+                placeholder="A quick hello or what you're looking for...",
                 max_length=self.bot.runtime.partnerships.max_message_length or 1,
                 on_submit=submitted,
             )
         )
+
+    async def _change_server(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
+        self.stop()
+        await start_request_flow(interaction, self.target_id, finder=self.finder)
 
     async def _back(self, interaction: discord.Interaction) -> None:
         self.stop()

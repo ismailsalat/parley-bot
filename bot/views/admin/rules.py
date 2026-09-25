@@ -57,7 +57,8 @@ SECTIONS: dict[str, tuple[str, str, tuple, str]] = {
         "Partnerships",
         "🤝",
         (
-            Number("partnerships.request_cooldown_seconds", "Request cooldown", "seconds", 0, 86_400),
+            Number("partnerships.request_cooldown_seconds", "User request cooldown", "seconds", 0, 86_400),
+            Number("partnerships.server_request_cooldown_seconds", "Server request cooldown", "seconds", 0, 86_400),
             Number("partnerships.decline_cooldown_hours", "Decline cooldown", "hours", 0, 720),
             Number("partnerships.max_pending_requests", "Maximum pending", "requests", 1, 100),
             Number("partnerships.request_expiration_days", "Request expiration (0 = never)", "days", 0, 90),

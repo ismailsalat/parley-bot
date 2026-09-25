@@ -75,7 +75,7 @@ async def test_self_partnership_blocked_by_database_constraint(db, config, serve
 
 async def test_duplicate_pending_request_is_rejected(db, config, servers):
     await request(db, config)
-    with pytest.raises(Conflict, match="You already have a pending request."):
+    with pytest.raises(Conflict, match="already has a pending partnership request"):
         await request(db, config, requester=7777, now=NOW + timedelta(minutes=10))
 
 
@@ -91,7 +91,7 @@ async def test_duplicate_pending_blocked_by_database_index(db, config, servers):
 
 async def test_reverse_pending_request_points_to_inbox(db, config, servers):
     await request(db, config)
-    with pytest.raises(Conflict, match="already sent your server a request"):
+    with pytest.raises(Conflict, match="already sent .* a partnership request"):
         await request(db, config, source=TARGET, target=SOURCE, requester=TARGET_OWNER, members=430)
 
 
@@ -114,11 +114,29 @@ async def test_missing_target_listing(db, config, servers):
 
 
 async def test_requester_cooldown_limits_spam(db, config, servers):
+    from dataclasses import replace
+
+    config = replace(config, partnerships=replace(config.partnerships, server_request_cooldown_seconds=0))
     await request(db, config)
     with pytest.raises(CooldownActive, match="before sending another request"):
         await request(db, config, target=OTHER, now=NOW + timedelta(seconds=10))
     later = NOW + timedelta(seconds=config.partnerships.request_cooldown_seconds)
     await request(db, config, target=OTHER, now=later)
+
+
+async def test_server_cooldown_is_shared_across_admins(db, config, servers):
+    """A second admin cannot immediately fire another request for the same source server."""
+    from dataclasses import replace
+
+    config = replace(config, partnerships=replace(config.partnerships, request_cooldown_seconds=0))
+    await request(db, config)
+    with pytest.raises(CooldownActive, match="Another admin may have sent it"):
+        await request(
+            db, config, source=SOURCE, target=OTHER, requester=7777,
+            now=NOW + timedelta(seconds=10),
+        )
+    later = NOW + timedelta(seconds=config.partnerships.server_request_cooldown_seconds + 1)
+    await request(db, config, source=SOURCE, target=OTHER, requester=7777, now=later)
 
 
 async def test_accept_notifies_state_and_second_click_loses(db, config, servers):
@@ -156,7 +174,15 @@ async def test_decline_applies_cooldown_then_allows_again(db, config, servers):
 async def test_max_pending_requests(db, config, servers):
     from dataclasses import replace
 
-    config = replace(config, partnerships=replace(config.partnerships, max_pending_requests=1, request_cooldown_seconds=0))
+    config = replace(
+        config,
+        partnerships=replace(
+            config.partnerships,
+            max_pending_requests=1,
+            request_cooldown_seconds=0,
+            server_request_cooldown_seconds=0,
+        ),
+    )
     await request(db, config)
     with pytest.raises(ValidationError, match="pending requests"):
         await request(db, config, target=OTHER)
@@ -169,3 +195,42 @@ async def test_old_requests_expire(db, config, servers):
             session, config, NOW + timedelta(days=config.partnerships.request_expiration_days, minutes=1)
         )
         assert [r.id for r in expired] == [request_id]
+
+async def test_duplicate_pending_message_names_both_servers_and_explains_other_admin(db, config, servers):
+    async with db.session() as session:
+        source = await repository.get_guild(session, SOURCE)
+        target = await repository.get_guild(session, TARGET)
+        source.name = "Rivals HQ"
+        target.name = "Night Owls"
+
+    await request(db, config)
+    with pytest.raises(Conflict) as caught:
+        await request(db, config, requester=7777, now=NOW + timedelta(minutes=10))
+
+    message = str(caught.value)
+    assert "**Rivals HQ**" in message
+    assert "**Night Owls**" in message
+    assert "Another admin may have sent it already" in message
+    assert "Partnership Requests" in message
+
+async def test_partner_board_post_cooldown_is_per_server(db, config, servers):
+    async with db.session() as session:
+        await partnerships.claim_looking_post(
+            session, config,
+            source_guild_id=SOURCE, actor_id=REQUESTER, message="Looking for gaming servers", now=NOW,
+        )
+
+    with pytest.raises(CooldownActive, match="can post again"):
+        async with db.session() as session:
+            await partnerships.claim_looking_post(
+                session, config,
+                source_guild_id=SOURCE, actor_id=7777, message="Another partner post",
+                now=NOW + timedelta(minutes=1),
+            )
+
+    later = NOW + timedelta(minutes=config.partnerships.looking_post_cooldown_minutes, seconds=1)
+    async with db.session() as session:
+        await partnerships.claim_looking_post(
+            session, config,
+            source_guild_id=SOURCE, actor_id=7777, message="Fresh partner post", now=later,
+        )

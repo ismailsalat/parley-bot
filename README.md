@@ -58,8 +58,8 @@ Listing a server never requires installing Parley. **Post Server Ad** offers **V
 a read-only Discord login (`identify` + `guilds`) that tells Parley which servers you manage. You
 pick one, paste an invite, and the listing goes live with Parley in none of your servers.
 
-Adding Parley stays optional and unlocks the Connected perks (faster Relists, Find a Partner,
-Partner Posts, the Parley Network, Auto Partner, in-server partnership controls, live metadata).
+Adding Parley stays optional and unlocks the Connected perks (faster Relists, Find Partners,
+Partner Board posts, the Parley Network, Auto Partner, in-server partnership controls, live metadata).
 
 To turn verification on, set these (the secret belongs in Railway variables, never in git):
 
@@ -177,11 +177,14 @@ Every change applies immediately, without a restart. Every section has **Reset t
 
 **Normal users only see this:**
 
-- **DM Parley:** Post My Server · Find Partners · My Listing · Requests · Add Parley
+- **DM Parley:** Post Server Ad · Find Partners · My Server Listings · My Partner Posts · Requests
 - **My Listing:** a compact private embed with Relist · Edit · View Ad · Remove Listing. **View Ad** resolves the latest actual advertisement message, not Parley's helper card, then gives the user the real jump link.
-- **Under every listing:** Join Server · Request Partnership
+- **Under every directory listing:** Join Server · Request Partnership
+- **Partner Board:** only servers actively looking for partners appear here; posts use View Server · Request Partnership
 
 If you manage several connected servers, **My Listing** becomes **My Servers** and uses one clean server picker. Server-choice screens use compact embeds; one-server users skip the picker entirely.
+
+Partnership requests are also multi-server aware. If you can represent more than one listed server, Parley asks which server is sending the request, shows a clear **From → To** confirmation, and lets you change the source before sending. Duplicate requests name both servers so a second admin can immediately see that another admin may already have sent it. A configurable server-wide cooldown prevents two admins from firing requests too quickly.
 
 **A server owner connects in three steps:**
 

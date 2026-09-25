@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.database import repository
 
 SCOPE_REQUEST_USER = "request_user"
+SCOPE_REQUEST_SERVER = "request_server"
 SCOPE_DECLINED_PAIR = "declined_pair"
 SCOPE_PARTNER_PAIR = "partner_pair"
 SCOPE_LOOKING_POST = "looking_post"
