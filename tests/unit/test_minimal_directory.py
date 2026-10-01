@@ -13,7 +13,7 @@ def _labels(view):
 def test_public_directory_footer_is_small(db):
     bot = FakeBot(db)
     content, view = listings_panel(bot)
-    assert _labels(view) == ["Post Server Ad", "My Server Listings", "Relist"]
+    assert _labels(view) == ["Post a Server Free", "My Server Listings", "Relist"]
     assert content == "# 📣 Server Directory\n*Browse servers, join communities, or request partnerships.*"
     buttons = [getattr(child, "item", child) for child in view.children]
     relist = buttons[-1]

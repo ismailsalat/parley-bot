@@ -111,7 +111,7 @@ async def test_button_customization_keeps_routing(db):
     async with db.session() as session:
         await configuration.reset_button(session, "post", actor_id=ACTOR)
     config, _ = apply_overrides(default_config(), await overrides(db))
-    assert config.button("post") == ("Post Server Ad", None) and config.button("find")[0] == "Search"
+    assert config.button("post") == ("Post a Server Free", "📣") and config.button("find")[0] == "Search"
 
 
 @pytest.mark.parametrize("label, emoji", [("", "📢"), ("x" * 41, ""), ("Ok", "not-an-emoji"), ("Ok", "<:bad:1>")])

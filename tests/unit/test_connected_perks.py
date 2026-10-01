@@ -472,12 +472,13 @@ async def test_verified_manager_can_manage_after_parley_is_removed(db, config):
 
 
 async def test_post_server_keeps_existing_disconnected_listings_reachable(db, config):
-    """Post Server Ad still reaches an already-verified listing - and can list a new server.
+    """The main Post action is Quick Post, without deleting legacy verified listings.
 
-    It used to open the Listing Manager directly, which dead-ended anyone who
-    wanted to list a *second* server without installing Parley.
+    Existing verified listings remain stored and reachable through My Server
+    Listings; the Post action no longer forces the OAuth-first picker.
     """
     from bot.views.listings import start_post_flow
+    from bot.views.welcome import control_panel
     from tests.fakes import FakeInteraction
 
     bot = FakeBot(db)
@@ -491,10 +492,12 @@ async def test_post_server_keeps_existing_disconnected_listings_reachable(db, co
     await start_post_flow(interaction)
 
     sent = interaction.response.sent[-1]
-    assert sent["embed"].title == "😊 Choose a Server"
-    chooser = next(c for c in sent["view"].children if isinstance(c, discord.ui.Select))
-    assert [option.value for option in chooser.options] == [str(OTHER)]  # the listing is one click away
-    assert "Refresh Servers" in labels(sent["view"])  # and so is a brand new one
+    assert "No OAuth" in sent["content"]
+    assert "Post / Repost Free" in labels(sent["view"])
+    assert "Manage Connected Servers" in labels(sent["view"])
+    assert "My Server Listings" in labels(control_panel(bot)[1])
+    async with db.session() as session:
+        assert (await repository.get_listing(session, OTHER)) is not None
 
 async def test_disconnected_verified_manager_can_represent_multiple_listings(db, config):
     from bot.views.partnership import represented_listings

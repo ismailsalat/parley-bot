@@ -44,7 +44,7 @@ def test_permissions_are_minimal():
 async def test_dm_home_is_simple_for_users_and_has_settings_for_staff():
     bot = UIBot()
     _content, view = control_panel(bot)
-    assert labels(view) == ["Post Server Ad", "Find Partners", "My Server Listings", "My Partner Posts", "Requests"]
+    assert labels(view) == ["Post a Server Free", "Find Partners", "My Server Listings", "My Partner Posts", "Requests"]
     _content, staff_view = control_panel(bot, staff=True)
     assert "Settings" in labels(staff_view)
 
@@ -60,14 +60,14 @@ async def test_start_here_panel_stays_simple_and_optional_links_still_work_elsew
     )
     # Start Here has one green partnership CTA; Find Partners guides missing setup.
     _content, view = welcome_panel(UIBot(runtime))
-    assert labels(view) == ["Add Parley", "Find Partners", "Server Directory", "Post Server Ad"]
+    assert labels(view) == ["Post a Server Free", "Find Partners", "Browse Directory", "Privacy & Safety", "Add Parley"]
     green = [getattr(c, "item", c).label for c in view.children if getattr(c, "item", c).style is discord.ButtonStyle.success]
     assert green == ["Find Partners"]
     assert len(labels(view)) <= 5
 
     # Before /setup runs there is no directory channel link, but Network setup still works.
     _content, bare = welcome_panel(UIBot())
-    assert labels(bare) == ["Add Parley", "Find Partners", "Post Server Ad"]
+    assert labels(bare) == ["Post a Server Free", "Find Partners", "Privacy & Safety", "Add Parley"]
 
     links = optional_links(UIBot(runtime))
     assert {item.url for item in links} == {"https://discord.gg/help", "https://example.com"}

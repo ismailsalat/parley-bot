@@ -166,12 +166,23 @@ async def test_editing_a_removed_listing_fails(db, config):
 async def test_refresh_cooldown_message(db, config):
     async with db.session() as session:
         await make_listing(session, config, GID)
-    with pytest.raises(CooldownActive) as caught:
+
+    # A disconnected listing has the new 24-hour cooldown.
+    with pytest.raises(CooldownActive) as free:
         async with db.session() as session:
             await listing_service.claim_refresh(
                 session, config, guild_id=GID, actor_id=OWNER, now=NOW + timedelta(minutes=23)
             )
-    assert caught.value.user_message == "You can Relist again in 7 minutes."
+    assert free.value.user_message == "You can Relist again in 23 hours 37 minutes."
+
+    # Verified connected servers keep the shorter 30-minute cooldown.
+    with pytest.raises(CooldownActive) as connected:
+        async with db.session() as session:
+            await listing_service.claim_refresh(
+                session, config, guild_id=GID, actor_id=OWNER,
+                now=NOW + timedelta(minutes=23), connected=True,
+            )
+    assert connected.value.user_message == "You can Relist again in 7 minutes."
 
 
 async def test_refresh_allowed_after_cooldown_and_blocks_double_click(db, config):

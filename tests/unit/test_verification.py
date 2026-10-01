@@ -60,23 +60,25 @@ def oauth_bot(db, **overrides) -> FakeBot:
 # ---------------------------------------------------------------- 1-2. the reported bug
 
 
-async def test_post_server_ad_without_the_bot_offers_verification(db):
-    """The old 'Connect Parley once to list a new server' screen is gone."""
+async def test_post_server_ad_without_the_bot_offers_quick_post(db):
+    """Normal posting never starts OAuth or demands installation."""
+    from sqlalchemy import select
     from bot.views.listings import start_post_flow
 
     bot = oauth_bot(db)
-    bot.get_guild = lambda _gid: None  # Parley is in nothing this user manages
+    bot.get_guild = lambda _gid: None
     bot.guilds = []
     interaction = FakeInteraction(bot, ADMIN_ID)
     await start_post_flow(interaction)
 
     message = interaction.response.sent[-1]
-    embed = message["embed"]
-    assert "Connect Parley once" not in (embed.description or "")
-    assert "Post Your Server" in (embed.title or "")
-    assert "No bot required" in (embed.description or "")
+    assert "Advertise your server for free" in message["content"]
+    assert "No OAuth" in message["content"]
+    assert "no authorization" in message["content"].lower() or "No OAuth" in message["content"]
     labels = [getattr(c, "item", c).label for c in message["view"].children]
-    assert labels == ["Choose My Server"]
+    assert labels == ["Post / Repost Free", "Manage Connected Servers", "Install Parley (Optional)"]
+    async with db.session() as session:
+        assert await session.scalar(select(OAuthSession)) is None
 
 
 async def test_the_legacy_copy_is_gone_from_the_codebase():
@@ -92,13 +94,14 @@ async def test_the_legacy_copy_is_gone_from_the_codebase():
 
 
 async def test_verification_link_points_at_discord_with_the_right_scopes(db):
-    from bot.views.listings import start_post_flow
+    """The optional legacy verifier retains its secure OAuth scopes and state."""
+    from bot.views.verify import start_verification
 
     bot = oauth_bot(db)
     bot.get_guild = lambda _gid: None
     bot.guilds = []
     interaction = FakeInteraction(bot, ADMIN_ID)
-    await start_post_flow(interaction)
+    await start_verification(interaction)
 
     button = interaction.response.sent[-1]["view"].children[0]
     fields = parse_qs(urlparse(button.url).query)
@@ -111,8 +114,9 @@ async def test_verification_link_points_at_discord_with_the_right_scopes(db):
     assert fields["state"] == [row.state]  # the live session, not a guessable value
 
 
-async def test_without_oauth_configured_it_says_so_instead_of_demanding_the_bot(db):
+async def test_quick_post_works_without_oauth_configured(db):
     from bot.views.listings import start_post_flow
+    from bot.views.verify import start_verification
 
     bot = FakeBot(db)
     bot.application_id = 1
@@ -121,7 +125,13 @@ async def test_without_oauth_configured_it_says_so_instead_of_demanding_the_bot(
     interaction = FakeInteraction(bot, ADMIN_ID)
     await start_post_flow(interaction)
     sent = interaction.response.sent[-1]
-    assert "not ready yet" in sent["embed"].description
+    assert "No OAuth" in sent["content"]
+    assert "Post / Repost Free" in [c.label for c in sent["view"].children]
+
+    # Legacy verification is still optional and reports missing configuration.
+    explicit = FakeInteraction(bot, ADMIN_ID)
+    await start_verification(explicit)
+    assert "not ready yet" in explicit.response.sent[-1]["embed"].description
 
 
 # ---------------------------------------------------------------- 3-7. state security
@@ -482,7 +492,7 @@ async def test_a_connected_server_never_hides_the_botless_route(db, config):
 
     view = interaction.response.sent[-1]["view"]
     labels = [c.label for c in view.children if getattr(c, "label", None)]
-    assert "Refresh Servers" in labels
+    assert "Post / Repost Free" in labels and "Manage Connected Servers" in labels
 
 
 # ---------------------------------------------------------------- 10. the whole journey
@@ -507,7 +517,7 @@ def _botless_bot(db):
 
 
 async def test_journey_verify_pick_publish_and_manage_without_the_bot(db, config):
-    """Post Server Ad -> verify -> pick -> invite -> publish -> manage, bot absent throughout."""
+    """Default Quick Post stays separate from the supported legacy OAuth journey."""
     from bot.views.listings import ListingFormView, start_post_flow
     from bot.views.verify import show_verified_servers
 
@@ -519,12 +529,13 @@ async def test_journey_verify_pick_publish_and_manage_without_the_bot(db, config
         listings_channel=lambda: None,
     )
 
-    # 1. the entry point offers verification, not an install
+    # 1. The normal entry point remains no-auth Quick Post.
     first = FakeInteraction(bot, ADMIN_ID)
     await start_post_flow(first)
-    assert "Choose My Server" in [c.label for c in first.response.sent[-1]["view"].children if getattr(c, "label", None)]
+    assert "Post / Repost Free" in [c.label for c in first.response.sent[-1]["view"].children if getattr(c, "label", None)]
+    assert "No OAuth" in first.response.sent[-1]["content"]
 
-    # 2. OAuth completes out of band; the callback can refresh the same message automatically
+    # 2. An existing explicitly initiated legacy OAuth session still works.
     await _verify(db)
     second = FakeInteraction(bot, ADMIN_ID)
     await show_verified_servers(second)

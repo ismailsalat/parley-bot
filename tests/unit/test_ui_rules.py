@@ -62,7 +62,7 @@ async def test_a_stored_invalid_emoji_is_never_rendered(db):
 
     config, notes = apply_overrides(default_config(), {"panels.buttons": {"post": {"label": "Post", "emoji": "←"}}})
     assert any("valid Discord button emoji" in n for n in notes)
-    assert config.button("post")[1] is None
+    assert config.button("post")[1] == default_config().button("post")[1] == "📣"
 
 
 def test_button_styles_can_be_customized_within_the_system():
@@ -127,7 +127,7 @@ def test_grey_is_navigation_only(db):
 
 
 def test_grey_buttons_are_navigation_or_intentionally_low_emphasis():
-    allowed = {"back", "home", "directory", "refresh", "relist", "network_help", "add_bot"}
+    allowed = {"back", "home", "directory", "refresh", "relist", "network_help", "add_bot", "quick_relist", "trust"}
     for key, spec in DEFAULT_BUTTONS.items():
         if spec["style"] == "secondary":
             assert key in allowed, key
@@ -178,7 +178,7 @@ async def test_user_screens_use_valid_emoji_and_colours(db):
     # Product-significant colours are stable even if appearance settings drift.
     home = control_panel(bot)[1]
     by_label = {item.label: item for item in buttons(home)}
-    assert by_label["Post Server Ad"].style is discord.ButtonStyle.primary
+    assert by_label["Post a Server Free"].style is discord.ButtonStyle.primary
     assert by_label["Find Partners"].style is discord.ButtonStyle.success
     assert by_label["My Partner Posts"].style is discord.ButtonStyle.success
     listing_buttons = buttons(listing_message_kwargs(bot, listing)["view"])
