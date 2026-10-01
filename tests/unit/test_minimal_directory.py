@@ -14,7 +14,11 @@ def test_public_directory_footer_is_small(db):
     bot = FakeBot(db)
     content, view = listings_panel(bot)
     assert _labels(view) == ["Post a Server Free", "My Server Listings", "Relist"]
-    assert content == "# 📣 Server Directory\n*Browse servers, join communities, or request partnerships.*"
+    assert content == (
+        "# 📣 Parley Server Directory\n"
+        "Discover new communities by interest. **Quick Post is free — no OAuth or bot installation.**\n"
+        "Unconnected submissions are reviewed. Connected managers can request approved partnerships."
+    )
     buttons = [getattr(child, "item", child) for child in view.children]
     relist = buttons[-1]
     assert str(relist.emoji) == "🔄"
