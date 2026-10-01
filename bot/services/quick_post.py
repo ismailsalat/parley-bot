@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config.runtime import RuntimeConfig
 from bot.database import repository
-from bot.database.models import Guild, Listing, ListingStatus
+from bot.database.models import Listing, ListingStatus
 from bot.services import listings, moderation
 from bot.services.errors import Conflict, CooldownActive, ValidationError
 from bot.utils.helpers import format_duration

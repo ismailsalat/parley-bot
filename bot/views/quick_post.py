@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 import discord
 
 from bot.database import repository
-from bot.database.models import ListingStatus
 from bot.services import listings as listing_service
 from bot.services import quick_post as quick_service
 from bot.services.errors import ParleyError, ValidationError

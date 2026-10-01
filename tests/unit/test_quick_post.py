@@ -2,10 +2,9 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy.exc import IntegrityError
 
 from bot.database import repository
-from bot.database.models import Listing, ListingStatus
+from bot.database.models import ListingStatus
 from bot.services import listings, quick_post
 from bot.services.errors import Conflict, CooldownActive, ValidationError
 
