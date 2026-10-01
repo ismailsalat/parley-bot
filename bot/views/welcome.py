@@ -443,15 +443,49 @@ def _hub_channel_url(bot: ParleyBot, channel_id: int | None) -> str | None:
 
 
 def welcome_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
-    """Start Here: one obvious partnership CTA, with directory tools secondary."""
+    """Trust-first hub: advertise without authorizing, then explore optional tools."""
     directory_url = _hub_channel_url(bot, bot.runtime.hub.listings_channel_id)
     view = persistent_view(
-        add_bot_button(bot, row=0),
+        action_button(bot, "post", style=discord.ButtonStyle.primary, row=0),
         action_button(bot, "find", style=discord.ButtonStyle.success, row=0),
-        discord.ui.Button(label="Server Directory", url=directory_url, row=0) if directory_url else None,
-        action_button(bot, "post", style=discord.ButtonStyle.primary, row=1),
+        discord.ui.Button(label="Browse Directory", url=directory_url, row=1) if directory_url else None,
+        action_button(bot, "trust", style=discord.ButtonStyle.secondary, row=1),
+        add_bot_button(bot, row=2),
     )
     return templates.render(bot.runtime, "welcome"), view
+
+
+@register_action("trust")
+async def trust_and_safety(interaction: discord.Interaction) -> None:
+    """Explain exactly what Quick Post and an optional installation authorize."""
+    bot = get_bot(interaction)
+    content = (
+        "## 🛡️ Parley · Privacy & Safety\n\n"
+        "**To list a server:** No OAuth account authorization, no bot installation, "
+        "and no access to the advertised server is needed. Paste a public invite; "
+        "staff review the submission before it appears. The invite is not proof "
+        "that you own the server.\n\n"
+        "**If you choose to install Parley:** Discord shows the requested bot "
+        "permissions. Parley needs access to agreed listing/partnership channels "
+        "to publish messages and uses server/member information for management checks. "
+        "The bot does **not** require Administrator permission for the normal install.\n\n"
+        "**Partner ads:** Parley posts only to channels selected by server managers "
+        "for partnerships accepted by both communities. Connecting does not "
+        "automatically enroll your server in mass advertising.\n\n"
+        "**Your control:** Managers can adjust their Network channel, decline "
+        "partnerships, and remove Parley. If a listing misrepresents your "
+        "community, ask Parley staff to review or remove it.\n\n"
+        "-# No bot can guarantee that every advertised community is safe. "
+        "Use Discord's own safety tools when joining new servers."
+    )
+    await show_screen(
+        interaction, content,
+        view=persistent_view(
+            action_button(bot, "post", row=0),
+            action_button(bot, "network_help", row=0),
+            home_button(bot, row=1),
+        ),
+    )
 
 
 @register_action("network_help")

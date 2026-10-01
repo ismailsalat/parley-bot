@@ -220,18 +220,21 @@ class PostServerPickerView(OwnedView):
             self.add_item(previous)
             self.add_item(next_button)
 
-        # Parley being installed somewhere must never be the only way to list a
-        # server: any other server can still be listed through verification.
-        another = discord.ui.Button(label="Refresh Servers", emoji="🔄", style=discord.ButtonStyle.secondary, row=2)
+        # More connected servers require installation; Quick Post remains
+        # available separately on the public Post a Server Free entry.
+        another = discord.ui.Button(label="Add Another Server", emoji="➕", style=discord.ButtonStyle.secondary, row=2)
         another.callback = self._verify_another  # type: ignore[method-assign]
         self.add_item(another)
 
     async def _verify_another(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction, thinking=False)
-        from bot.views.verify import start_verification
+        from bot.views.welcome import add_bot_button
 
         self.stop()
-        await start_verification(interaction, force=True)
+        await show_screen(
+            interaction, "Install Parley in another server you manage, then reopen Connected Servers.",
+            view=persistent_view(add_bot_button(self.bot), action_button(self.bot, "post")),
+        )
 
     def embed(self) -> discord.Embed:
         embed = discord.Embed(
@@ -269,22 +272,6 @@ class PostServerPickerView(OwnedView):
         await edit_response(interaction, content=None, embed=self.embed(), view=self)
 
 
-def _verify_another_button(row: int | None = None) -> discord.ui.Button:
-    """The always-available route to listing a server Parley isn't in."""
-    button = discord.ui.Button(
-        label="Refresh Servers", emoji="🔄", style=discord.ButtonStyle.secondary, row=row
-    )
-
-    async def callback(interaction: discord.Interaction) -> None:
-        await acknowledge(interaction, thinking=False)
-        from bot.views.verify import start_verification
-
-        await start_verification(interaction, force=True)
-
-    button.callback = callback  # type: ignore[method-assign]
-    return button
-
-
 @register_action("post", "connect")
 async def start_post_flow(interaction: discord.Interaction) -> None:
     bot = get_bot(interaction)
@@ -299,8 +286,18 @@ async def start_post_flow(interaction: discord.Interaction) -> None:
         await open_listing_form(interaction, guild)
         return
 
-    # In DMs / the Parley hub: servers where Parley is installed are offered directly,
-    # and anything else goes through "Verify My Servers", which needs no bot at all.
+    # In DMs / the Parley hub, prioritize a trust-first Quick Post instead of
+    # an OAuth login. Connected owners can explicitly choose their old picker.
+    from bot.views.quick_post import show_quick_start
+    await show_quick_start(interaction)
+
+
+async def open_connected_picker(interaction: discord.Interaction) -> None:
+    """Connected-only picker. No account-wide OAuth or read-all-servers prompt."""
+    bot = get_bot(interaction)
+    user = interaction.user
+    # Previously authorized disconnected listings remain reachable via My Servers;
+    # the primary Connected flow is deliberately about installed guilds only.
     # Existing verified listings stay manageable even after Parley is removed.
     candidates = [
         g for g in await permissions.manageable_guilds(bot, user.id)
@@ -351,16 +348,21 @@ async def start_post_flow(interaction: discord.Interaction) -> None:
             picked,
             placeholder="Choose a listing",
         )
-        view.add_item(_verify_another_button())
+        from bot.views.welcome import add_bot_button
+        install = add_bot_button(bot)
+        if install is not None:
+            view.add_item(install)
         await show_screen(interaction, embed=embed, view=view)
         return
 
     if not candidates:
-        # Listing never requires installing Parley: prove Manage Server with a
-        # read-only Discord login instead.
-        from bot.views.verify import start_verification
-
-        await start_verification(interaction)
+        from bot.views.welcome import add_bot_button
+        await show_screen(
+            interaction,
+            "## Connect a Server\nInstall Parley in a server where you have **Manage Server**. "
+            "Then use **Manage Connected Servers** again. Quick Post never requires installation.",
+            view=persistent_view(add_bot_button(bot), action_button(bot, "post")),
+        )
         return
 
     view = PostServerPickerView(bot, user.id, candidates, existing)
@@ -429,6 +431,21 @@ async def open_listing_form(
     async with bot.db.session() as session:
         await moderation.ensure_allowed(session, bot.runtime, guild_ids=[guild.id], user_id=user_id)
         existing = await repository.get_listing(session, guild.id)
+
+    if existing is not None and existing.quick_submitted_by is not None:
+        # Now (and only now) a real Manage Server check has passed in this connected guild.
+        async with bot.db.session() as session:
+            live = await repository.get_listing(session, guild.id)
+            if live is not None and live.quick_submitted_by is not None:
+                live.quick_submitted_by = None
+                live.accepting_partnerships = False  # admin opts in intentionally
+                await repository.upsert_guild(
+                    session, guild_id=guild.id, name=guild.name,
+                    icon_url=str(guild.icon.url) if guild.icon else None,
+                    member_count=guild.member_count or 0, connected_by=user_id,
+                )
+                await repository.replace_contacts(session, guild.id, [user_id])
+        existing.quick_submitted_by = None
 
     if existing is not None and existing.status in ListingStatus.LIVE:
         if return_to_network:
@@ -1401,6 +1418,8 @@ def review_payload(bot: ParleyBot, listing: Listing, guild_name: str, member_cou
     header.add_field(name="Category", value=category.replace(",", ", ") or "—")
     if listing.pending_submitted_by:
         header.add_field(name="Submitted by", value=f"<@{listing.pending_submitted_by}>", inline=False)
+    if listing.quick_submitted_by is not None:
+        header.add_field(name="Submission type", value="Unverified Quick Post — invite does not prove control", inline=False)
     if listing.is_test:
         header.add_field(name="Test", value="🧪 Created in TEST mode", inline=False)
     if edit:
@@ -1465,6 +1484,8 @@ async def review(interaction: discord.Interaction, guild_id: int, approve: bool,
             session, guild_id=guild_id, approve=approve, moderator_id=interaction.user.id, now=utcnow(), revision=revision
         )
         contacts = await repository.get_contact_ids(session, guild_id)
+        if listing.quick_submitted_by is not None and listing.quick_submitted_by not in contacts:
+            contacts.append(listing.quick_submitted_by)  # notify unverified submitter, NOT partnership authority
         stored = await repository.get_guild(session, guild_id)
     name = stored.name if stored else str(guild_id)
 

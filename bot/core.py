@@ -31,7 +31,7 @@ from bot.utils.mentions import safe_allowed_mentions
 log = logging.getLogger(__name__)
 
 JOIN_CHANNEL_NAMES = ("general", "start-here", "welcome", "bot-commands", "bots", "commands", "chat")
-VIEW_MODULES = ("bot.views.network","bot.views.partner_posts",  "bot.views.admin.settings", "bot.views.admin.setup", "bot.views.admin.test_center")
+VIEW_MODULES = ("bot.views.quick_post", "bot.views.network","bot.views.partner_posts",  "bot.views.admin.settings", "bot.views.admin.setup", "bot.views.admin.test_center")
 TOP_LEVEL_ACTION_ID = re.compile(r"^wp:act:(?P<action>[a-z_]+)$")
 INTERACTION_ROUTING_REVISION = "2026-09-25-static-router-r1"
 

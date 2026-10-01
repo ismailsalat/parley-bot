@@ -23,7 +23,7 @@ HARD_MIN_NETWORK_INTERVAL_MINUTES = 15
 
 DEFAULT_BUTTONS: dict[str, dict[str, str | None]] = {
     # Label, emoji and colour of every user-facing button.
-    "post": {"label": "Post Server Ad", "emoji": None, "style": "primary"},
+    "post": {"label": "Post a Server Free", "emoji": "📣", "style": "primary"},
     "connect": {"label": "Connect This Server", "emoji": None, "style": "primary"},
     "find": {"label": "Find Partners", "emoji": "🤝", "style": "success"},
     "servers": {"label": "My Server Listings", "emoji": None, "style": "primary"},
@@ -57,6 +57,8 @@ DEFAULT_BUTTONS: dict[str, dict[str, str | None]] = {
     "back": {"label": "Back", "emoji": "⬅️", "style": "secondary"},
     "home": {"label": "Home", "emoji": "🏠", "style": "secondary"},
     "directory": {"label": "All Listings", "emoji": None, "style": "secondary"},
+    "quick_relist": {"label": "Repost My Free Ad", "emoji": "🔄", "style": "secondary"},
+    "trust": {"label": "Privacy & Safety", "emoji": "🛡️", "style": "secondary"},
     "settings": {"label": "Settings", "emoji": "\u2699\uFE0F", "style": "primary"},
 }
 
@@ -67,7 +69,7 @@ CUSTOMIZABLE_BUTTONS = (
     "post", "connect", "find", "servers", "requests", "looking", "partner_posts",
     "network", "network_help", "perks", "join", "request", "view_ad", "next", "edit", "edit_ad", "edit_info",
     "partnerships", "preview", "self_post", "refresh", "relist", "publish", "remove",
-    "accept", "decline", "add_bot", "support", "rules", "website", "directory",
+    "accept", "decline", "add_bot", "support", "rules", "website", "directory", "trust",
 )
 
 MODES = ("test", "live", "off")
@@ -91,8 +93,9 @@ class BotConfig:
 @dataclass(frozen=True)
 class ListingConfig:
     # Standard listings keep the existing cooldown. Connected servers get a shorter cooldown.
-    refresh_cooldown_minutes: int = 30
-    connected_refresh_cooldown_minutes: int = 10
+    refresh_cooldown_minutes: int = 1440  # unconnected Quick Posts: 24 hours
+    connected_refresh_cooldown_minutes: int = 30  # connected managers
+    quick_post_cooldown_minutes: int = 1440  # separate, so old saved settings cannot shorten free posts
     max_ad_length: int = 1800
     categories: tuple[str, ...] = ("Gaming", "Anime", "Social", "Community", "Roleplay", "Creator")
     max_categories: int = 1
@@ -145,35 +148,39 @@ class NetworkConfig:
 class PanelConfig:
     listings_panel_enabled: bool = True
     listings_panel_text: str = (
-        "# 📣 Server Directory\n"
-        "*Browse servers, join communities, or request partnerships.*"
+        "# 📣 Parley Server Directory\n"
+        "Discover new communities by interest. **Quick Post is free — no OAuth or bot installation.**\n"
+        "Unconnected submissions are reviewed. Connected managers can request approved partnerships."
     )
     looking_panel_enabled: bool = True
     looking_panel_text: str = (
         "# 🤝 Partner Board\n"
         "*For servers actively looking for a partnership right now.*\n\n"
-        "**Before you post**\n"
-        "`01` Add Parley to the server you want to represent.\n"
-        "`02` Check your **DMs from Parley** and finish that server's setup.\n"
-        "`03` Make sure **Partnerships** are turned on for that listing.\n\n"
+        "**To propose a partnership**\n"
+        "`01` Add Parley to a server you manage.\n"
+        "`02` Configure the channel for approved partner ads.\n"
+        "`03` Choose an available partner and send a request.\n\n"
         "**Find Partners** browses the board. **My Partner Posts** lets you choose which of your servers to advertise.\n\n"
         "-# Manage several servers? Parley always asks which server you want to use."
     )
     welcome_panel_enabled: bool = True
     welcome_panel_text: str = (
         "# 👋 Welcome to Parley\n"
-        "*Connect. Partner. Exchange ads.*\n\n"
-        "**Simple setup**\n"
-        "`01` **Add Parley** to the server you manage.\n"
-        "`02` Press **Find Partners**. Parley checks that server's ad and Network setup for you.\n"
-        "`03` Choose a server and send a partnership request.\n\n"
-        "When both servers accept, Parley exchanges their ads in the partner-ad channels they chose.\n"
-        "-# **Post Server Ad** is also available if you only want to manage your public directory ad."
+        "**Find your next community. Promote your server. Partner by choice.**\n\n"
+        "**Quick Post — free, no authorization**\n"
+        "Paste your invite and description. One unconnected listing per account; repost every 24 hours.\n\n"
+        "**Connected Network — also free**\n"
+        "Server managers can add Parley for faster relisting, multiple servers, and approved ad exchanges.\n"
+        "Nothing is auto-posted into partner servers without both communities agreeing.\n\n"
+        "-# An invite is not proof of ownership. Quick Posts are reviewed before appearing."
     )
     perks_panel_enabled: bool = True
     perks_panel_text: str = (
         "# 📖 How Parley Works\n"
-        "*One server ad. One Network setup. Everything stays in sync.*\n\n"
+        "**Quick Post: no login, installation, or access to your server.**\n"
+        "Paste an invite and description. A moderator reviews your listing before it's shown.\n\n"
+        "**Connected Network: optional.**\n"
+        "Connect a server you manage to relist sooner and manage partnerships.\n\n"
         "**1 · Add Parley**\n"
         "Add Parley to a server you manage. The owner is not required — **Administrator** or **Manage Server** can manage Parley too.\n\n"
         "**2 · Server Directory**\n"
@@ -206,8 +213,8 @@ class PanelConfig:
     )
 
     # Start Here may make one intentional announcement when the panel is first created.
-    welcome_ping_everyone: bool = True
-    welcome_ping_role_ids: tuple[int, ...] = (1552864166115549224,)
+    welcome_ping_everyone: bool = False  # trust-first: never mass ping by default
+    welcome_ping_role_ids: tuple[int, ...] = ()  # only ping opted-in roles an admin chooses
     # Kept only so older saved settings continue to load. Public panels no longer render banner art.
     panel_images_enabled: bool = False
     send_join_message: bool = True
@@ -290,7 +297,8 @@ class MessagesConfig:
     )
     help: str = (
         "## 📖 How {bot_name} Works\n"
-        "**Add Parley** to a server you manage, then use **Find Partners**. Parley checks that server's ad and Network setup and guides you through anything missing.\n\n"
+        "**Quick Post:** paste an invite to list one community with no OAuth and no installation. Every submission is reviewed. Repost once per 24 hours.\n\n"
+        "**Connected Network:** install Parley in a server you manage to enable faster relisting and mutual, approved partnerships.\n\n"
         "**Server Directory** - one synced public ad per server.\n"
         "**Network** - choose where accepted partners' ads are delivered.\n"
         "**Partnerships** - when both servers accept, Parley exchanges their approved ads through those chosen channels.\n"
@@ -434,6 +442,7 @@ def sanitize(config: RuntimeConfig) -> tuple[RuntimeConfig, list[str]]:
         max_contacts=_clamp(config.listings.max_contacts, 1, 25),
         refresh_cooldown_minutes=max(0, config.listings.refresh_cooldown_minutes),
         connected_refresh_cooldown_minutes=max(0, config.listings.connected_refresh_cooldown_minutes),
+        quick_post_cooldown_minutes=max(1440, config.listings.quick_post_cooldown_minutes),
         expiration_days=max(0, config.listings.expiration_days),
         minimum_member_options=tuple(min_options[:DISCORD_SELECT_OPTION_LIMIT]),
         find_page_size=_clamp(config.listings.find_page_size, 1, 4),

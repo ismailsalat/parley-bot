@@ -1,8 +1,8 @@
 # PARLEY
 
-**Connect once. Post once. Find partners. Talk to people.**
+**Discover servers. List for free. Connect only when you want partnerships.**
 
-Parley is a Discord bot for server advertising and partnerships. Server owners list their server once, their ad appears in a shared listings channel, and other servers can find them and request a partnership with one button. Everything is buttons, menus and DMs.
+Parley is a Discord community directory and opt-in partnership network. People can submit a public server invite for staff review without installing or authorizing Parley. Connected server owners list their server once, their ad appears in a shared listings channel, and other servers can find them and request a partnership with one button. Everything is buttons, menus and DMs.
 
 You only ever put **two things** in a file: the bot token and (on Railway) the database. Everything else is set up inside Discord with **/setup** and **/settings**.
 
@@ -52,16 +52,21 @@ After that, all configuration happens in Discord. No more visits to Railway Vari
 
 If the DM doesn't arrive, use **OAuth2 → URL Generator** with scopes `bot` + `applications.commands` and the permissions below.
 
-### Listing a server (no bot required)
+### Quick Post (no authorization or installation required)
 
-Listing a server never requires installing Parley. **Post Server Ad** offers **Verify My Servers**:
-a read-only Discord login (`identify` + `guilds`) that tells Parley which servers you manage. You
-pick one, paste an invite, and the listing goes live with Parley in none of your servers.
+Inside Parley's main server, click **Post a Server Free → Post / Repost Free**.
+Paste a Discord invite, choose a category, enter a short link-free description, and confirm.
 
-Adding Parley stays optional and unlocks the Connected perks (faster Relists, Find Partners,
-Partner Board posts, the Parley Network, Auto Partner, in-server partnership controls, live metadata).
+- **No OAuth, account-wide server access, or bot install.** Parley reads public invite metadata only.
+- **One unconnected listing per user**; approved ads can be reposted once per 24 hours.
+- **Every Quick Post goes to the configured staff review channel** before publication.
+- Quick Post **does not verify ownership**. A submitter is not a partnership contact, server manager, or authorized representative.
+- Connect Parley in a server you manage to claim its listing using live Discord Manage Server permission. Connected management supports multiple servers, shorter relist cooldowns, and consent-based ad exchange.
 
-To turn verification on, set these (the secret belongs in Railway variables, never in git):
+**Staff setup required:** configure the Parley log/review channel in `/setup`. Without it Quick Post refuses new submissions.
+
+Existing OAuth verification is retained for backward compatibility but is no longer the entry point. You do **not** need to enable it for Quick Post. The following OAuth variables are only for operators who deliberately keep the legacy verification feature:
+
 
 | Variable | Value |
 |---|---|
@@ -183,7 +188,7 @@ Every change applies immediately, without a restart. Every section has **Reset t
 - **Under every directory listing:** Join Server · Request Partnership
 - **Partner Board:** only servers actively looking for partners appear here; posts use View Server · Request Partnership
 
-When an action starts in the **Parley hub or DMs**, Parley asks which manageable server you want to use so it never silently chooses the wrong one. Inside your own server, that server is already the clear context. Server-choice screens only show servers where Parley is installed and you currently have **Administrator** or **Manage Server**.
+In the **Parley hub or DMs**, **Post a Server Free** opens the unverified Quick Post flow first. **Manage Connected Servers** explicitly opens a picker of servers where Parley is installed and the user has **Administrator** or **Manage Server**. Inside an installed guild, the bot uses that guild as the context. No server is silently chosen. See `TRUST_AND_SAFETY.md` for an honest explanation of permissions and what Quick Posting does *not* authorize.
 
 Partnership requests are also multi-server aware. If you can represent more than one listed server, Parley asks which server is sending the request, shows a clear **From → To** confirmation, and lets you change the source before sending. Duplicate requests name both servers so a second admin can immediately see that another admin may already have sent it. A configurable server-wide cooldown prevents two admins from firing requests too quickly.
 

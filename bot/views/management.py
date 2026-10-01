@@ -168,11 +168,9 @@ async def show_my_servers(interaction: discord.Interaction) -> None:
         stored = await repository.get_guilds(session, [row.guild_id for row in rows])
 
     if not rows:
-        await reply(
-            interaction,
-            "You don't have a listed server yet.",
-            view=persistent_view(action_button(bot, "post")),
-        )
+        # Free submitters are deliberately NOT managers or partnership contacts.
+        from bot.views.quick_post import show_quick_start
+        await show_quick_start(interaction)
         return
 
     def name_for(guild_id: int) -> str:
@@ -653,7 +651,8 @@ async def relist_from_anywhere(interaction: discord.Interaction) -> None:
         ]
         stored = await repository.get_guilds(session, [row.guild_id for row in rows])
     if not rows:
-        await reply(interaction, "You don't have a listed server yet.", view=persistent_view(action_button(bot, "post")))
+        from bot.views.quick_post import show_quick_start
+        await show_quick_start(interaction)
         return
     from bot.views.partnership import GuildPickerView
 

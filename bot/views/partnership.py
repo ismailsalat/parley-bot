@@ -108,6 +108,8 @@ def listing_message_kwargs(bot: ParleyBot, listing: Listing) -> dict:
     kwargs = advertisement_kwargs(listing.advertisement_text)
     if listing.is_test and len(kwargs["content"]) + len(TEST_LISTING_NOTE) + 1 <= 2000:
         kwargs["content"] += "\n" + TEST_LISTING_NOTE
+    if listing.quick_submitted_by is not None:
+        kwargs["content"] = "-# 📣 Community listing · Not owner-verified\n" + kwargs["content"]
     view = listing_components(bot, listing)
     kwargs["view"] = view if view is not None else discord.utils.MISSING
     return kwargs
