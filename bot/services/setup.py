@@ -9,12 +9,18 @@ new read-only #💎・parley-perks channel. Nothing here requires Administrator.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 
 import discord
 
 log = logging.getLogger(__name__)
+
+# Automatic Setup and the panel service's startup upgrade both create channels.
+# Serialize their find/create operations to avoid creating two #ad-approvals
+# channels when setup and recovery execute at about the same time.
+_CHANNEL_CREATION_LOCK = asyncio.Lock()
 
 
 @dataclass(frozen=True)
@@ -137,13 +143,111 @@ def can_auto_setup(guild: discord.Guild) -> bool:
     return guild.me.guild_permissions.manage_channels
 
 
-def find_existing(guild: discord.Guild, slot: ChannelSlot) -> discord.TextChannel | None:
-    """Reuse the recommended name or a legacy name from an older Parley install."""
+def _matching_channels(channels, slot: ChannelSlot) -> list[discord.TextChannel]:
     names = {slot.name, *slot.legacy_names}
-    for channel in guild.text_channels:
-        if channel.name in names:
-            return channel
-    return None
+    return [
+        channel for channel in channels
+        if channel.name in names
+        and getattr(channel, "type", discord.ChannelType.text) in (discord.ChannelType.text, discord.ChannelType.news)
+    ]
+
+
+def find_existing(guild: discord.Guild, slot: ChannelSlot, *, preferred_id: int = 0) -> discord.TextChannel | None:
+    """Reuse the recommended name or a legacy name from an older Parley install."""
+    matches = _matching_channels(guild.text_channels, slot)
+    if not matches:
+        return None
+    # Preserve a previously configured channel, especially if it already has
+    # pending approvals. Otherwise use the oldest ID, not channel sidebar order.
+    return next((c for c in matches if c.id == preferred_id), min(matches, key=lambda c: c.id))
+
+
+async def get_or_create_channel(
+    guild: discord.Guild,
+    slot: ChannelSlot,
+    staff_roles: list[discord.Role],
+    *,
+    preferred_id: int = 0,
+) -> tuple[discord.TextChannel, bool]:
+    """Atomically reuse a channel or create it, even if the gateway cache lags.
+
+    Discord's REST channel list is checked just before creating when the cache
+    has no match. On REST failure we *do not create*: that could duplicate a
+    channel that the websocket hasn't delivered yet.
+    """
+    async with _CHANNEL_CREATION_LOCK:
+        existing = find_existing(guild, slot, preferred_id=preferred_id)
+        if existing is not None:
+            return existing, False
+
+        fetch_channels = getattr(guild, "fetch_channels", None)
+        if callable(fetch_channels):
+            remote = await fetch_channels()
+            matches = _matching_channels(remote, slot)
+            if matches:
+                chosen = next(
+                    (c for c in matches if c.id == preferred_id),
+                    min(matches, key=lambda c: c.id),
+                )
+                return chosen, False
+
+        created = await guild.create_text_channel(
+            slot.name,
+            topic=slot.topic,
+            overwrites=overwrites_for(slot, guild, staff_roles),
+            reason="Parley automatic setup",
+        )
+        return created, True
+
+
+async def reconcile_duplicate_approvals(guild: discord.Guild, *, canonical_id: int) -> None:
+    """Safely consolidate an accidentally duplicated approvals channel.
+
+    Never erase an approval request or historic staff decision. Delete only
+    channels confirmed empty; rename non-empty extras to archives so there is
+    just one live `ad-approvals` destination. Archived buttons still work.
+    """
+    slot = SLOT_BY_KEY["review_channel_id"]
+    async with _CHANNEL_CREATION_LOCK:
+        channels = list(guild.text_channels)
+        fetch_channels = getattr(guild, "fetch_channels", None)
+        if callable(fetch_channels):
+            try:
+                channels = list(await fetch_channels())
+            except discord.HTTPException as exc:
+                log.warning("setup.approvals_duplicate_scan_failed guild_id=%s: %s", guild.id, exc)
+                return  # cannot prove which channels exist; change nothing
+        duplicates = [c for c in channels if c.name == slot.name and c.id != canonical_id]
+        for extra in duplicates:
+            try:
+                # We must be able to inspect history before declaring it empty.
+                history = getattr(extra, "history", None)
+                if not callable(history):
+                    log.warning("setup.approvals_duplicate_unchecked channel_id=%s", extra.id)
+                    continue
+                has_messages = False
+                async for _message in history(limit=1):
+                    has_messages = True
+                    break
+                if not has_messages:
+                    await extra.delete(reason="Parley: empty duplicate ad-approvals channel")
+                    log.info("setup.approvals_duplicate_removed channel_id=%s", extra.id)
+                else:
+                    # Retain pending approvals and audit history. Renaming only
+                    # affects the display name, never the existing messages.
+                    secure = getattr(extra, "set_permissions", None)
+                    if callable(secure):
+                        await secure(
+                            guild.default_role, view_channel=False,
+                            reason="Parley: keep archived approvals staff-only",
+                        )
+                    await extra.edit(
+                        name=f"ad-approvals-archive-{extra.id % 100000:05d}",
+                        reason="Parley: preserve old approval history; use configured queue",
+                    )
+                    log.warning("setup.approvals_duplicate_archived channel_id=%s", extra.id)
+            except (discord.HTTPException, discord.Forbidden) as exc:
+                log.warning("setup.approvals_duplicate_cleanup_failed channel_id=%s: %s", extra.id, exc)
 
 
 async def _repair_reused_channel(slot: ChannelSlot, channel: discord.TextChannel, guild: discord.Guild) -> None:
@@ -195,29 +299,33 @@ async def _repair_reused_channel(slot: ChannelSlot, channel: discord.TextChannel
         log.warning("setup.permission_repair_failed channel=%s guild_id=%s: %s", channel.name, guild.id, exc)
 
 
-async def automatic_setup(guild: discord.Guild, staff_roles: list[discord.Role]) -> SetupResult:
+async def automatic_setup(
+    guild: discord.Guild,
+    staff_roles: list[discord.Role],
+    *,
+    preferred_channels: dict[str, int] | None = None,
+) -> SetupResult:
     """Create or reuse the recommended channels and enforce the directory lock."""
     result = SetupResult()
     for slot in AUTO_SETUP_SLOTS:
-        existing = find_existing(guild, slot)
-        if existing is not None:
-            result.channels[slot.key] = existing
-            result.reused.append(existing.name)
-            await _repair_reused_channel(slot, existing, guild)
-            continue
         try:
-            channel = await guild.create_text_channel(
-                slot.name,
-                topic=slot.topic,
-                overwrites=overwrites_for(slot, guild, staff_roles),
-                reason="Parley automatic setup",
+            channel, created = await get_or_create_channel(
+                guild, slot, staff_roles,
+                preferred_id=(preferred_channels or {}).get(slot.key, 0),
             )
         except discord.HTTPException as exc:
             log.warning("setup.create_failed channel=%s guild_id=%s: %s", slot.name, guild.id, exc)
             result.failed.append(slot.name)
             continue
         result.channels[slot.key] = channel
-        result.created.append(slot.name)
+        if created:
+            result.created.append(slot.name)
+        else:
+            result.reused.append(channel.name)
+            await _repair_reused_channel(slot, channel, guild)
+    approvals = result.channels.get("review_channel_id")
+    if approvals is not None:
+        await reconcile_duplicate_approvals(guild, canonical_id=approvals.id)
     log.info(
         "setup.automatic guild_id=%s created=%s reused=%s failed=%s",
         guild.id, result.created, result.reused, result.failed,

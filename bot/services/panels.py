@@ -46,6 +46,7 @@ class PanelService:
         # One lock per channel: listing posts and panel moves must never interleave.
         self._listings_lock = asyncio.Lock()
         self._looking_lock = asyncio.Lock()
+        self._aux_channels_lock = asyncio.Lock()
         self._looking_task: asyncio.Task | None = None
         # Discord emits on_raw_message_delete for our own panel moves too. Keep a
         # short TTL so that self-initiated deletes are not mistaken for manual
@@ -85,6 +86,10 @@ class PanelService:
         return self.main_channel(self.bot.runtime.hub.rules_channel_id)
 
     async def ensure_aux_channels(self) -> None:
+        async with self._aux_channels_lock:
+            await self._ensure_aux_channels_locked()
+
+    async def _ensure_aux_channels_locked(self) -> None:
         """Upgrade an EXISTING hub without making the owner rerun /setup.
 
         Only create channels if the bot already has Manage Channels. Never
@@ -108,17 +113,13 @@ class PanelService:
             configured = guild.get_channel(getattr(hub, key) or 0)
             if isinstance(configured, discord.TextChannel):
                 continue
-            existing = setup_service.find_existing(guild, slot)
-            if existing is None:
-                try:
-                    existing = await guild.create_text_channel(
-                        slot.name, topic=slot.topic,
-                        overwrites=setup_service.overwrites_for(slot, guild, roles),
-                        reason="Parley: add approval queue and public rules",
-                    )
-                except discord.HTTPException as exc:
-                    log.error("Could not create %s: %s", slot.name, exc)
-                    continue
+            try:
+                existing, _created = await setup_service.get_or_create_channel(
+                    guild, slot, roles, preferred_id=getattr(hub, key) or 0,
+                )
+            except discord.HTTPException as exc:
+                log.error("Could not create/reuse %s: %s", slot.name, exc)
+                continue
             changes[f"hub.{key}"] = existing.id
             # Repair any reused channel: approvals must be private, rules
             # must be read-only. Failure must never expose a public review queue.
@@ -144,6 +145,11 @@ class PanelService:
             async with self.bot.db.session() as session:
                 await configuration.save(session, changes, actor_id=None)
             await self.bot.settings_changed(refresh_panels=False)
+        # Keep exactly one active staff review channel. A duplicate containing
+        # old approvals is archived, not erased, to preserve pending decisions.
+        review_id = changes.get("hub.review_channel_id", hub.review_channel_id)
+        if review_id:
+            await setup_service.reconcile_duplicate_approvals(guild, canonical_id=review_id)
 
     async def _refresh_how_it_works_channel(self) -> None:
         """Rename the old Parley Perks channel in place on upgrade.

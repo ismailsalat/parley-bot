@@ -158,7 +158,11 @@ class SetupWelcome(Page):
             return
         await edit_response(interaction, content="⏳ Setting up your channels…", view=None, embeds=[])
         staff_roles = [r for r in (self.guild.get_role(rid) for rid in self.bot.runtime.hub.staff_role_ids) if r]
-        result = await setup_service.automatic_setup(self.guild, staff_roles)
+        hub = self.bot.runtime.hub
+        result = await setup_service.automatic_setup(
+            self.guild, staff_roles,
+            preferred_channels={slot.key: getattr(hub, slot.key) for slot in setup_service.SLOTS},
+        )
         await save_hub(
             self.bot, self.guild, {k: c.id for k, c in result.channels.items()}, actor_id=interaction.user.id
         )

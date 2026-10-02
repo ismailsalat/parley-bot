@@ -80,6 +80,15 @@ async def test_healthy_setup(db):
     assert "Database schema" in health.render_details(checks)  # every check is one press away
 
 
+def test_health_summary_remains_short_as_optional_checks_expand():
+    checks = [health.Check(health.OK, "Discord")]
+    checks.extend(health.Check(health.WARN, f"Optional issue {i}", "not configured") for i in range(20))
+    summary = health.render(checks)
+    assert len(summary.splitlines()) <= 14
+    assert "more issue(s)" in summary
+    assert "Optional issue 19" in health.render_details(checks)
+
+
 async def test_not_set_up(db):
     named = by_name(await health.run(HealthBot(db, HubConfig(), {})))
     assert named["Main server"].status == health.FAIL and named["Main server"].fix == "setup"

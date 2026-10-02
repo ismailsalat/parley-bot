@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -87,6 +88,86 @@ async def test_automatic_setup_reuses_legacy_channel_names_without_duplicates():
     assert "💎・parley-perks" not in result.reused
     assert "benefits_channel_id" not in result.channels
     assert "📖・how-parley-works" in created
+
+
+async def test_concurrent_channel_setup_creates_approvals_only_once():
+    """Automatic setup and startup repair must share one find/create lock."""
+    guild = SetupGuild()
+    slot = setup_service.SLOT_BY_KEY["review_channel_id"]
+    results = await asyncio.gather(*(
+        setup_service.get_or_create_channel(guild, slot, []) for _ in range(3)
+    ))
+    assert [name for name, _ in guild.created] == ["📝・ad-approvals"]
+    assert len({channel.id for channel, _created in results}) == 1
+    assert sum(created for _channel, created in results) == 1
+
+
+async def test_channel_setup_checks_discord_when_cache_has_not_updated():
+    """Prefer an existing REST-visible channel to creating a cache duplicate."""
+    guild = SetupGuild()
+    existing = SimpleNamespace(id=899, name="📝・ad-approvals")
+
+    async def fetch_channels():
+        return [existing]
+
+    guild.fetch_channels = fetch_channels
+    channel, created = await setup_service.get_or_create_channel(
+        guild, setup_service.SLOT_BY_KEY["review_channel_id"], [],
+    )
+    assert channel.id == 899 and not created
+    assert guild.created == []
+
+
+async def test_duplicate_review_channel_cleanup_preserves_messages():
+    """Never delete review history; archive nonempty duplicate channels."""
+    guild = SetupGuild(existing=("📝・ad-approvals", "📝・ad-approvals"))
+    canonical, extra = guild.text_channels
+    calls = []
+
+    async def history(*, limit):
+        assert limit == 1
+        yield SimpleNamespace(id=123)
+
+    async def edit(**kwargs):
+        calls.append(("edit", kwargs))
+        extra.name = kwargs["name"]
+
+    async def delete(**kwargs):
+        calls.append(("delete", kwargs))
+
+    extra.history = history
+    extra.edit = edit
+    extra.delete = delete
+    await setup_service.reconcile_duplicate_approvals(guild, canonical_id=canonical.id)
+    assert extra.name.startswith("ad-approvals-archive-")
+    assert [what for what, _ in calls] == ["edit"]
+
+
+async def test_empty_duplicate_review_channel_is_deleted():
+    guild = SetupGuild(existing=("📝・ad-approvals", "📝・ad-approvals"))
+    canonical, extra = guild.text_channels
+    removed = []
+
+    async def empty_history(*, limit):
+        if False:  # keep this an async iterator with no messages
+            yield limit
+
+    async def delete(**kwargs):
+        removed.append(extra.id)
+
+    extra.history = empty_history
+    extra.delete = delete
+    await setup_service.reconcile_duplicate_approvals(guild, canonical_id=canonical.id)
+    assert removed == [extra.id]
+
+
+def test_existing_duplicate_prefers_previously_configured_queue():
+    guild = SetupGuild(existing=("📝・ad-approvals", "📝・ad-approvals"))
+    chosen = setup_service.find_existing(
+        guild, setup_service.SLOT_BY_KEY["review_channel_id"],
+        preferred_id=guild.text_channels[1].id,
+    )
+    assert chosen.id == guild.text_channels[1].id
 
 
 def test_channel_permissions():

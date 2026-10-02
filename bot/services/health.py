@@ -68,7 +68,7 @@ def _worst(statuses: list[str]) -> str:
 
 
 def render(checks: list[Check]) -> str:
-    """Short, readable summary. One line per area, then what to do about problems."""
+    """Short summary (at most 14 lines); the Details view remains exhaustive."""
     by_name = {c.name: c for c in checks}
     lines = ["## Parley Health"]
     covered: set[str] = set()
@@ -79,13 +79,34 @@ def render(checks: list[Check]) -> str:
             continue
         lines.append(f"{ICONS[_worst([i.status for i in items])]} {group}")
     rest = [c for c in checks if c.name not in covered]
-    for check in rest:
+    # Keep room for actionable warnings. New optional checks must not turn
+    # this summary into a wall of text (Details remains exhaustive).
+    room = max(0, 10 - len(lines))
+    visible_rest = min(len(rest), room)
+    if len(rest) > visible_rest and visible_rest:
+        visible_rest -= 1  # reserve a line for the omitted-check count
+    for check in rest[:visible_rest]:
         lines.append(f"{ICONS[check.status]} {check.name}")
-    problems = [c for c in checks if c.status != OK]
+    if len(rest) > visible_rest and room:
+        lines.append(f"… {len(rest) - visible_rest} more checks — press Details")
+    # The two optional channels added in 4.0 increased the warning count. Do
+    # not make Health grow forever whenever we add a new check: retain the
+    # at-a-glance groups, prioritize failures, and send the rest to Details.
+    problems = sorted(
+        (c for c in checks if c.status != OK),
+        key=lambda c: 0 if c.status == FAIL else 1,
+    )
     if problems:
-        lines.append("")
-        for check in problems[:5]:
-            lines.append(f"{ICONS[check.status]} {check.name}: {check.detail or 'needs attention'}")
+        available = max(0, 14 - len(lines) - 1)  # reserve one blank line
+        shown = min(len(problems), available)
+        if len(problems) > shown and shown:
+            shown -= 1  # reserve the last slot for an explanation
+        if available:
+            lines.append("")
+            for check in problems[:shown]:
+                lines.append(f"{ICONS[check.status]} {check.name}: {check.detail or 'needs attention'}")
+            if len(problems) > shown:
+                lines.append(f"… {len(problems) - shown} more issue(s) — press Details")
     return "\n".join(lines)[:1990]
 
 
