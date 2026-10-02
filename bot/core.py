@@ -60,6 +60,7 @@ def persistent_items() -> list[type[discord.ui.DynamicItem]]:
     for module in VIEW_MODULES:  # importing registers their action handlers
         importlib.import_module(module)
     from bot.views.listings import ReviewButton
+    from bot.views.admin.moderation import StaffAdButton
     from bot.views.management import ManageButton, ManagementButton
     from bot.views.partnership import RequestPartnershipButton, RequestResponseButton, ViewAdButton
     return [
@@ -67,6 +68,7 @@ def persistent_items() -> list[type[discord.ui.DynamicItem]]:
         ViewAdButton,
         RequestResponseButton,
         ReviewButton,
+        StaffAdButton,
         ManageButton,
         ManagementButton,
     ]
@@ -317,9 +319,21 @@ class ParleyBot(commands.Bot):
         # before accepting new interactions.
         from bot.views import self_post
 
-        recovered = await self_post.restore_abandoned_sessions(self)
-        if recovered:
-            log.info("Recovered %d abandoned direct-post window(s)", recovered)
+        try:
+            recovered = await self_post.restore_abandoned_sessions(self)
+            if recovered:
+                log.info("Recovered %d abandoned direct-post window(s)", recovered)
+        except Exception:
+            log.exception("Legacy posting recovery failed; continuing to private ad cleanup")
+        # A fresh process has lost all in-memory confirmation buttons and message
+        # waiters. Never leave old private draft rooms accessible after a restart.
+        try:
+            from bot.views import temp_ads
+            closed = await temp_ads.cleanup(self, startup=True)
+            if closed:
+                log.info("Recovered %d abandoned private ad draft(s)", closed)
+        except Exception:
+            log.exception("Temporary ad cleanup failed at startup; maintenance will retry")
         # #server-directory is always read-only except for Parley's controlled
         # three-minute, one-message posting window.
         await self.panels.ensure_directory_locked()

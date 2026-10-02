@@ -150,7 +150,7 @@ class PanelConfig:
     listings_panel_text: str = (
         "# 📣 Parley Server Directory\n"
         "Discover new communities by interest. **Quick Post is free — no OAuth or bot installation.**\n"
-        "Unconnected submissions are reviewed. Connected managers can request approved partnerships."
+        "Listings pass safety checks; some ads may require staff review. Connected managers can request approved partnerships."
     )
     looking_panel_enabled: bool = True
     looking_panel_text: str = (
@@ -168,17 +168,17 @@ class PanelConfig:
         "# 👋 Welcome to Parley\n"
         "**Find your next community. Promote your server. Partner by choice.**\n\n"
         "**Quick Post — free, no authorization**\n"
-        "Paste your invite and description. One unconnected listing per account; repost every 24 hours.\n\n"
+        "Paste your invite, choose one category, and write or paste your ad. One unconnected listing per account; repost every 24 hours.\n\n"
         "**Connected Network — also free**\n"
         "Server managers can add Parley for faster relisting, multiple servers, and approved ad exchanges.\n"
         "Nothing is auto-posted into partner servers without both communities agreeing.\n\n"
-        "-# An invite is not proof of ownership. Quick Posts are reviewed before appearing."
+        "-# An invite is not proof of ownership. Safety checks apply even when automatic publishing is on."
     )
     perks_panel_enabled: bool = True
     perks_panel_text: str = (
         "# 📖 How Parley Works\n"
         "**Quick Post: no login, installation, or access to your server.**\n"
-        "Paste an invite and description. A moderator reviews your listing before it's shown.\n\n"
+        "Write a short ad or paste an existing one. Automatic safety checks always apply; staff approval is configurable.\n\n"
         "**Connected Network: optional.**\n"
         "Connect a server you manage to relist sooner and manage partnerships.\n\n"
         "**1 · Add Parley**\n"

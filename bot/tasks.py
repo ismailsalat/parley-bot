@@ -246,7 +246,17 @@ class BackgroundTasks:
         now = utcnow()
         config = bot.runtime
 
+        # Clean expired private draft rooms even during uninterrupted uptime.
+        # Failure here must not prevent cooldown and network maintenance.
+        try:
+            from bot.views import temp_ads
+            await temp_ads.cleanup(bot)
+        except Exception:
+            log.exception("Private ad room maintenance failed; will retry")
+
         async with bot.db.session() as session:
+            from bot.services import moderation
+            restored_suspensions = await moderation.restore_expired_suspensions(session, now)
             expired_listings = await listing_service.expire_listings(session, config, now)
             expired_info = [
                 (listing.guild_id, listing.channel_id, listing.message_id, await repository.get_contact_ids(session, listing.guild_id))
@@ -258,6 +268,52 @@ class BackgroundTasks:
             await partnerships.expire_requests(session, config, now)
             await repository.delete_expired_cooldowns(session, now)
             await repository.delete_network_posts_before(session, now - timedelta(days=config.network.post_retention_days))
+
+        for restored in restored_suspensions:
+            if restored.status == "active":
+                try:
+                    await bot.panels.publish_listing(restored.guild_id)
+                except discord.HTTPException:
+                    log.exception("Could not republish restored listing %s", restored.guild_id)
+
+        # If Discord went offline between saving an auto-approved ad and
+        # publishing its public message, recover from the durable ACTIVE listing.
+        # Never publish pending, suspended or test-only listings in live mode.
+        if bot.panels.listings_channel() is not None and config.hub.mode != "off":
+            from sqlalchemy import select
+            from bot.database.models import Listing, ListingStatus
+            async with bot.db.session() as session:
+                pending_publication = list(await session.scalars(
+                    select(Listing).where(
+                        Listing.status == ListingStatus.ACTIVE,
+                        Listing.message_id.is_(None),
+                        Listing.self_posted.is_(False),
+                    ).limit(10)
+                ))
+            for waiting in pending_publication:
+                if waiting.is_test != (config.hub.mode == "test"):
+                    continue
+                try:
+                    await bot.panels.publish_listing(waiting.guild_id)
+                except Exception:
+                    log.exception("Failed to recover unpublished ad for guild=%s", waiting.guild_id)
+
+        # Review messages are durable DB records; a failed staff log send must
+        # never silently auto-approve an ad. Retry missing notifications.
+        if bot.log_channel() is not None:
+            async with bot.db.session() as session:
+                due_reviews = await repository.listings_awaiting_review(session, limit=25)
+                due_reviews = [l for l in due_reviews if not l.review_message_id]
+                names = await repository.get_guilds(session, [l.guild_id for l in due_reviews])
+            from bot.views.listings import send_for_review
+            for pending in due_reviews:
+                try:
+                    await send_for_review(
+                        bot, pending,
+                        names[pending.guild_id].name if pending.guild_id in names else str(pending.guild_id),
+                    )
+                except discord.HTTPException:
+                    log.warning("Review notification still unavailable for %s", pending.guild_id)
 
         from bot.views.base import deliver_dms
         from bot.views.management import manage_button

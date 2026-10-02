@@ -1,5 +1,6 @@
 """No-OAuth Quick Posts never confer verified server management rights."""
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 
 import pytest
 
@@ -24,6 +25,7 @@ async def submit(session, config, *, gid=1001, user=2002, at=NOW):
 
 
 async def test_quick_post_has_no_manager_or_partnership_authority(db, config):
+    config = replace(config, listings=replace(config.listings, approval_required=True))
     async with db.session() as session:
         row, result = await submit(session, config)
         assert result == "pending"
@@ -44,6 +46,7 @@ async def test_quick_post_has_no_manager_or_partnership_authority(db, config):
 
 
 async def test_quick_relist_24_hours_after_approval(db, config):
+    config = replace(config, listings=replace(config.listings, approval_required=True))
     async with db.session() as session:
         await submit(session, config)
         await listings.review_listing(
@@ -60,6 +63,7 @@ async def test_quick_relist_24_hours_after_approval(db, config):
 
 
 async def test_rejected_quick_post_can_be_corrected_next_day(db, config):
+    config = replace(config, listings=replace(config.listings, approval_required=True))
     async with db.session() as session:
         await submit(session, config)
         await listings.review_listing(
@@ -79,3 +83,54 @@ def test_quick_descriptions_block_links_and_mentions(config):
         with pytest.raises(ValidationError):
             quick_post.quick_description(bad, config)
     assert quick_post.quick_description("We're a casual gaming club!", config)
+
+
+async def test_quick_auto_publish_without_oauth(db, config):
+    async with db.session() as session:
+        row, outcome = await submit(session, config, gid=4001, user=9001)
+        assert (outcome, row.status) == ("published", ListingStatus.ACTIVE)
+        assert row.pending_submitted_by is None
+        assert (await repository.get_guild(session, 4001)).connected_by is None
+
+
+async def test_quick_edit_does_not_reset_relist_cooldown(db, config):
+    async with db.session() as session:
+        row, _ = await submit(session, config, gid=4002, user=9002)
+        original = row.refreshed_at
+        result, outcome = await quick_post.edit_quick_listing(
+            session, config, guild_id=4002, actor_id=9002,
+            category="Anime", info=guild(4002),
+            invite_url="https://discord.gg/testInvite", description="New text!",
+            now=NOW + timedelta(minutes=2),
+        )
+        assert outcome == "edited"
+        assert result.refreshed_at == original
+        assert result.category == "Anime"
+        with pytest.raises(CooldownActive):
+            await quick_post.edit_quick_listing(
+                session, config, guild_id=4002, actor_id=9002,
+                category="Gaming", info=guild(4002),
+                invite_url="https://discord.gg/testInvite", description="Again!",
+                now=NOW + timedelta(minutes=3),
+            )
+
+
+async def test_risky_link_needs_review_even_when_automatic(db, config):
+    async with db.session() as session:
+        row, result = await quick_post.create_quick_listing(
+            session, config, info=guild(4003), actor_id=9003,
+            invite_url="https://discord.gg/testInvite", description="",
+            raw_ad="Join our gaming server! Website: https://example.org",
+            category="Gaming", now=NOW,
+        )
+        assert (result, row.status) == ("pending", ListingStatus.PENDING)
+
+
+def test_quick_pasted_ad_blocks_impersonation(db, config):
+    info = guild(5000)
+    for bad in ("@everyone join!", "<@12345> join", "https://discord.gg/different"):
+        with pytest.raises(ValidationError):
+            quick_post.prepare_quick_ad(
+                config, info=info, invite_url="https://discord.gg/testInvite",
+                category="Gaming", raw_ad=bad,
+            )

@@ -554,6 +554,9 @@ class PanelService:
             # 4. panel underneath (reposts/deletes the old panel safely).
             await self._repost_panel(LISTINGS_PANEL, channel)
         log.info("listing.published guild_id=%s message_id=%s", guild_id, message.id)
+        if listing.message_id is None:  # first publication, not every relist
+            from bot.views.admin.moderation import post_private_staff_controls
+            await post_private_staff_controls(self.bot, guild_id, "Directory listing")
         return message
 
     async def adopt_self_post(self, guild_id: int, message: discord.Message) -> None:

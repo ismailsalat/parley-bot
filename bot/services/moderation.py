@@ -6,6 +6,7 @@ import re
 import time
 from collections import deque
 from collections.abc import Iterable
+from datetime import timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -112,7 +113,8 @@ async def unblock_user(session: AsyncSession, *, user_id: int, moderator_id: int
 
 
 async def suspend_listing(
-    session: AsyncSession, *, guild_id: int, reason: str | None, moderator_id: int, restore: bool = False
+    session: AsyncSession, *, guild_id: int, reason: str | None, moderator_id: int, restore: bool = False,
+    duration_minutes: int | None = None,
 ) -> Listing:
     listing = await repository.get_listing(session, guild_id)
     if listing is None or listing.status in (ListingStatus.REMOVED,):
@@ -120,18 +122,28 @@ async def suspend_listing(
     if restore:
         if listing.status != ListingStatus.SUSPENDED:
             raise ValidationError("That listing is not suspended.")
-        listing.status = ListingStatus.ACTIVE
-        listing.refreshed_at = utcnow()
+        listing.status = (listing.suspended_from_status if listing.suspended_from_status in
+                          (ListingStatus.ACTIVE, ListingStatus.PENDING, ListingStatus.EXPIRED)
+                          else ListingStatus.ACTIVE)
+        listing.suspended_until = None
+        listing.suspended_from_status = None
+        if listing.status == ListingStatus.ACTIVE:
+            listing.refreshed_at = utcnow()
     else:
         if listing.status == ListingStatus.SUSPENDED:
             raise ValidationError("That listing is already suspended.")
+        if duration_minutes is not None and not 1 <= duration_minutes <= 43_200:
+            raise ValidationError("Suspension duration must be between 1 minute and 30 days.")
+        listing.suspended_from_status = listing.status
         listing.status = ListingStatus.SUSPENDED
+        listing.suspended_until = (utcnow() + timedelta(minutes=duration_minutes)) if duration_minutes else None
         listing.pending_changes = None
         await _cancel_pending_requests(session, guild_id)
     await repository.add_audit(
         session,
         "moderation.restore_listing" if restore else "moderation.suspend_listing",
-        actor_id=moderator_id, guild_id=guild_id, details={"reason": reason},
+        actor_id=moderator_id, guild_id=guild_id,
+        details={"reason": reason, "duration_minutes": duration_minutes},
     )
     return listing
 
@@ -141,12 +153,37 @@ async def staff_remove_listing(session: AsyncSession, *, guild_id: int, reason: 
     if listing is None or listing.status == ListingStatus.REMOVED:
         raise NotFound("That server has no listing.")
     listing.status = ListingStatus.REMOVED
+    listing.suspended_until = None
+    listing.suspended_from_status = None
     listing.pending_changes = None
     await _cancel_pending_requests(session, guild_id)
     await repository.add_audit(
         session, "moderation.remove_listing", actor_id=moderator_id, guild_id=guild_id, details={"reason": reason}
     )
     return listing
+
+
+async def restore_expired_suspensions(session: AsyncSession, now) -> list[Listing]:
+    """Auto-restore only time-limited bans, without approving an unreviewed ad."""
+    from sqlalchemy import select
+    rows = list(await session.scalars(
+        select(Listing).where(
+            Listing.status == ListingStatus.SUSPENDED,
+            Listing.suspended_until.is_not(None),
+            Listing.suspended_until <= now,
+        ).with_for_update()
+    ))
+    restored = []
+    for listing in rows:
+        from_status = listing.suspended_from_status
+        listing.status = from_status if from_status in (
+            ListingStatus.ACTIVE, ListingStatus.PENDING, ListingStatus.EXPIRED
+        ) else ListingStatus.EXPIRED
+        listing.suspended_until = None
+        listing.suspended_from_status = None
+        await repository.add_audit(session, "moderation.suspension_expired", guild_id=listing.guild_id)
+        restored.append(listing)
+    return restored
 
 
 class RateLimiter:

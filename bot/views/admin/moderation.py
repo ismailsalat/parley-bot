@@ -8,11 +8,11 @@ import discord
 
 from bot.database import repository
 from bot.database.models import Listing, ListingStatus
-from bot.services import moderation
+from bot.services import moderation, permissions
 from bot.services.errors import ValidationError
 from bot.utils.helpers import format_members, format_minimum, truncate
 from bot.views.admin.common import ConfirmPage, Field, FieldsModal, Page
-from bot.views.base import acknowledge, reply
+from bot.views.base import acknowledge, reply, handle_error
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -208,7 +208,7 @@ class ServerPage(Page):
         if listing is not None and listing.awaiting_review:
             self.button("Show Review", self._review, emoji="📝", style=discord.ButtonStyle.primary, row=0)
         if listing is not None and listing.status == ListingStatus.ACTIVE:
-            self.button("Suspend", self._action("suspend"), emoji="⛔", style=discord.ButtonStyle.danger, row=1)
+            self.button("Suspend…", self._suspend_menu, emoji="⛔", style=discord.ButtonStyle.danger, row=1)
         if listing is not None and listing.status == ListingStatus.SUSPENDED:
             self.button("Restore", self._action("restore"), emoji="✅", style=discord.ButtonStyle.success, row=1)
         if listing is not None and listing.status not in (ListingStatus.REMOVED,):
@@ -218,6 +218,9 @@ class ServerPage(Page):
         elif self.guild_id != self.bot.runtime.hub.main_guild_id:
             self.button("Ban Server", self._action("ban"), emoji="🚫", style=discord.ButtonStyle.danger, row=1)
         self.nav()
+
+    async def _suspend_menu(self, interaction: discord.Interaction) -> None:
+        await SuspensionPage(self.bot, self.owner_id, self.guild_id, back=self._again).show(interaction)
 
     async def _review(self, interaction: discord.Interaction) -> None:
         from bot.views.listings import review_payload
@@ -258,14 +261,128 @@ class ServerPage(Page):
         return callback
 
 
-async def apply_staff_action(bot: ParleyBot, action: str, guild_id: int, actor_id: int) -> None:
-    """Shared by the Moderation page and /admin. Discord messages follow the database change."""
+class SuspensionPage(Page):
+    title = "Suspend Listing"
+    DURATIONS = (
+        ("1 hour", 60), ("12 hours", 720), ("1 day", 1440),
+        ("3 days", 4320), ("7 days", 10080),
+        ("30 days", 43200), ("Indefinite", None),
+    )
+
+    def __init__(self, bot: ParleyBot, owner_id: int, guild_id: int, *, back) -> None:
+        super().__init__(bot, owner_id, back=back)
+        self.guild_id = guild_id
+
+    def content(self) -> str:
+        return (
+            f"## Suspend server `{self.guild_id}`\n"
+            "Choose how long the listing should be hidden. It will be removed "
+            "from both the directory and partner board. Time-limited suspensions "
+            "restore automatically, but an ad awaiting review stays awaiting review."
+        )
+
+    def build(self) -> None:
+        for index, (label, minutes) in enumerate(self.DURATIONS):
+            self.button(label, self._confirm(label, minutes),
+                        style=discord.ButtonStyle.danger, row=index // 4)
+        self.nav(row=4)
+
+    def _confirm(self, label: str, minutes: int | None):
+        async def callback(interaction: discord.Interaction) -> None:
+            async def apply(inter: discord.Interaction) -> None:
+                await acknowledge(inter)
+                await apply_staff_action(
+                    self.bot, "suspend", self.guild_id, inter.user.id,
+                    duration_minutes=minutes,
+                )
+                await self.back().show(inter, f"✅ Suspended for {label.lower()}.")
+            await ConfirmPage(
+                self.bot, self.owner_id,
+                question=f"Suspend server `{self.guild_id}` for {label.lower()}?",
+                confirm_label="Suspend", on_confirm=apply,
+                back=lambda: SuspensionPage(self.bot, self.owner_id, self.guild_id, back=self.back),
+                danger=True,
+            ).show(interaction)
+        return callback
+
+
+class StaffAdButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"wp:staffad:(?P<action>manage):(?P<gid>\d+)",
+):
+    """Only deployed in the private staff channel; gateway-safe after restarts."""
+
+    def __init__(self, guild_id: int):
+        super().__init__(discord.ui.Button(
+            label="Manage Ad · Remove / Suspend / Ban", emoji="🛡️",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"wp:staffad:manage:{guild_id}",
+        ))
+        self.guild_id = guild_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):  # type: ignore[override]
+        return cls(int(match["gid"]))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        try:
+            if not await permissions.is_staff(interaction.client, interaction.user.id):
+                await reply(interaction, "Only Parley moderators may manage advertisements.")
+                return
+            await ServerPage(
+                interaction.client, interaction.user.id, self.guild_id,
+                back=lambda: ModerationPage(interaction.client, interaction.user.id),
+            ).show(interaction)
+        except Exception as exc:
+            await handle_error(interaction, exc)
+
+
+async def post_private_staff_controls(bot: ParleyBot, guild_id: int, context: str) -> None:
+    """Public components cannot be moderator-invisible: show them privately."""
+    channel = bot.log_channel()
+    if channel is None:
+        return
+    # Never expose moderation controls in a staff channel accidentally visible
+    # to ordinary members; callbacks still independently check permissions.
+    try:
+        public = channel.permissions_for(channel.guild.default_role).view_channel
+    except (AttributeError, TypeError):
+        # Never guess that an unknown channel is private.
+        return
+    if public:
+        log = __import__("logging").getLogger(__name__)
+        log.error("Staff channel %s is public; refusing to send admin controls", channel.id)
+        return
+    view = discord.ui.View(timeout=None)
+    view.add_item(StaffAdButton(guild_id))
+    try:
+        await channel.send(
+            f"🛡️ **Staff tools** · {context} · Guild `{guild_id}`\n"
+            "Private actions for both directory and partner-board advertisements. "
+            "Includes removal, timed suspensions, and server bans.",
+            view=view,
+        )
+    except discord.HTTPException:
+        __import__("logging").getLogger(__name__).exception("Staff controls failed guild=%s", guild_id)
+
+
+async def apply_staff_action(
+    bot: ParleyBot, action: str, guild_id: int, actor_id: int,
+    *, duration_minutes: int | None = None,
+) -> None:
+    """Shared by the Moderation page and /admin. Re-check staff on every action."""
+    # A user may lose a moderator role while an old ephemeral UI stays open.
+    # Never rely only on the permission check used when that UI was created.
+    await permissions.require_staff(bot, actor_id)
     if action == "ban" and guild_id == bot.runtime.hub.main_guild_id:
         raise ValidationError("You can't ban the main Parley server.")
     async with bot.db.session() as session:
         listing = None
         if action == "suspend":
-            listing = await moderation.suspend_listing(session, guild_id=guild_id, reason=None, moderator_id=actor_id)
+            listing = await moderation.suspend_listing(
+                session, guild_id=guild_id, reason=None, moderator_id=actor_id,
+                duration_minutes=duration_minutes,
+            )
         elif action == "restore":
             listing = await moderation.suspend_listing(session, guild_id=guild_id, reason=None, moderator_id=actor_id, restore=True)
         elif action == "remove":

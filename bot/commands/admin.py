@@ -69,11 +69,17 @@ class StaffCommands(commands.Cog):
         await reply(interaction, f"✅ Removed the listing for `{gid}`.")
 
     @admin.command(name="suspend", description="Hide a listing temporarily (or restore it).")
-    @app_commands.describe(guild_id="Server ID", restore="Choose True to lift a suspension")
-    async def suspend(self, interaction: discord.Interaction, guild_id: str, restore: bool = False) -> None:
+    @app_commands.describe(guild_id="Server ID", restore="Choose True to lift a suspension",
+                           hours="Optional suspension duration in hours (1-720). Omit for indefinite.")
+    async def suspend(self, interaction: discord.Interaction, guild_id: str, restore: bool = False, hours: int | None = None) -> None:
         gid = parse_id(guild_id)
+        if hours is not None and not 1 <= hours <= 720:
+            raise ValidationError("Hours must be between 1 and 720.")
         await acknowledge(interaction)
-        await apply_staff_action(self.bot, "restore" if restore else "suspend", gid, interaction.user.id)
+        await apply_staff_action(
+            self.bot, "restore" if restore else "suspend", gid, interaction.user.id,
+            duration_minutes=hours * 60 if hours is not None and not restore else None,
+        )
         await reply(interaction, f"✅ {'Restored' if restore else 'Suspended'} the listing for `{gid}`.")
 
     @admin.command(name="ban-server", description="Ban a server by ID from Parley.")

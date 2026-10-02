@@ -132,3 +132,36 @@ async def test_cooldowns_survive_new_sessions(db, config):
     async with db.session() as session:
         assert await cooldowns.remaining(session, cooldowns.SCOPE_REQUEST_USER, 5, NOW + timedelta(minutes=1))
         assert await repository.delete_expired_cooldowns(session, NOW + timedelta(minutes=3)) == 1
+
+
+async def test_timed_suspension_auto_restores_and_clears(db, config):
+    async with db.session() as session:
+        await make_listing(session, config, GID)
+        listing = await moderation.suspend_listing(
+            session, guild_id=GID, reason="one hour", moderator_id=STAFF,
+            duration_minutes=60,
+        )
+        expiry = listing.suspended_until
+        assert expiry is not None
+    async with db.session() as session:
+        assert not await moderation.restore_expired_suspensions(session, expiry - timedelta(seconds=1))
+    async with db.session() as session:
+        rows = await moderation.restore_expired_suspensions(session, expiry + timedelta(seconds=1))
+        assert len(rows) == 1
+        assert rows[0].status == ListingStatus.ACTIVE
+        assert rows[0].suspended_until is None
+
+
+async def test_temporary_ad_session_database_is_persistent(db):
+    from bot.database.models import TemporaryAdSession
+    from bot.utils.helpers import utcnow
+    now = utcnow()
+    async with db.session() as session:
+        session.add(TemporaryAdSession(
+            channel_id=222, user_id=333, hub_guild_id=444,
+            advertised_guild_id=555, created_at=now,
+            expires_at=now + timedelta(minutes=10),
+        ))
+    async with db.session() as session:
+        record = await session.get(TemporaryAdSession, 222)
+        assert (record.user_id, record.advertised_guild_id) == (333, 555)

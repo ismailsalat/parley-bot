@@ -17,7 +17,7 @@ def test_public_directory_footer_is_small(db):
     assert content == (
         "# 📣 Parley Server Directory\n"
         "Discover new communities by interest. **Quick Post is free — no OAuth or bot installation.**\n"
-        "Unconnected submissions are reviewed. Connected managers can request approved partnerships."
+        "Listings pass safety checks; some ads may require staff review. Connected managers can request approved partnerships."
     )
     buttons = [getattr(child, "item", child) for child in view.children]
     relist = buttons[-1]

@@ -122,6 +122,8 @@ class Listing(Base):
     # One advertisement edit is allowed per Relist cycle.
     last_ad_edit_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default=ListingStatus.ACTIVE, index=True)
+    suspended_until: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    suspended_from_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Created while Parley was in TEST mode: never shown to real users in LIVE mode.
     is_test: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     # A listing the owner posted themselves (keeps their own custom emoji).
@@ -246,6 +248,18 @@ class PanelState(Base):
     panel_type: Mapped[str] = mapped_column(String(30))
     message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
+
+
+class TemporaryAdSession(Base):
+    """Crash-safe temporary private paste channel; never stores unconfirmed ads."""
+    __tablename__ = "temporary_ad_sessions"
+
+    channel_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    hub_guild_id: Mapped[int] = mapped_column(BigInteger)
+    advertised_guild_id: Mapped[int] = mapped_column(BigInteger)
+    user_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 class ModerationBan(Base):
