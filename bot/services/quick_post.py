@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config.runtime import RuntimeConfig
 from bot.database import repository
-from bot.database.models import Listing, ListingStatus
-from bot.services import listings, moderation
+from bot.database.models import AuditLog, Listing, ListingStatus
+from bot.services import cooldowns, listings, moderation
 from bot.services.errors import Conflict, CooldownActive, ValidationError
 from bot.utils.helpers import format_duration
 
@@ -107,6 +107,11 @@ async def create_quick_listing(
     owned = await my_quick_listing(session, actor_id)
     if owned and owned.guild_id != info.guild_id:
         raise Conflict("Quick Post allows one unconnected server per account. Connect Parley to manage additional servers.")
+    # Deleting a listing frees the slot, not the posting cooldown. This persists
+    # across bot restarts and prevents delete/recreate cycles from flooding feeds.
+    wait = await cooldowns.remaining(session, "quick_post_deleted", actor_id, now)
+    if wait is not None:
+        raise CooldownActive(f"You can submit another Free Listing in {format_duration(wait)}.", wait)
 
     # PostgreSQL locks the existing guild row during relist/replace decisions.
     previous = await session.scalar(
@@ -114,7 +119,24 @@ async def create_quick_listing(
     )
     if previous is not None:
         if previous.quick_submitted_by != actor_id:
-            raise Conflict("This server has an existing listing. Only its verified managers can change it.")
+            # A deleted unverified listing may be restored by its ORIGINAL
+            # submitter after cooldown. Audit history is durable even though
+            # quick_submitted_by was cleared to free their one-listing slot.
+            restore_allowed = False
+            if previous.status == ListingStatus.REMOVED and previous.quick_submitted_by is None:
+                last_action = await session.scalar(
+                    select(AuditLog).where(AuditLog.guild_id == info.guild_id)
+                    .order_by(AuditLog.id.desc()).limit(1)
+                )
+                stored_guild = await repository.get_guild(session, info.guild_id)
+                restore_allowed = bool(
+                    last_action is not None and last_action.action == "listing.quick_deleted"
+                    and last_action.actor_id == actor_id
+                    and stored_guild is not None and stored_guild.connected_by is None
+                )
+            if not restore_allowed:
+                raise Conflict("This server has an existing listing. Only its verified managers can change it.")
+            previous.quick_submitted_by = actor_id
         if previous.status == ListingStatus.SUSPENDED:
             raise Conflict("This server's listing is suspended. Contact Parley staff.")
         if previous.status == ListingStatus.PENDING:
@@ -222,3 +244,29 @@ async def edit_quick_listing(
         outcome = "edited"
     await repository.add_audit(session, "listing.quick_" + outcome, actor_id=actor_id, guild_id=guild_id)
     return row, outcome
+
+
+async def delete_quick_listing(
+    session: AsyncSession, config: RuntimeConfig, *, actor_id: int, guild_id: int, now,
+) -> Listing:
+    """Remove only the caller's own *unverified submission*, never guild authority.
+
+    Retain a removed tombstone for audit. Other strangers cannot reclaim it;
+    the original submitter may re-submit after cooldown unless staff intervene.
+    Release the submitter's one-slot limit without resetting the cooldown.
+    """
+    row = await session.scalar(select(Listing).where(Listing.guild_id == guild_id).with_for_update())
+    if row is None or row.quick_submitted_by != actor_id or row.status == ListingStatus.REMOVED:
+        raise Conflict("This Free Listing is no longer available to delete.")
+    row.status = ListingStatus.REMOVED
+    row.quick_submitted_by = None
+    row.pending_changes = None
+    row.pending_submitted_by = None
+    row.review_revision = (row.review_revision or 0) + 1  # invalidate old approval buttons
+    row.updated_at = now
+    if row.refreshed_at is not None:
+        remaining = row.refreshed_at + timedelta(minutes=config.listings.quick_post_cooldown_minutes) - now
+        if remaining.total_seconds() > 0:
+            await cooldowns.start(session, "quick_post_deleted", actor_id, now, remaining)
+    await repository.add_audit(session, "listing.quick_deleted", actor_id=actor_id, guild_id=guild_id)
+    return row

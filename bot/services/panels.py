@@ -147,18 +147,20 @@ class PanelService:
 
     # ------------------------------------------------------------ low-level message helpers
 
-    async def _delete(self, channel_id: int | None, message_id: int | None) -> None:
+    async def _delete(self, channel_id: int | None, message_id: int | None) -> bool:
         if not channel_id or not message_id:
-            return
+            return True
         channel = self.bot.get_channel(channel_id)
         if channel is None or not hasattr(channel, "get_partial_message"):
-            return
+            return False  # retry when Discord channel cache becomes available
         try:
             await channel.get_partial_message(message_id).delete()
         except discord.NotFound:
-            pass  # already gone: that's the goal
+            return True  # already gone
         except discord.HTTPException as exc:
             log.warning("Could not delete message %s in channel %s: %s", message_id, channel_id, exc)
+            return False
+        return True
 
     async def delete_listing_message(self, channel_id: int | None, message_id: int | None) -> None:
         await self._delete(channel_id, message_id)
@@ -167,19 +169,30 @@ class PanelService:
         """Delete every public post owned by a listing after removal/suspension/ban."""
         if listing is None:
             return
-        await self._delete(listing.channel_id, listing.controls_message_id)
-        await self._delete(listing.channel_id, listing.message_id)
-        await self._delete(listing.partner_channel_id, listing.partner_controls_message_id)
-        await self._delete(listing.partner_channel_id, listing.partner_message_id)
+        ad_controls_ok = await self._delete(listing.channel_id, listing.controls_message_id)
+        ad_ok = await self._delete(listing.channel_id, listing.message_id)
+        partner_controls_ok = await self._delete(listing.partner_channel_id, listing.partner_controls_message_id)
+        partner_ok = await self._delete(listing.partner_channel_id, listing.partner_message_id)
+        # Persist failed-message IDs for restart-safe cleanup. A failed Discord
+        # delete must not disappear from our database merely because it was tried.
         async with self.bot.db.session() as session:
-            await listing_service.record_message(session, guild_id=listing.guild_id, channel_id=None, message_id=None)
             current = await repository.get_listing(session, listing.guild_id)
             if current is not None:
-                current.partner_ad_text = None
-                current.partner_channel_id = None
-                current.partner_message_id = None
-                current.partner_controls_message_id = None
-                current.partner_posted_at = None
+                if ad_controls_ok and current.controls_message_id == listing.controls_message_id:
+                    current.controls_message_id = None
+                if ad_ok and current.message_id == listing.message_id:
+                    current.message_id = None
+                    current.self_posted = False
+                if current.message_id is None and current.controls_message_id is None:
+                    current.channel_id = None
+                if partner_controls_ok and current.partner_controls_message_id == listing.partner_controls_message_id:
+                    current.partner_controls_message_id = None
+                if partner_ok and current.partner_message_id == listing.partner_message_id:
+                    current.partner_message_id = None
+                if current.partner_message_id is None and current.partner_controls_message_id is None:
+                    current.partner_channel_id = None
+                    current.partner_ad_text = None
+                    current.partner_posted_at = None
 
     async def _is_newest(self, channel: discord.TextChannel, message_id: int) -> bool:
         async for newest in channel.history(limit=1):

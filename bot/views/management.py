@@ -165,10 +165,15 @@ async def show_my_servers(interaction: discord.Interaction) -> None:
             for row in await repository.get_listings(session, guild_ids)
             if row.status != ListingStatus.REMOVED
         ]
-        stored = await repository.get_guilds(session, [row.guild_id for row in rows])
+        from bot.services import quick_post as quick_service
+        quick = await quick_service.my_quick_listing(session, interaction.user.id)
+        stored = await repository.get_guilds(
+            session, [*{row.guild_id for row in rows}, *([quick.guild_id] if quick else [])]
+        )
 
     if not rows:
-        # Free submitters are deliberately NOT managers or partnership contacts.
+        # Free Listing submitters can manage their own *ad*, without receiving
+        # verified server-manager or partnership authority.
         from bot.views.quick_post import show_quick_start
         await show_quick_start(interaction)
         return
@@ -182,14 +187,24 @@ async def show_my_servers(interaction: discord.Interaction) -> None:
 
     rows.sort(key=lambda row: name_for(row.guild_id).lower())
     from bot.views.partnership import GuildPickerView
+    quick_only = quick is not None and quick.guild_id not in {row.guild_id for row in rows}
 
     async def picked(inter: discord.Interaction, guild_id: int) -> None:
-        await show_management(inter, guild_id)
+        if quick_only and guild_id == quick.guild_id:
+            from bot.views.quick_post import show_quick_start
+            await show_quick_start(inter)
+        else:
+            await show_management(inter, guild_id)
 
+    choices = [(row.guild_id, f"{name_for(row.guild_id)} · Verified") for row in rows]
+    if quick_only:
+        choices.append((quick.guild_id, f"{name_for(quick.guild_id)} · Free (Unverified)"))
     embed = discord.Embed(
-        title="My Servers",
+        title="My Server Listings",
         description=(
-            "Choose a server to manage. Listings you previously verified stay here even when Parley is disconnected."
+            "Manage your advertisements in one place. **Unverified / Free** means you submitted an invite, "
+            "not that you manage the Discord server. **Verified** listings require server permissions. "
+            "Choose a listing to Edit, Relist, or Delete."
         ),
         color=bot.runtime.bot.color_primary,
     )
@@ -198,7 +213,7 @@ async def show_my_servers(interaction: discord.Interaction) -> None:
         embed=embed,
         view=GuildPickerView(
             interaction.user.id,
-            [(row.guild_id, name_for(row.guild_id)) for row in rows],
+            choices,
             picked,
             placeholder="Choose a server",
         ),
@@ -277,6 +292,10 @@ def management_embed(bot: ParleyBot, listing: Listing, guild: discord.Guild) -> 
         edit_value = "Ready"
     embed.add_field(name="Ad editing", value=edit_value, inline=False)
     connected = permissions.is_connected(bot, listing.guild_id)
+    embed.add_field(
+        name="Verification", value="✅ Verified manager" if connected else "✅ Previously verified manager",
+        inline=False,
+    )
     embed.add_field(name="Parley", value="🟢 Connected" if connected else "⚪ Not Connected", inline=False)
 
     notes = []

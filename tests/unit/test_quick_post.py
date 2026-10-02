@@ -134,3 +134,76 @@ def test_quick_pasted_ad_blocks_impersonation(db, config):
                 config, info=info, invite_url="https://discord.gg/testInvite",
                 category="Gaming", raw_ad=bad,
             )
+
+
+async def test_free_delete_releases_one_listing_without_resetting_cooldown(db, config):
+    async with db.session() as session:
+        created, result = await submit(session, config, gid=6011, user=7011)
+        assert result == "published"
+    async with db.session() as session:
+        removed = await quick_post.delete_quick_listing(
+            session, config, actor_id=7011, guild_id=6011, now=NOW + timedelta(minutes=1),
+        )
+        assert removed.status == ListingStatus.REMOVED
+        assert removed.quick_submitted_by is None
+    async with db.session() as session:
+        assert await quick_post.my_quick_listing(session, 7011) is None
+        with pytest.raises(CooldownActive):
+            await submit(session, config, gid=6012, user=7011, at=NOW + timedelta(hours=2))
+        with pytest.raises(Conflict):
+            await submit(session, config, gid=6011, user=7022, at=NOW + timedelta(hours=25))
+    async with db.session() as session:
+        second, result = await submit(session, config, gid=6012, user=7011, at=NOW + timedelta(hours=25))
+        assert result == "published"
+        assert second.quick_submitted_by == 7011
+
+
+async def test_free_delete_revokes_pending_review_and_blocks_other_users(db, config):
+    config = replace(config, listings=replace(config.listings, approval_required=True))
+    async with db.session() as session:
+        row, result = await submit(session, config, gid=6021, user=7031)
+        assert result == "pending"
+        with pytest.raises(Conflict):
+            await quick_post.delete_quick_listing(
+                session, config, actor_id=7032, guild_id=6021, now=NOW,
+            )
+    async with db.session() as session:
+        await quick_post.delete_quick_listing(
+            session, config, actor_id=7031, guild_id=6021, now=NOW + timedelta(minutes=1),
+        )
+    async with db.session() as session:
+        with pytest.raises(Conflict):
+            await listings.review_listing(
+                session, guild_id=6021, approve=True, moderator_id=9999,
+                now=NOW + timedelta(minutes=2), revision=1,
+            )
+        deleted = await repository.get_listing(session, 6021)
+        assert deleted.status == ListingStatus.REMOVED
+        assert deleted.pending_submitted_by is None
+
+
+async def test_free_listing_menu_has_delete_and_verification_explanation(db, config):
+    from bot.views.quick_post import QuickStartView, show_quick_start
+    from tests.fakes import FakeBot, FakeInteraction
+    bot = FakeBot(db)
+    async with db.session() as session:
+        await submit(session, config, gid=6031, user=4)
+    interaction = FakeInteraction(bot, 4)
+    await show_quick_start(interaction)
+    sent = interaction.response.sent[-1]
+    assert "Unverified" in sent["content"]
+    assert "Delete Listing" in [getattr(c, "label", None) for c in sent["view"].children]
+
+
+async def test_only_original_submitter_can_restore_deleted_guild(db, config):
+    async with db.session() as session:
+        await submit(session, config, gid=6055, user=7111)
+    async with db.session() as session:
+        await quick_post.delete_quick_listing(
+            session, config, actor_id=7111, guild_id=6055, now=NOW + timedelta(minutes=2),
+        )
+    async with db.session() as session:
+        with pytest.raises(Conflict):
+            await submit(session, config, gid=6055, user=9999, at=NOW + timedelta(hours=26))
+        row, outcome = await submit(session, config, gid=6055, user=7111, at=NOW + timedelta(hours=26))
+        assert (outcome, row.quick_submitted_by) == ("published", 7111)

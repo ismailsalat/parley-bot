@@ -328,3 +328,29 @@ def test_verify_view_has_no_stale_listing_import():
     marker = 'async def show_verified_servers(interaction: discord.Interaction) -> None:'
     body = source.split(marker, 1)[1].split('async def ', 1)[0]
     assert body.count('from bot.views.listings import open_verified_listing_form') <= 1
+
+
+async def test_deleted_listing_retries_public_message_cleanup_after_outage(db, config, bot):
+    """A missing Discord channel cannot erase the message ID needed for retry."""
+    service = service_for(bot)
+    async with db.session() as session:
+        await make_listing(session, config, 7654321)
+    published = await service.publish_listing(7654321)
+    channel = bot.channels.pop(LISTINGS)  # Simulate cache/Discord unavailable.
+    async with db.session() as session:
+        record = await repository.get_listing(session, 7654321)
+        record.status = "removed"
+    async with db.session() as session:
+        record = await repository.get_listing(session, 7654321)
+    await service.take_down_listing(record)
+    async with db.session() as session:
+        saved = await repository.get_listing(session, 7654321)
+        assert saved.message_id == published.id
+    bot.channels[LISTINGS] = channel
+    async with db.session() as session:
+        record = await repository.get_listing(session, 7654321)
+    await service.take_down_listing(record)
+    async with db.session() as session:
+        saved = await repository.get_listing(session, 7654321)
+        assert saved.message_id is None
+    assert published.id not in channel.messages

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from bot.utils.helpers import utcnow
+
 import discord
 
 from bot.database import repository
@@ -102,7 +104,7 @@ async def test_hub_my_servers_always_asks_which_server(db, config):
     interaction = FakeInteraction(bot, ADMIN_ID)
     await show_my_servers(interaction)
     message = sent(interaction)
-    assert message["embed"].title == "My Servers"
+    assert message["embed"].title == "My Server Listings"
     assert isinstance(message["view"].children[0], discord.ui.Select)
     assert message["view"].children[0].options[0].value == str(MAIN)
 
@@ -261,7 +263,7 @@ async def test_multiple_servers_use_one_picker_not_button_grid(db, config):
     await show_my_servers(interaction)
     message = sent(interaction)
     assert message.get("content") is None
-    assert message["embed"].title == "My Servers"
+    assert message["embed"].title == "My Server Listings"
     assert len(message["view"].children) == 1
     assert isinstance(message["view"].children[0], discord.ui.Select)
 
@@ -362,3 +364,41 @@ async def test_hub_partner_board_never_silently_picks_only_server(db, config):
     assert message["content"].startswith("## Choose Your Server")
     assert isinstance(message["view"].children[0], discord.ui.Select)
     assert message["view"].children[0].options[0].value == str(MAIN)
+
+
+async def test_my_servers_includes_unverified_free_listing(db, config):
+    from bot.services.quick_post import create_quick_listing
+    from bot.services.listings import GuildInfo
+    from tests.fakes import USER_ID
+    bot = FakeBot(db)
+    async with db.session() as session:
+        await create_quick_listing(
+            session, bot.runtime, info=GuildInfo(81001, "My Free Community", None, 12),
+            actor_id=USER_ID, invite_url="https://discord.gg/free", description="Welcome to my server!",
+            category="Gaming", now=utcnow(),
+        )
+    interaction = FakeInteraction(bot, USER_ID)
+    await show_my_servers(interaction)
+    message = sent(interaction)
+    assert "My Server Listing" in message["content"]
+    assert "Unverified" in message["content"]
+    assert "Delete Listing" in [getattr(c, "label", None) for c in message["view"].children]
+
+
+async def test_my_servers_mixes_free_and_managed_without_conflating_authority(db, config):
+    from bot.services.quick_post import create_quick_listing
+    from bot.services.listings import GuildInfo
+    bot = FakeBot(db)
+    async with db.session() as session:
+        await make_listing(session, config, MAIN, actor_id=ADMIN_ID)
+        await create_quick_listing(
+            session, bot.runtime, info=GuildInfo(81002, "Free Side Server", None, 25),
+            actor_id=ADMIN_ID, invite_url="https://discord.gg/free", description="Come hang out!",
+            category="Gaming", now=utcnow(),
+        )
+    interaction = FakeInteraction(bot, ADMIN_ID)
+    await show_my_servers(interaction)
+    message = sent(interaction)
+    labels = [item.label for item in message["view"].children[0].options]
+    assert any("Free (Unverified)" in label for label in labels)
+    assert any("Verified" in label for label in labels)

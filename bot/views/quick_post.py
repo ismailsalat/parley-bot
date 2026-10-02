@@ -18,7 +18,7 @@ from bot.services import quick_post as quick_service
 from bot.services.errors import ParleyError, ValidationError
 from bot.utils.helpers import utcnow
 from bot.utils.mentions import safe_allowed_mentions
-from bot.views.base import OwnedView, acknowledge, get_bot, guard, handle_error, reply
+from bot.views.base import ConfirmView, OwnedView, acknowledge, get_bot, guard, handle_error, reply
 from bot.views.welcome import add_bot_button, persistent_view, register_action, show_screen
 
 if TYPE_CHECKING:
@@ -42,14 +42,19 @@ async def show_quick_start(interaction: discord.Interaction) -> None:
     async with bot.db.session() as session:
         existing = await quick_service.my_quick_listing(session, interaction.user.id)
         stored = await repository.get_guild(session, existing.guild_id) if existing else None
-    view = QuickStartView(bot, interaction.user.id, existing=existing is not None)
+    view = QuickStartView(
+        bot, interaction.user.id, existing=existing is not None,
+        status=existing.status if existing else None,
+    )
     if existing:
         name = discord.utils.escape_markdown(stored.name) if stored else f"Server {existing.guild_id}"
-        state = {"pending": "Awaiting staff review", "active": "Listed", "expired": "Expired", "suspended": "Suspended", "removed": "Removed"}.get(existing.status, existing.status)
+        state = {"pending": "Awaiting staff review", "active": "Listed", "expired": "Expired", "suspended": "Suspended", "removed": "Removed — submit corrected copy after cooldown"}.get(existing.status, existing.status)
         message = (
-            f"## 📣 Your Free Listing — {name}\n**Status:** {state}\n"
-            "**Repost Existing Ad** refreshes your *approved* advertisement once every 24 hours.\n"
-            "**Edit Ad** lets you change it once per repost cycle, with another review if necessary.\n\n"
+            f"## 📣 My Server Listing — {name}\n"
+            f"**Type:** ⚪ Unverified · Free Listing\n**Status:** {state}\n\n"
+            "**Edit Ad** — change the text or category (once per repost cycle).\n"
+            "**Repost** — refresh an approved ad every 24 hours.\n"
+            "**Delete Listing** — remove your ad from Parley, including pending reviews.\n\n"
             "Quick Post is unverified and does not grant server permissions. "
             "Install Parley only if you want connected tools and partnerships."
         )
@@ -68,16 +73,25 @@ async def show_quick_start(interaction: discord.Interaction) -> None:
 
 
 class QuickStartView(OwnedView):
-    def __init__(self, bot: ParleyBot, owner_id: int, *, existing: bool = False):
+    def __init__(self, bot: ParleyBot, owner_id: int, *, existing: bool = False, status: str | None = None):
         super().__init__(owner_id)
         self.bot = bot
-        if existing:
+        if existing and status == ListingStatus.REMOVED:
+            corrected = discord.ui.Button(label="Submit Corrected Ad", style=discord.ButtonStyle.primary, row=0)
+            corrected.callback = self._quick
+            self.add_item(corrected)
+        elif existing:
             repost = discord.ui.Button(label="Repost Existing Ad", emoji="🔄", style=discord.ButtonStyle.primary, row=0)
+            repost.disabled = status not in (None, ListingStatus.ACTIVE, ListingStatus.EXPIRED)
             repost.callback = self._repost
             self.add_item(repost)
             edit = discord.ui.Button(label="Edit Ad", emoji="✏️", style=discord.ButtonStyle.secondary, row=0)
+            edit.disabled = status not in (None, ListingStatus.ACTIVE)
             edit.callback = self._edit
             self.add_item(edit)
+            delete = discord.ui.Button(label="Delete Listing", emoji="🗑️", style=discord.ButtonStyle.danger, row=1)
+            delete.callback = self._delete
+            self.add_item(delete)
         else:
             quick = discord.ui.Button(label="Create Free Listing", emoji="📣", style=discord.ButtonStyle.primary, row=0)
             quick.callback = self._quick
@@ -149,6 +163,51 @@ class QuickStartView(OwnedView):
         except Exception as exc:
             await handle_error(interaction, exc)
 
+    async def _delete(self, interaction: discord.Interaction) -> None:
+        """Owner-only confirmation followed by atomic DB removal and message cleanup."""
+        await acknowledge(interaction)
+        try:
+            async with self.bot.db.session() as session:
+                existing = await quick_service.my_quick_listing(session, interaction.user.id)
+                stored = await repository.get_guild(session, existing.guild_id) if existing else None
+            if existing is None or existing.status == ListingStatus.REMOVED:
+                raise ValidationError("You don't have an active Free Listing to delete.")
+            name = discord.utils.escape_markdown(stored.name) if stored else str(existing.guild_id)
+            confirm = ConfirmView(interaction.user.id, confirm_label="Yes, delete my ad")
+            await interaction.edit_original_response(
+                content=(f"## Delete your Free Listing?\n**{name}** will be removed from Parley's directory "
+                         "and partnership board (if present). You can submit again after the cooldown. "
+                         "Your posting cooldown still applies.\n\n"
+                         "This removes only your Parley ad, not the Discord server itself."),
+                view=confirm, allowed_mentions=safe_allowed_mentions(),
+            )
+            await confirm.wait()
+            if not confirm.confirmed or confirm.interaction is None:
+                return
+            done = confirm.interaction
+            await acknowledge(done, thinking=False)
+            async with self.bot.db.session() as session:
+                removed = await quick_service.delete_quick_listing(
+                    session, self.bot.runtime, actor_id=done.user.id,
+                    guild_id=existing.guild_id, now=utcnow(),
+                )
+            # DB removal commits first: if Discord is offline, maintenance retries
+            # deleting the public messages using their persisted IDs.
+            try:
+                await self.bot.panels.take_down_listing(removed)
+            except Exception:
+                log.exception("Free Listing deletion cleanup delayed for %s", removed.guild_id)
+            await done.edit_original_response(
+                content="✅ Your Free Listing has been removed from Parley. "
+                        "Any Discord message that couldn't be deleted immediately will be retried automatically. "
+                        "Your 24-hour posting cooldown still applies.",
+                view=None,
+            )
+        except ParleyError as exc:
+            await interaction.edit_original_response(content=f"⚠️ {exc.user_message}", view=None)
+        except Exception as exc:
+            await handle_error(interaction, exc)
+
     async def _connected(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction)
         from bot.views.listings import open_connected_picker
@@ -173,6 +232,13 @@ class QuickWizardView(OwnedView):
         paste = discord.ui.Button(label="Paste Existing Ad", emoji="📋", style=discord.ButtonStyle.secondary, row=1)
         paste.callback = self._paste
         self.add_item(paste)
+        back = discord.ui.Button(label="Back to My Listing", style=discord.ButtonStyle.secondary, row=2)
+        back.callback = self._back
+        self.add_item(back)
+
+    async def _back(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction, thinking=False)
+        await show_quick_start(interaction)
 
     async def _pick(self, interaction: discord.Interaction) -> None:
         self.category = interaction.data["values"][0]
@@ -222,7 +288,7 @@ class QuickPostModal(discord.ui.Modal):
                 existing = await quick_service.my_quick_listing(session, interaction.user.id)
             if self.editing and existing is None:
                 raise ValidationError("Your original Free Listing no longer exists.")
-            if not self.editing and existing is not None:
+            if not self.editing and existing is not None and existing.status != ListingStatus.REMOVED:
                 raise ValidationError("You already have a Free Listing. Choose **Edit Ad** or **Repost Existing Ad**.")
             raw_invite = self.invite.value.strip() or (existing.invite_url if existing else "")
             code = listing_service.parse_invite_code(raw_invite)

@@ -298,6 +298,27 @@ class BackgroundTasks:
                 except Exception:
                     log.exception("Failed to recover unpublished ad for guild=%s", waiting.guild_id)
 
+        # Delete any public messages left over from removed/suspended ads.
+        # This also repairs interrupted deletions after a Railway restart.
+        try:
+            from sqlalchemy import or_, select
+            from bot.database.models import Listing, ListingStatus
+            async with bot.db.session() as session:
+                stale_posts = list(await session.scalars(
+                    select(Listing).where(
+                        Listing.status.in_((ListingStatus.REMOVED, ListingStatus.SUSPENDED)),
+                        or_(Listing.message_id.is_not(None), Listing.controls_message_id.is_not(None),
+                            Listing.partner_message_id.is_not(None), Listing.partner_controls_message_id.is_not(None)),
+                    ).limit(25)
+                ))
+            for stale in stale_posts:
+                try:
+                    await bot.panels.take_down_listing(stale)
+                except Exception:
+                    log.exception("Failed to clean up removed listing %s; will retry", stale.guild_id)
+        except Exception:
+            log.exception("Could not scan removed listings for cleanup; will retry")
+
         # Review messages are durable DB records; a failed staff log send must
         # never silently auto-approve an ad. Retry missing notifications.
         if bot.log_channel() is not None:
