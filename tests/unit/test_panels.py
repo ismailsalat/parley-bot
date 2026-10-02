@@ -7,6 +7,7 @@ delivery is covered by tests/integration.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import discord
@@ -16,7 +17,7 @@ from dataclasses import replace
 
 from bot.config.runtime import HubConfig, default_config
 from bot.database import repository
-from bot.services.panels import LISTINGS_PANEL, LOOKING_PANEL, PanelService
+from bot.services.panels import LISTINGS_PANEL, LOOKING_PANEL, RULES_PANEL, PanelService
 from tests.conftest import make_settings
 from tests.factories import make_listing
 
@@ -354,3 +355,42 @@ async def test_deleted_listing_retries_public_message_cleanup_after_outage(db, c
         saved = await repository.get_listing(session, 7654321)
         assert saved.message_id is None
     assert published.id not in channel.messages
+
+
+async def test_parallel_rules_panel_repair_does_not_duplicate_messages(db, bot):
+    """Restart/refresh overlap must not create two plain-text rules posts."""
+    rules_id = 900000000000000004
+    bot.runtime = replace(
+        bot.runtime, hub=replace(bot.runtime.hub, rules_channel_id=rules_id),
+    )
+    bot.channels[rules_id] = FakeChannel(rules_id)
+    service = service_for(bot)
+    await asyncio.gather(service.restore_panels(), service.restore_panels())
+    assert len(bot.channels[rules_id].messages) == 1
+    stored = await stored_panel(db, RULES_PANEL)
+    assert stored.message_id in bot.channels[rules_id].messages
+
+
+async def test_orphan_cleanup_removes_old_rules_but_preserves_current(db, bot, monkeypatch):
+    """Rules have no buttons, unlike other entry panels; match by bot-owned heading."""
+    rules_id = 900000000000000005
+    bot.runtime = replace(bot.runtime, hub=replace(bot.runtime.hub, rules_channel_id=rules_id))
+    channel = FakeChannel(rules_id)
+    bot.channels[rules_id] = channel
+    bot.user = SimpleNamespace(id=123456)
+    service = service_for(bot)
+    for text in (
+        "# 📜 Parley Server Rules\nOld rules",
+        "# 📜 Parley Server Rules\nCurrent rules",
+    ):
+        message = await channel.send(content=text, allowed_mentions=discord.AllowedMentions.none())
+        message.author = bot.user
+        message.components = []
+    async with db.session() as session:
+        await repository.save_panel(
+            session, guild_id=MAIN, channel_id=rules_id,
+            panel_type=RULES_PANEL, message_id=2,
+        )
+    monkeypatch.setattr(discord, "TextChannel", FakeChannel)
+    assert await service.cleanup_orphan_entry_panels() == 1
+    assert channel.ids() == [2]

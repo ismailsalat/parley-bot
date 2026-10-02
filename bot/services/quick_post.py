@@ -345,8 +345,11 @@ async def delete_quick_listing(
     Release the submitter's one-slot limit without resetting the cooldown.
     """
     row = await session.scalar(select(Listing).where(Listing.guild_id == guild_id).with_for_update())
-    if row is None or row.quick_submitted_by != actor_id or row.status == ListingStatus.REMOVED:
+    if row is None or row.quick_submitted_by != actor_id:
         raise Conflict("This Free Listing is no longer available to delete.")
+    # If staff removed an ad, its submitter must be able to free their slot
+    # without creating an owner-deleted tombstone that permits guild reclaims.
+    was_staff_removed = row.status in (ListingStatus.REMOVED, ListingStatus.SUSPENDED)
     row.status = ListingStatus.REMOVED
     row.quick_submitted_by = None
     row.pending_changes = None
@@ -357,7 +360,11 @@ async def delete_quick_listing(
         remaining = row.refreshed_at + timedelta(minutes=config.listings.quick_post_cooldown_minutes) - now
         if remaining.total_seconds() > 0:
             await cooldowns.start(session, "quick_post_deleted", actor_id, now, remaining)
-    await repository.add_audit(session, "listing.quick_deleted", actor_id=actor_id, guild_id=guild_id)
+    await repository.add_audit(
+        session,
+        "listing.quick_slot_released" if was_staff_removed else "listing.quick_deleted",
+        actor_id=actor_id, guild_id=guild_id,
+    )
     return row
 
 

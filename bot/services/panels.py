@@ -46,6 +46,10 @@ class PanelService:
         # One lock per channel: listing posts and panel moves must never interleave.
         self._listings_lock = asyncio.Lock()
         self._looking_lock = asyncio.Lock()
+        # Channel creation has its own lock, but reposting static panels did
+        # not. On startup + resume two repairs can both see a missing message
+        # before either saves it, leaving duplicate #server-rules posts.
+        self._static_panel_lock = asyncio.Lock()
         self._aux_channels_lock = asyncio.Lock()
         self._looking_task: asyncio.Task | None = None
         # Discord emits on_raw_message_delete for our own panel moves too. Keep a
@@ -439,14 +443,16 @@ class PanelService:
         results: dict[str, str] = {}
         await self.ensure_aux_channels()
         await self._refresh_how_it_works_channel()
-        await self.ensure_panel(RULES_PANEL, keep_at_bottom=False, force_edit=force_edit)
+        async with self._static_panel_lock:
+            await self.ensure_panel(RULES_PANEL, keep_at_bottom=False, force_edit=force_edit)
         async with self._listings_lock:
             results[LISTINGS_PANEL] = await self.ensure_panel(LISTINGS_PANEL, keep_at_bottom=True, force_edit=force_edit)
         async with self._looking_lock:
             results[LOOKING_PANEL] = await self.ensure_panel(LOOKING_PANEL, keep_at_bottom=False, force_edit=force_edit)
-        results[WELCOME_PANEL] = await self.ensure_panel(WELCOME_PANEL, keep_at_bottom=False, force_edit=force_edit)
-        results[PERKS_PANEL] = await self.ensure_panel(PERKS_PANEL, keep_at_bottom=False, force_edit=force_edit)
-        results[PARLEY_PERKS_PANEL] = await self.ensure_panel(PARLEY_PERKS_PANEL, keep_at_bottom=False, force_edit=force_edit)
+        async with self._static_panel_lock:
+            results[WELCOME_PANEL] = await self.ensure_panel(WELCOME_PANEL, keep_at_bottom=False, force_edit=force_edit)
+            results[PERKS_PANEL] = await self.ensure_panel(PERKS_PANEL, keep_at_bottom=False, force_edit=force_edit)
+            results[PARLEY_PERKS_PANEL] = await self.ensure_panel(PARLEY_PERKS_PANEL, keep_at_bottom=False, force_edit=force_edit)
         return results
 
     async def refresh_entry_panels(self, *, repost: bool) -> dict[str, str]:
@@ -498,7 +504,8 @@ class PanelService:
                 async with self._looking_lock:
                     results[panel_type] = await refresh_one(panel_type)
             else:
-                results[panel_type] = await refresh_one(panel_type)
+                async with self._static_panel_lock:
+                    results[panel_type] = await refresh_one(panel_type)
             if index < len(ordered) - 1:
                 await asyncio.sleep(STARTUP_PANEL_SPACING_SECONDS)
         log.info("Permanent panels refreshed: %s", results)
@@ -564,7 +571,15 @@ class PanelService:
                                    for child in getattr(row, "children", ()))
                         )
                     )
-                    if not has_entry_action and not is_legacy_welcome and not is_old_perks:
+                    # Rules are plain text with no components, so the older
+                    # orphan scan could never recognize duplicate rules posts.
+                    is_old_rules = (
+                        channel.id == self.bot.runtime.hub.rules_channel_id
+                        and (message.content or "").startswith((
+                            "# 📜 Parley Server Rules", "# 📜 Server Rules"
+                        ))
+                    )
+                    if not (has_entry_action or is_legacy_welcome or is_old_perks or is_old_rules):
                         continue
                     try:
                         await message.delete()

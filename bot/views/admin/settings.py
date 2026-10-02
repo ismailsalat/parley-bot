@@ -46,26 +46,24 @@ class SettingsHome(_HomeMarker, Page):
         network = "Enabled" if bot.runtime.network.enabled else "Off"
         return "\n".join(
             [
-                "## PARLEY SETTINGS",
-                f"**Mode:** {MODE_LABELS[hub.mode]}",
-                f"**Main Server:** {guild.name if guild else 'not set up — run /setup'}",
-                f"**Listings:** {channel_mention(hub.listings_channel_id)}",
-                f"**Network:** {network}",
-                "-# Changes apply immediately. No restart needed.",
+                "## ⚙️ Parley Settings",
+                f"**Bot:** {MODE_LABELS[hub.mode]} · **Posting:** {'Staff review' if bot.runtime.listings.approval_required else 'Automatic'}",
+                f"**Server:** {guild.name if guild else 'not configured'} · **Network:** {network}",
+                "Choose what you want to change below. Advanced settings are optional.",
             ]
         )
 
     def build(self) -> None:
-        from bot.views.admin import messages, moderation
+        from bot.views.admin import moderation
 
         home = lambda: SettingsHome(self.bot, self.owner_id)  # noqa: E731
         o, b = self.owner_id, self.bot
         pages = [
-            ("Server", "📍", lambda: ServerMenu(b, o, back=home)),
-            ("Appearance", "🎨", lambda: messages.AppearancePage(b, o, back=home)),
-            ("Rules", "📋", lambda: RulesMenu(b, o, back=home)),
-            ("Moderation", "🚫", lambda: moderation.ModerationPage(b, o, back=home)),
-            ("Tools", "🧰", lambda: ToolsMenu(b, o, back=home)),
+            ("Posting", "📢", lambda: SimplePostingPage(b, o, back=home)),
+            ("Review & Safety", "🛡️", lambda: moderation.ModerationPage(b, o, back=home)),
+            ("Channels", "📍", lambda: ChannelsPage(b, o, back=home)),
+            ("Fix & Test", "🔧", lambda: ToolsMenu(b, o, back=home)),
+            ("Advanced", "⚙️", lambda: AdvancedSettingsPage(b, o, back=home)),
         ]
         for label, emoji, factory in pages:
             self.button(label, _opener(factory), emoji=emoji, row=0)
@@ -74,13 +72,72 @@ class SettingsHome(_HomeMarker, Page):
     async def _export(self, interaction: discord.Interaction) -> None:
         async with self.bot.db.session() as session:
             data = await configuration.export_settings(session, self.bot.runtime)
-        file = discord.File(io.BytesIO(data.encode("utf-8")), filename="waypoint-settings.json")
+        file = discord.File(io.BytesIO(data.encode("utf-8")), filename="parley-settings.json")
         await reply(
             interaction,
             "📤 Your settings (no token, passwords or database details). "
             "To restore them, use **/admin import-settings** with this file.",
             file=file,
         )
+
+
+class SimplePostingPage(Page):
+    """Small, usable front door for the posting settings most owners change."""
+
+    title = "Posting"
+
+    def content(self) -> str:
+        rules = self.bot.runtime.listings
+        mode = "Staff approval" if rules.approval_required else "Automatic (safety checks still apply)"
+        return (
+            f"## 📢 Posting\n**Mode:** {mode}\n"
+            f"**Free repost:** {rules.quick_post_cooldown_minutes // 60} hours\n"
+            f"**Connected repost:** {rules.connected_refresh_cooldown_minutes} minutes\n\n"
+            "Switch the publishing mode here. All other controls are under Advanced."
+        )
+
+    def build(self) -> None:
+        approval = self.bot.runtime.listings.approval_required
+        label = "Use Automatic Posting" if approval else "Require Staff Approval"
+        self.button(label, self._toggle_approval, emoji="📝", row=0)
+        back = lambda: SimplePostingPage(self.bot, self.owner_id, back=self.back)  # noqa: E731
+        from bot.views.admin import rules
+        self.button("More Posting Options", _opener(lambda: rules.RulesPage(
+            self.bot, self.owner_id, "listings", back=back,
+        )), style=discord.ButtonStyle.secondary, row=1)
+        self.nav(row=2)
+
+    async def _toggle_approval(self, interaction: discord.Interaction) -> None:
+        # Persist first; settings_changed reloads the effective runtime from DB.
+        new_value = not self.bot.runtime.listings.approval_required
+        await acknowledge(interaction, thinking=False)
+        async with self.bot.db.session() as session:
+            await configuration.save(
+                session, {"listings.approval_required": new_value},
+                actor_id=interaction.user.id,
+            )
+        await self.bot.settings_changed()
+        await self.show(interaction, "✅ Posting mode updated.")
+
+
+class AdvancedSettingsPage(Page):
+    """Keep older settings reachable instead of removing supported commands."""
+
+    title = "Advanced"
+
+    def content(self) -> str:
+        return "## Advanced Settings\nUse these options only when you need to customize Parley."
+
+    def build(self) -> None:
+        from bot.views.admin import messages
+
+        back = lambda: AdvancedSettingsPage(self.bot, self.owner_id, back=self.back)  # noqa: E731
+        bot, owner = self.bot, self.owner_id
+        self.button("Server & Staff", _opener(lambda: ServerMenu(bot, owner, back=back)), row=0)
+        self.button("Partnership & Network", _opener(lambda: RulesMenu(bot, owner, back=back)), row=0)
+        self.button("Appearance & Text", _opener(lambda: messages.AppearancePage(bot, owner, back=back)), row=1)
+        self.button("Other Tools", _opener(lambda: ToolsMenu(bot, owner, back=back)), row=1)
+        self.nav(row=2)
 
 
 class ServerMenu(Page):
@@ -101,23 +158,67 @@ class ServerMenu(Page):
 
 
 class ToolsMenu(Page):
-    """Testing, health, mode and backups."""
+    """One screen for safe repairs and the less common testing controls."""
 
     title = "Tools"
 
     def content(self) -> str:
-        return f"## Tools\nMode: **{MODE_LABELS[self.bot.runtime.hub.mode]}**"
+        return ("## 🔧 Fix & Test\n"
+                f"**Mode:** {MODE_LABELS[self.bot.runtime.hub.mode]}\n"
+                "Repair buttons or refresh Discord commands without resetting any listings.")
 
     def build(self) -> None:
         from bot.views.admin import test_center
 
         back = lambda: ToolsMenu(self.bot, self.owner_id, back=self.back)  # noqa: E731
         o, b = self.owner_id, self.bot
-        self.button("Test", _opener(lambda: test_center.TestCenterPage(b, o, back=back)), emoji="🧪", row=0)
         self.button("Health Check", _opener(lambda: HealthPage(b, o, back=back)), emoji="🩺", row=0)
-        self.button("Mode", _opener(lambda: ModePage(b, o, back=back)), emoji="🔀", row=0)
-        self.button("Export Settings", self._export, emoji="📤", row=0)
+        self.button("Repair Panels", self._repair_panels, emoji="🔧", row=0)
+        self.button("Sync Commands", self._sync_commands, emoji="🔄", row=0)
+        self.button("Test Center", _opener(lambda: test_center.TestCenterPage(b, o, back=back)), emoji="🧪", row=1)
+        self.button("Mode", _opener(lambda: ModePage(b, o, back=back)), emoji="🔀", row=1)
+        self.button("Export Settings", self._export, emoji="📤", row=1)
+        self.button("Reset My Free Test", self._reset_my_free_test, style=discord.ButtonStyle.danger, row=2)
         self.nav()
+
+    async def _reset_my_free_test(self, interaction: discord.Interaction) -> None:
+        """Clearly scoped staff-only recovery, with a required confirmation."""
+        async def confirmed(done: discord.Interaction) -> None:
+            from bot.services import testmode
+
+            await acknowledge(done, thinking=False)
+            removed = await testmode.reset_my_quick_listing(self.bot, actor_id=done.user.id)
+            await self.show(done, "✅ Your Free test listing and cooldown were reset."
+                            if removed else "✅ Your Free test cooldown was cleared.")
+
+        await ConfirmPage(
+            self.bot, self.owner_id,
+            question=("Reset **only your own** Free Listing and its posting timer? "
+                      "This removes its advertisement, including in LIVE mode, "
+                      "but does not touch any other person's listings."),
+            confirm_label="Reset My Free Test", on_confirm=confirmed,
+            back=lambda: ToolsMenu(self.bot, self.owner_id, back=self.back),
+        ).show(interaction)
+
+    async def _repair_panels(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction, thinking=False)
+        results = await self.bot.panels.refresh_entry_panels(repost=True)
+        removed = await self.bot.panels.cleanup_orphan_entry_panels()
+        failures = [name for name, result in results.items() if result == "error"]
+        await self.show(interaction,
+                        (f"⚠️ Some panels still need attention: {', '.join(failures)}."
+                         if failures else f"✅ Panels refreshed; {removed} old message(s) cleaned up."))
+
+    async def _sync_commands(self, interaction: discord.Interaction) -> None:
+        """Repair stale Discord commands without changing the DB or cooldowns."""
+        await acknowledge(interaction, thinking=False)
+        main_id = self.bot.runtime.hub.main_guild_id
+        if not main_id:
+            await self.show(interaction, "⚠️ Set up the Parley main server before syncing commands.")
+            return
+        await self.bot.register_staff_commands(main_id, sync=False)
+        await self.bot._sync_commands()
+        await self.show(interaction, "🔄 Command synchronization requested. Check Railway logs if any commands remain unavailable.")
 
     async def _export(self, interaction: discord.Interaction) -> None:
         await SettingsHome._export(self, interaction)  # type: ignore[arg-type]

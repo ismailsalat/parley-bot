@@ -154,7 +154,7 @@ class StaffCommands(commands.Cog):
         )
 
     @admin.command(name="import-settings", description="Restore settings from an exported file.")
-    @app_commands.describe(file="waypoint-settings.json from Export Settings", include_channels="Also restore main-server channels (same server only)")
+    @app_commands.describe(file="parley-settings.json from Export Settings", include_channels="Also restore main-server channels (same server only)")
     async def import_settings(self, interaction: discord.Interaction, file: discord.Attachment, include_channels: bool = False) -> None:
         if file.size > MAX_IMPORT_BYTES:
             raise ValidationError("That file is too big to be a Parley settings export.")

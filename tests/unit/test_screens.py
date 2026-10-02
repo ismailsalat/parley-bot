@@ -30,6 +30,8 @@ def pages(bot):
     home = lambda: settings.SettingsHome(bot, OWNER_ID)  # noqa: E731
     guild = bot.guild
     yield settings.SettingsHome(bot, OWNER_ID)
+    yield settings.SimplePostingPage(bot, OWNER_ID, back=home)
+    yield settings.AdvancedSettingsPage(bot, OWNER_ID, back=home)
     yield settings.ServerMenu(bot, OWNER_ID, back=home)
     yield settings.ToolsMenu(bot, OWNER_ID, back=home)
     yield settings.RulesMenu(bot, OWNER_ID, back=home)
@@ -84,6 +86,18 @@ async def test_every_screen_builds_within_discord_limits(db):
                 assert len(label) <= 80, label
         count += 1
     assert count > 40
+
+
+def test_settings_home_is_simple_and_older_features_remain_available(db):
+    bot = make_bot(db)
+    home = settings.SettingsHome(bot, OWNER_ID)
+    home.build()
+    names = [getattr(child, "label", None) for child in home.children]
+    assert names == ["Posting", "Review & Safety", "Channels", "Fix & Test", "Advanced", "Home"]
+    advanced = settings.AdvancedSettingsPage(bot, OWNER_ID, back=lambda: home)
+    advanced.build()
+    old = [getattr(child, "label", None) for child in advanced.children]
+    assert "Server & Staff" in old and "Partnership & Network" in old
 
 
 async def test_settings_screens_refuse_non_staff(db):

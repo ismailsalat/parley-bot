@@ -442,3 +442,58 @@ def test_manual_approval_requires_invite_and_short_summary(db, config):
     assert len(modal.children) == 2
     assert "invite" in modal.children[0].label.lower()
     assert "description" in modal.children[1].label.lower()
+
+
+async def test_staff_removed_free_ad_can_be_deleted_to_switch_without_reclaiming_guild(db, config):
+    """An old moderator removal must not trap a person in the one-server slot."""
+    from bot.database.models import AuditLog
+    from sqlalchemy import select
+
+    async with db.session() as session:
+        row, _ = await submit(session, config, gid=96001, user=96002)
+        row.status = ListingStatus.REMOVED  # staff rejected/removed the listing
+    async with db.session() as session:
+        row = await quick_post.delete_quick_listing(
+            session, config, actor_id=96002, guild_id=96001,
+            now=NOW + timedelta(minutes=5),
+        )
+        assert row.quick_submitted_by is None
+        action = await session.scalar(
+            select(AuditLog.action).where(AuditLog.guild_id == 96001)
+            .order_by(AuditLog.id.desc()).limit(1)
+        )
+        assert action == "listing.quick_slot_released"
+        assert await quick_post.my_quick_listing(session, 96002) is None
+    async with db.session() as session:
+        with pytest.raises(CooldownActive):
+            await submit(session, config, gid=96003, user=96002, at=NOW + timedelta(hours=2))
+    async with db.session() as session:
+        with pytest.raises(Conflict):
+            await submit(session, config, gid=96001, user=96002, at=NOW + timedelta(hours=25))
+    async with db.session() as session:
+        new_listing, outcome = await submit(
+            session, config, gid=96003, user=96002, at=NOW + timedelta(hours=25),
+        )
+        assert outcome == "published" and new_listing.quick_submitted_by == 96002
+
+
+def test_free_listing_menu_always_has_switch_and_delete_even_if_removed(db):
+    from bot.views.quick_post import QuickStartView
+    from tests.fakes import FakeBot
+
+    bot = FakeBot(db)
+    for status, awaiting in (
+        (ListingStatus.REMOVED, False),
+        (ListingStatus.PENDING, False),
+        (ListingStatus.ACTIVE, True),
+        (ListingStatus.ACTIVE, False),
+    ):
+        view = QuickStartView(bot, 96002, existing=True, status=status, awaiting_ad=awaiting)
+        labels = [getattr(item, "label", "") for item in view.children]
+        assert labels.count("Delete Listing") == 1
+        assert labels.count("Switch Server") == 1
+        assert len(view.children) <= 25
+    removed = QuickStartView(bot, 96002, existing=True, status=ListingStatus.REMOVED,
+                             cooldown_active=True)
+    correction = next(item for item in removed.children if item.label == "Submit Corrected Ad")
+    assert correction.disabled is True
