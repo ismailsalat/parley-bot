@@ -494,7 +494,7 @@ async def test_post_server_keeps_existing_disconnected_listings_reachable(db, co
     sent = interaction.response.sent[-1]
     assert "No OAuth" in sent["content"]
     assert "Create Free Listing" in labels(sent["view"])
-    assert "Manage Connected Servers" in labels(sent["view"])
+    assert "Connected Servers" in labels(sent["view"])
     assert "My Server Listings" in labels(control_panel(bot)[1])
     async with db.session() as session:
         assert (await repository.get_listing(session, OTHER)) is not None

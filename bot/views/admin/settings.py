@@ -178,27 +178,7 @@ class ToolsMenu(Page):
         self.button("Test Center", _opener(lambda: test_center.TestCenterPage(b, o, back=back)), emoji="🧪", row=1)
         self.button("Mode", _opener(lambda: ModePage(b, o, back=back)), emoji="🔀", row=1)
         self.button("Export Settings", self._export, emoji="📤", row=1)
-        self.button("Reset My Free Test", self._reset_my_free_test, style=discord.ButtonStyle.danger, row=2)
         self.nav()
-
-    async def _reset_my_free_test(self, interaction: discord.Interaction) -> None:
-        """Clearly scoped staff-only recovery, with a required confirmation."""
-        async def confirmed(done: discord.Interaction) -> None:
-            from bot.services import testmode
-
-            await acknowledge(done, thinking=False)
-            removed = await testmode.reset_my_quick_listing(self.bot, actor_id=done.user.id)
-            await self.show(done, "✅ Your Free test listing and cooldown were reset."
-                            if removed else "✅ Your Free test cooldown was cleared.")
-
-        await ConfirmPage(
-            self.bot, self.owner_id,
-            question=("Reset **only your own** Free Listing and its posting timer? "
-                      "This removes its advertisement, including in LIVE mode, "
-                      "but does not touch any other person's listings."),
-            confirm_label="Reset My Free Test", on_confirm=confirmed,
-            back=lambda: ToolsMenu(self.bot, self.owner_id, back=self.back),
-        ).show(interaction)
 
     async def _repair_panels(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction, thinking=False)

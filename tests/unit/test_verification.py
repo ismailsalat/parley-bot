@@ -72,11 +72,11 @@ async def test_post_server_ad_without_the_bot_offers_quick_post(db):
     await start_post_flow(interaction)
 
     message = interaction.response.sent[-1]
-    assert "Post your Discord server for free" in message["content"]
+    assert "Post a Server Free" in message["content"]
     assert "No OAuth" in message["content"]
     assert "no authorization" in message["content"].lower() or "No OAuth" in message["content"]
     labels = [getattr(c, "item", c).label for c in message["view"].children]
-    assert labels == ["Create Free Listing", "Manage Connected Servers", "Install Parley (Optional)"]
+    assert labels == ["Create Free Listing", "Connected Servers", "Install Parley (Optional)"]
     async with db.session() as session:
         assert await session.scalar(select(OAuthSession)) is None
 
@@ -492,7 +492,7 @@ async def test_a_connected_server_never_hides_the_botless_route(db, config):
 
     view = interaction.response.sent[-1]["view"]
     labels = [c.label for c in view.children if getattr(c, "label", None)]
-    assert "Create Free Listing" in labels and "Manage Connected Servers" in labels
+    assert "Create Free Listing" in labels and "Connected Servers" in labels
 
 
 # ---------------------------------------------------------------- 10. the whole journey

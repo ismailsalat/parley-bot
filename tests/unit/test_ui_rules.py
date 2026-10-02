@@ -79,7 +79,7 @@ def buttons(view: discord.ui.View) -> list[discord.ui.Button]:
 
 
 NAVIGATION = {"Back", "Home", "Settings", "Cancel"}
-ALLOWED_SECONDARY = NAVIGATION | {"Directory Overview", "Relist", "Test Utilities"}
+ALLOWED_SECONDARY = NAVIGATION | {"Directory Overview", "Relist", "Test Utilities", "More Posting Options"}  # navigates to the advanced posting page
 
 
 def test_no_screen_is_overloaded(db):

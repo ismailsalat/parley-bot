@@ -380,7 +380,7 @@ async def test_my_servers_includes_unverified_free_listing(db, config):
     interaction = FakeInteraction(bot, USER_ID)
     await show_my_servers(interaction)
     message = sent(interaction)
-    assert "My Server Listing" in message["content"]
+    assert "My Free Listing" in message["content"]
     assert "Unverified" in message["content"]
     assert "Delete Listing" in [getattr(c, "label", None) for c in message["view"].children]
 
