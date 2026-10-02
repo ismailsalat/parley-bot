@@ -183,7 +183,7 @@ async def test_free_delete_revokes_pending_review_and_blocks_other_users(db, con
 
 
 async def test_free_listing_menu_has_delete_and_verification_explanation(db, config):
-    from bot.views.quick_post import QuickStartView, show_quick_start
+    from bot.views.quick_post import show_quick_start
     from tests.fakes import FakeBot, FakeInteraction
     bot = FakeBot(db)
     async with db.session() as session:
