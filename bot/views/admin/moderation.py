@@ -325,6 +325,9 @@ class StaffAdButton(
         return cls(int(match["gid"]))
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        # Acknowledge before checking permissions (which may query the database).
+        # Discord invalidates component interactions that remain unanswered.
+        await acknowledge(interaction)
         try:
             if not await permissions.is_staff(interaction.client, interaction.user.id):
                 await reply(interaction, "Only Parley moderators may manage advertisements.")
@@ -339,7 +342,13 @@ class StaffAdButton(
 
 async def post_private_staff_controls(bot: ParleyBot, guild_id: int, context: str) -> None:
     """Public components cannot be moderator-invisible: show them privately."""
-    channel = bot.log_channel()
+    # Moderation controls are optional during isolated panel tests and in
+    # partially configured installations. Do not fail public ad publication
+    # if the staff-log channel accessor is unavailable.
+    get_log_channel = getattr(bot, "log_channel", None)
+    if not callable(get_log_channel):
+        return
+    channel = get_log_channel()
     if channel is None:
         return
     # Never expose moderation controls in a staff channel accidentally visible

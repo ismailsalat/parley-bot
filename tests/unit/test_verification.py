@@ -72,7 +72,7 @@ async def test_post_server_ad_without_the_bot_offers_quick_post(db):
     await start_post_flow(interaction)
 
     message = interaction.response.sent[-1]
-    assert "Advertise your server for free" in message["content"]
+    assert "Post your Discord server for free" in message["content"]
     assert "No OAuth" in message["content"]
     assert "no authorization" in message["content"].lower() or "No OAuth" in message["content"]
     labels = [getattr(c, "item", c).label for c in message["view"].children]
