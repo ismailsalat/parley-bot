@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from bot.database import repository
-from bot.database.models import ListingStatus
+from bot.database.models import Listing, ListingStatus
 from bot.services import listings, quick_post
 from bot.services.errors import Conflict, CooldownActive, ValidationError
 
@@ -239,6 +239,82 @@ async def test_only_original_submitter_can_restore_deleted_guild(db, config):
             await submit(session, config, gid=6055, user=9999, at=NOW + timedelta(hours=26))
         row, outcome = await submit(session, config, gid=6055, user=7111, at=NOW + timedelta(hours=26))
         assert (outcome, row.quick_submitted_by) == ("published", 7111)
+
+
+async def test_existing_free_listing_does_not_change_owner_or_ad(db, config):
+    """Someone pasting a Camelot vanity cannot overwrite Camelot's Free ad."""
+    async with db.session() as session:
+        original, _ = await submit(session, config, gid=6061, user=7116)
+        old_ad = original.advertisement_text
+    async with db.session() as session:
+        with pytest.raises(Conflict, match="another account"):
+            await submit(session, config, gid=6061, user=7117, at=NOW + timedelta(days=3))
+    async with db.session() as session:
+        unchanged = await repository.get_listing(session, 6061)
+        assert unchanged.quick_submitted_by == 7116
+        assert unchanged.advertisement_text == old_ad
+        assert (await repository.get_guild(session, 6061)).connected_by is None
+
+
+async def test_legacy_listing_cannot_be_claimed_with_public_invite(db, config):
+    async with db.session() as session:
+        await repository.upsert_guild(
+            session, guild_id=6062, name="Legacy Camelot", icon_url=None, member_count=100,
+        )
+        session.add(Listing(guild_id=6062, category="Gaming", advertisement_text="Old ad",
+                            quick_submitted_by=None, status=ListingStatus.ACTIVE))
+    async with db.session() as session:
+        with pytest.raises(Conflict, match="managed or legacy"):
+            await submit(session, config, gid=6062, user=7118, at=NOW + timedelta(days=2))
+        assert (await repository.get_listing(session, 6062)).quick_submitted_by is None
+
+
+async def test_original_submitter_can_use_existing_listing_after_cooldown(db, config):
+    async with db.session() as session:
+        original, _ = await submit(session, config, gid=6063, user=7119)
+        old_ad = original.advertisement_text
+    async with db.session() as session:
+        with pytest.raises(CooldownActive):
+            await submit(session, config, gid=6063, user=7119, at=NOW + timedelta(minutes=1))
+        row, result = await submit(session, config, gid=6063, user=7119,
+                                   at=NOW + timedelta(days=2))
+        assert result == "reposted"
+        assert row.advertisement_text == old_ad  # never silently replace copy
+
+
+async def test_stale_free_submitter_cannot_modify_newly_connected_listing(db, config):
+    """An old Free ID must never outrank a subsequent verified connection."""
+    async with db.session() as session:
+        await submit(session, config, gid=6064, user=7121)
+        await repository.upsert_guild(
+            session, guild_id=6064, name="Camelot", icon_url=None,
+            member_count=100, connected_by=99001,
+        )
+    async with db.session() as session:
+        with pytest.raises(Conflict, match="connected to Parley"):
+            await submit(session, config, gid=6064, user=7121, at=NOW + timedelta(days=2))
+        with pytest.raises(Conflict, match="connected to Parley"):
+            await quick_post.edit_quick_listing(
+                session, config, guild_id=6064, actor_id=7121,
+                category="Anime", info=guild(6064),
+                invite_url="https://discord.gg/testInvite", description="New ad", now=NOW,
+            )
+        with pytest.raises(Conflict, match="connected to Parley"):
+            await quick_post.delete_quick_listing(
+                session, config, actor_id=7121, guild_id=6064, now=NOW,
+            )
+        row = await repository.get_listing(session, 6064)
+        assert row.status == ListingStatus.ACTIVE
+        assert row.quick_submitted_by == 7121  # preserved for staff reconciliation
+        assert (await repository.get_guild(session, 6064)).connected_by == 99001
+
+
+def test_existing_listing_help_buttons_are_navigation_only(db, config):
+    from bot.views.quick_post import ExistingListingHelpView
+    from tests.fakes import FakeBot
+    view = ExistingListingHelpView(FakeBot(db), user_id=4)
+    assert {item.label for item in view.children} >= {"My Server Listings", "Connected Servers"}
+    assert all(not hasattr(item, "guild_id") for item in view.children)
 
 
 def test_vanity_codes_and_invite_variants_use_one_server_identity(config):

@@ -152,6 +152,67 @@ async def my_quick_listing(session: AsyncSession, actor_id: int) -> Listing | No
     return await session.scalar(select(Listing).where(Listing.quick_submitted_by == actor_id))
 
 
+async def can_restore_deleted_listing(session: AsyncSession, row: Listing, actor_id: int) -> bool:
+    """Only an original submitter may restore their own deleted Free Listing.
+
+    An invite alone must never reclaim a listing, including a legacy or
+    staff-removed record. A deletion preserves the original actor in the audit
+    trail even though the one-listing slot is released in ``quick_submitted_by``.
+    """
+    if row.status != ListingStatus.REMOVED or row.quick_submitted_by is not None:
+        return False
+    latest = await session.scalar(
+        select(AuditLog).where(AuditLog.guild_id == row.guild_id)
+        .order_by(AuditLog.id.desc()).limit(1)
+    )
+    guild = await repository.get_guild(session, row.guild_id)
+    return bool(
+        latest is not None
+        and latest.action == "listing.quick_deleted"
+        and latest.actor_id == actor_id
+        and guild is not None
+        and guild.connected_by is None
+    )
+
+
+def existing_listing_guidance(row: Listing) -> str:
+    """Actionable, non-disclosing guidance when a guild is already listed."""
+    if row.status == ListingStatus.SUSPENDED:
+        return ("This server's listing is suspended. Ask Parley staff to review it; "
+                "a new invite cannot bypass a suspension.")
+    if row.quick_submitted_by is not None:
+        return (
+            "This Discord server already has a Free Listing submitted from another account. "
+            "A different invite or vanity link still points to the same server. "
+            "If you're an admin, use **Connected Servers** to verify management "
+            "inside your server, or contact Parley staff for a listing review."
+        )
+    if row.status == ListingStatus.REMOVED:
+        return (
+            "This server has a previous listing that cannot be reclaimed with an invite. "
+            "Ask Parley staff to review its ownership or removal."
+        )
+    return (
+        "This Discord server already has a managed or legacy listing. "
+        "If you manage the server, choose **Connected Servers** to verify your "
+        "permissions; otherwise contact Parley staff."
+    )
+
+
+async def ensure_not_connected(session: AsyncSession, guild_id: int) -> None:
+    """Protect a Connected listing if a legacy/stale Free submitter ID remains.
+
+    A guild can gain a verified manager while a user holds an old Free Listing
+    menu open. Never let that menu change or delete a now-connected ad.
+    """
+    guild = await repository.get_guild(session, guild_id)
+    if guild is not None and guild.connected_by is not None:
+        raise Conflict(
+            "This server is connected to Parley now. Use **Connected Servers** "
+            "with verified Manage Server permissions to change its listing."
+        )
+
+
 async def create_quick_listing(
     session: AsyncSession,
     config: RuntimeConfig,
@@ -201,24 +262,10 @@ async def create_quick_listing(
         select(Listing).where(Listing.guild_id == info.guild_id).with_for_update()
     )
     if previous is not None:
+        await ensure_not_connected(session, info.guild_id)
         if previous.quick_submitted_by != actor_id:
-            # A deleted unverified listing may be restored by its ORIGINAL
-            # submitter after cooldown. Audit history is durable even though
-            # quick_submitted_by was cleared to free their one-listing slot.
-            restore_allowed = False
-            if previous.status == ListingStatus.REMOVED and previous.quick_submitted_by is None:
-                last_action = await session.scalar(
-                    select(AuditLog).where(AuditLog.guild_id == info.guild_id)
-                    .order_by(AuditLog.id.desc()).limit(1)
-                )
-                stored_guild = await repository.get_guild(session, info.guild_id)
-                restore_allowed = bool(
-                    last_action is not None and last_action.action == "listing.quick_deleted"
-                    and last_action.actor_id == actor_id
-                    and stored_guild is not None and stored_guild.connected_by is None
-                )
-            if not restore_allowed:
-                raise Conflict("This server has an existing listing. Only its verified managers can change it.")
+            if not await can_restore_deleted_listing(session, previous, actor_id):
+                raise Conflict(existing_listing_guidance(previous))
             previous.quick_submitted_by = actor_id
         if previous.status == ListingStatus.SUSPENDED:
             raise Conflict("This server's listing is suspended. Contact Parley staff.")
@@ -306,6 +353,7 @@ async def edit_quick_listing(
     row = await session.scalar(select(Listing).where(Listing.guild_id == guild_id).with_for_update())
     if row is None or row.quick_submitted_by != actor_id:
         raise Conflict("Only the original unverified submitter may edit this Quick Post.")
+    await ensure_not_connected(session, guild_id)
     if row.status != ListingStatus.ACTIVE or row.pending_changes:
         raise Conflict("This advertisement is not available for editing right now.")
     if row.last_ad_edit_at is not None and row.refreshed_at is not None and row.last_ad_edit_at >= row.refreshed_at:
@@ -347,6 +395,7 @@ async def delete_quick_listing(
     row = await session.scalar(select(Listing).where(Listing.guild_id == guild_id).with_for_update())
     if row is None or row.quick_submitted_by != actor_id:
         raise Conflict("This Free Listing is no longer available to delete.")
+    await ensure_not_connected(session, guild_id)
     # If staff removed an ad, its submitter must be able to free their slot
     # without creating an owner-deleted tombstone that permits guild reclaims.
     was_staff_removed = row.status in (ListingStatus.REMOVED, ListingStatus.SUSPENDED)
@@ -383,6 +432,7 @@ async def publish_approved_ad(
     row = await session.scalar(select(Listing).where(Listing.guild_id == guild_id).with_for_update())
     if not row or row.quick_submitted_by != actor_id or row.status != ListingStatus.ACTIVE or not row.awaiting_ad:
         raise Conflict("This server is not waiting for your approved advertisement.")
+    await ensure_not_connected(session, guild_id)
     if info.guild_id != guild_id or not row.invite_url:
         raise Conflict("The approved server no longer matches. Ask staff for help.")
     content, unsafe = prepare_quick_ad(

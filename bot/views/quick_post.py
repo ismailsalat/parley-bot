@@ -47,6 +47,17 @@ async def show_quick_start(interaction: discord.Interaction, *, notice: str = ""
         existing = await quick_service.my_quick_listing(session, interaction.user.id)
         stored = await repository.get_guild(session, existing.guild_id) if existing else None
         deleted_wait = await cooldowns.remaining(session, "quick_post_deleted", interaction.user.id, now)
+    if existing is not None and stored is not None and stored.connected_by is not None:
+        # A later verified connection wins over stale unverified submitter data.
+        # Never show working edit/delete controls for a now-connected guild.
+        await show_screen(
+            interaction,
+            "## Server connected to Parley\n"
+            "This server now has verified management. Use **Connected Servers** "
+            "to manage it with your current Discord permissions, or contact staff.",
+            view=ExistingListingHelpView(bot, interaction.user.id),
+        )
+        return
     listed_wait = None
     if existing is not None and existing.refreshed_at is not None:
         ready_at = existing.refreshed_at + timedelta(minutes=bot.runtime.listings.quick_post_cooldown_minutes)
@@ -253,6 +264,37 @@ class QuickStartView(OwnedView):
         await open_connected_picker(interaction)
 
 
+class ExistingListingHelpView(OwnedView):
+    """Offer safe next steps instead of a dead-end ownership warning.
+
+    This UI is navigational only: it never grants ownership or edits the
+    existing listing. Connected management always checks real permissions.
+    """
+
+    def __init__(self, bot: ParleyBot, user_id: int):
+        super().__init__(user_id, timeout=600)
+        self.bot = bot
+        mine = discord.ui.Button(label="My Server Listings", style=discord.ButtonStyle.primary)
+        mine.callback = self._mine
+        self.add_item(mine)
+        connected = discord.ui.Button(label="Connected Servers", style=discord.ButtonStyle.secondary)
+        connected.callback = self._connected
+        self.add_item(connected)
+        support_url = bot.runtime.bot.support_url
+        if support_url and support_url.startswith(("https://", "http://")):
+            self.add_item(discord.ui.Button(label="Contact Staff", url=support_url))
+
+    async def _mine(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction, thinking=False)
+        from bot.views.management import show_my_servers
+        await show_my_servers(interaction)
+
+    async def _connected(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
+        from bot.views.listings import open_connected_picker
+        await open_connected_picker(interaction)
+
+
 class QuickWizardView(OwnedView):
     """Dropdown prevents ambiguous comma-separated or invented category values."""
 
@@ -314,7 +356,12 @@ class QuickPostModal(discord.ui.Modal):
             if self.editing and existing is None:
                 raise ValidationError("Your original Free Listing no longer exists.")
             if not self.editing and existing is not None and existing.status != ListingStatus.REMOVED:
-                raise ValidationError("You already have a Free Listing. Open **My Server Listings** to edit, repost, or delete it.")
+                await show_quick_start(
+                    interaction,
+                    notice="You already have a Free Listing. Use its **Edit**, **Repost**, "
+                           "**Switch**, or **Delete** controls instead of making a duplicate.",
+                )
+                return
             if self.intro_only:
                 raw_invite = self.invite.value.strip()
             elif self.editing and existing:
@@ -345,7 +392,32 @@ class QuickPostModal(discord.ui.Modal):
             # Review a server marked age_restricted instead of blanket-rejecting it.
             additional_review = nsfw_level == "age_restricted"
             if existing is not None and invite.guild.id != existing.guild_id:
-                raise ValidationError("You can only edit the server already listed on your account.")
+                await show_quick_start(
+                    interaction,
+                    notice="Your account already has a Free Listing for a different server. "
+                           "Use **Switch Server** to release its slot. The normal cooldown still applies.",
+                )
+                return
+            # Catch existing listings *before* making the user finish a preview.
+            # Do not infer server ownership from the public invite. A removed
+            # listing may only be restored if its original submitter deleted it.
+            async with bot.db.session() as session:
+                previous = await repository.get_listing(session, invite.guild.id)
+                can_restore = bool(
+                    previous is not None
+                    and await quick_service.can_restore_deleted_listing(
+                        session, previous, interaction.user.id
+                    )
+                )
+            if previous is not None and previous.quick_submitted_by != interaction.user.id and not can_restore:
+                await interaction.edit_original_response(
+                    content=(f"## Already listed · {discord.utils.escape_markdown(invite.guild.name)}\n"
+                             f"{quick_service.existing_listing_guidance(previous)}\n\n"
+                             "**No changes were made.** You can still manage your other listings."),
+                    view=ExistingListingHelpView(bot, interaction.user.id),
+                    allowed_mentions=safe_allowed_mentions(),
+                )
+                return
             icon = getattr(invite.guild, "icon", None)
             guild_info = listing_service.GuildInfo(
                 invite.guild.id, invite.guild.name,
@@ -379,7 +451,10 @@ class QuickPostModal(discord.ui.Modal):
                 allowed_mentions=safe_allowed_mentions(),
             )
         except ParleyError as exc:
-            await interaction.edit_original_response(content=f"⚠️ {exc.user_message}\n\nOpen Free Listing to try again.", view=None)
+            await interaction.edit_original_response(
+                content=f"⚠️ {exc.user_message}",
+                view=ExistingListingHelpView(self.bot, interaction.user.id),
+            )
         except Exception as exc:
             await handle_error(interaction, exc)
 
@@ -499,7 +574,10 @@ class QuickConfirmView(OwnedView):
             await _submit_draft(self.bot, self.draft, interaction.user.id, interaction=interaction)
             self.stop()
         except ParleyError as exc:
-            await interaction.edit_original_response(content=f"⚠️ {exc.user_message}", view=None)
+            await interaction.edit_original_response(
+                content=f"⚠️ {exc.user_message}",
+                view=ExistingListingHelpView(self.bot, interaction.user.id),
+            )
         except Exception as exc:
             await handle_error(interaction, exc)
 
