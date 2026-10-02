@@ -1,0 +1,30 @@
+Parley permission hardening
+===========================
+
+What changed
+------------
+- All hub/DM server pickers now discover every connected server where the caller
+  currently has Discord Administrator or Manage Server permission.
+- Discovery no longer relies only on Discord.py's local member cache. Missing
+  members are fetched from Discord with bounded concurrency and a short UI cache.
+- Sensitive actions still perform a fresh live permission check before changing
+  a listing, Network settings, relisting, or sending/answering partnerships.
+- Post Server Ad, Find Partners, Network, My Servers, Relist, Requests, Partner
+  Board, and directory management all use the same permission discovery logic.
+- /find and /manage are safe public entry commands so a manager can use them in
+  the Parley hub even if they are only a normal member of the hub. They only show
+  servers that person is authorized to manage.
+- Server-specific mutation commands remain hidden behind Manage Server:
+  /connect, /network, /relist (and setup keeps its own stronger runtime checks).
+- The shared connected-server listing form now re-checks Manage Server/Admin at
+  the action boundary, preventing stale pickers from granting access.
+
+Authorization rule
+------------------
+A connected server is manageable when Discord currently reports either:
+- Administrator, or
+- Manage Server (manage_guild).
+
+The server owner naturally qualifies through Discord's permissions. Merely being
+in a server, being in the Parley hub, or having used the bot before does not grant
+management rights.

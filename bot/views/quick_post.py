@@ -7,21 +7,19 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import discord
 
 from bot.database import repository
 from bot.database.models import ListingStatus
-from bot.services import cooldowns
 from bot.services import listings as listing_service
 from bot.services import quick_post as quick_service
 from bot.services.errors import ParleyError, ValidationError
 from bot.utils.helpers import format_duration, utcnow
 from bot.utils.mentions import safe_allowed_mentions
 from bot.views.base import ConfirmView, OwnedView, acknowledge, get_bot, guard, handle_error, reply
-from bot.views.welcome import add_bot_button, persistent_view, register_action, show_screen
+from bot.views.welcome import add_bot_button, register_action, show_screen
 
 if TYPE_CHECKING:
     from bot.core import ParleyBot
@@ -46,7 +44,9 @@ async def show_quick_start(interaction: discord.Interaction, *, notice: str = ""
     async with bot.db.session() as session:
         existing = await quick_service.my_quick_listing(session, interaction.user.id)
         stored = await repository.get_guild(session, existing.guild_id) if existing else None
-        deleted_wait = await cooldowns.remaining(session, "quick_post_deleted", interaction.user.id, now)
+        deleted_wait = (await quick_service.deleted_cooldown_remaining(session, bot.runtime, interaction.user.id, now)
+                        if existing is None else None)
+        attribution = await quick_service.listing_attribution(session, existing) if existing else ""
     if existing is not None and stored is not None and stored.connected_by is not None:
         # A later verified connection wins over stale unverified submitter data.
         # Never show working edit/delete controls for a now-connected guild.
@@ -58,17 +58,15 @@ async def show_quick_start(interaction: discord.Interaction, *, notice: str = ""
             view=ExistingListingHelpView(bot, interaction.user.id),
         )
         return
-    listed_wait = None
-    if existing is not None and existing.refreshed_at is not None:
-        ready_at = existing.refreshed_at + timedelta(minutes=bot.runtime.listings.quick_post_cooldown_minutes)
-        if ready_at > now:
-            listed_wait = ready_at - now
-    wait = deleted_wait or listed_wait
+    listed_wait = listing_service.refresh_remaining(existing, bot.runtime, now) if existing else None
+    wait = max((value for value in (deleted_wait, listed_wait) if value), default=None)
+    unpublished = bool(existing and existing.status == ListingStatus.ACTIVE and
+                       not existing.awaiting_ad and existing.message_id is None)
     view = QuickStartView(
         bot, interaction.user.id, existing=existing is not None,
         status=existing.status if existing else None,
         awaiting_ad=bool(existing and existing.awaiting_ad),
-        cooldown_active=bool(wait),
+        cooldown_active=bool(wait), unpublished=unpublished,
     )
     if existing:
         name = discord.utils.escape_markdown(stored.name) if stored else f"Server {existing.guild_id}"
@@ -77,10 +75,13 @@ async def show_quick_start(interaction: discord.Interaction, *, notice: str = ""
         message = (
             f"## 📣 My Free Listing · {name}\n"
             f"**Status:** {state} · Unverified\n"
-            + (f"**Next post:** {format_duration(wait)}\n" if wait else "")
+            f"{attribution}\n"
+            + ("**Publication:** Saved, not yet visible. Use **Retry Saved Ad**.\n" if unpublished else "")
+            + (f"**Next repost:** {format_duration(wait)} · <t:{int((now + wait).timestamp())}:R>\n" if wait else "")
+            + f"**Free repost setting:** {bot.runtime.listings.quick_post_cooldown_minutes} minutes\n"
             + ("Your server was removed. You may correct this ad, or release the slot to advertise another server.\n"
                if existing.status == ListingStatus.REMOVED else "")
-            + "\nUse the buttons below to edit, repost, switch, or delete your listing."
+            + "\n**Edit Ad** replaces the saved text. **Repost** moves the same ad back up."
         )
     else:
         message = (
@@ -95,7 +96,7 @@ async def show_quick_start(interaction: discord.Interaction, *, notice: str = ""
 class QuickStartView(OwnedView):
     def __init__(self, bot: ParleyBot, owner_id: int, *, existing: bool = False,
                  status: str | None = None, awaiting_ad: bool = False,
-                 cooldown_active: bool = False):
+                 cooldown_active: bool = False, unpublished: bool = False):
         super().__init__(owner_id)
         self.bot = bot
         if existing and status == ListingStatus.ACTIVE and awaiting_ad:
@@ -108,24 +109,28 @@ class QuickStartView(OwnedView):
             corrected.disabled = cooldown_active
             self.add_item(corrected)
         elif existing:
-            repost = discord.ui.Button(label="Repost Existing Ad", emoji="🔄", style=discord.ButtonStyle.primary, row=0)
+            repost = discord.ui.Button(label="Retry Saved Ad" if unpublished else "Repost Existing Ad", emoji="🔄", style=discord.ButtonStyle.primary, row=0)
             repost.disabled = status not in (None, ListingStatus.ACTIVE, ListingStatus.EXPIRED)
-            repost.callback = self._repost
-            repost.disabled = repost.disabled or cooldown_active
+            repost.callback = self._retry if unpublished else self._repost
+            repost.disabled = repost.disabled or (cooldown_active and not unpublished)
             self.add_item(repost)
             edit = discord.ui.Button(label="Edit Ad", emoji="✏️", style=discord.ButtonStyle.secondary, row=0)
             edit.disabled = status not in (None, ListingStatus.ACTIVE)
             edit.callback = self._edit
             self.add_item(edit)
+            update_invite = discord.ui.Button(label="Update Invite", style=discord.ButtonStyle.primary, row=0)
+            update_invite.disabled = status not in (ListingStatus.ACTIVE, ListingStatus.EXPIRED)
+            update_invite.callback = self._update_invite
+            self.add_item(update_invite)
         else:
             quick = discord.ui.Button(label="Create Free Listing", emoji="📣", style=discord.ButtonStyle.primary, row=0)
             quick.callback = self._quick
             quick.disabled = cooldown_active
             self.add_item(quick)
-            if cooldown_active:
-                refresh = discord.ui.Button(label="Check Cooldown", style=discord.ButtonStyle.secondary, row=1)
-                refresh.callback = self._refresh
-                self.add_item(refresh)
+        if existing or cooldown_active:
+            refresh = discord.ui.Button(label="Check Cooldown", style=discord.ButtonStyle.secondary, row=1)
+            refresh.callback = self._refresh
+            self.add_item(refresh)
         if existing:
             switch = discord.ui.Button(label="Switch Server", style=discord.ButtonStyle.secondary, row=1)
             switch.callback = self._switch
@@ -162,6 +167,33 @@ class QuickStartView(OwnedView):
             view=QuickWizardView(self.bot, interaction.user.id, editing=True),
         )
 
+    async def _update_invite(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(UpdateFreeInviteModal(self.bot))
+
+    async def _retry(self, interaction: discord.Interaction) -> None:
+        """Deliver saved copy without charging another repost cycle."""
+        await acknowledge(interaction)
+        try:
+            from bot.services import moderation
+            async with self.bot.db.session() as session:
+                existing = await quick_service.my_quick_listing(session, interaction.user.id)
+                if existing is None or existing.status != ListingStatus.ACTIVE or existing.awaiting_ad:
+                    raise ValidationError("This account has no saved ad ready for publication.")
+                await moderation.ensure_allowed(session, self.bot.runtime,
+                                                guild_ids=[existing.guild_id], user_id=interaction.user.id)
+                await quick_service.ensure_not_connected(session, existing.guild_id)
+            published = await self.bot.panels.publish_listing(existing.guild_id, only_if_missing=True)
+            await show_quick_start(interaction, notice=(
+                "✅ Your saved ad is in the directory." if published is not None else
+                "⚠️ Your ad is saved, but the directory is still unavailable. Ask staff to check its channel permissions."
+            ))
+        except ParleyError as exc:
+            await show_quick_start(interaction, notice=f"⚠️ {exc.user_message}")
+        except discord.HTTPException:
+            await show_quick_start(interaction, notice="⚠️ Discord couldn't publish your saved ad. You can retry here.")
+        except Exception as exc:
+            await handle_error(interaction, exc)
+
     async def _repost(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction)
         try:
@@ -192,16 +224,32 @@ class QuickStartView(OwnedView):
                     description="Existing approved listing", now=utcnow(),
                     is_test=self.bot.runtime.hub.mode == "test",
                 )
-            published = await self.bot.panels.publish_listing(listing.guild_id)
+            async def release_timer():
+                async with self.bot.db.session() as session:
+                    await listing_service.release_failed_refresh(
+                        session, guild_id=listing.guild_id, claimed_at=listing.refreshed_at,
+                        previous_at=existing.refreshed_at, previous_message_id=existing.message_id,
+                        previous_status=existing.status,
+                    )
+
+            try:
+                published = await self.bot.panels.publish_listing(listing.guild_id)
+            except Exception:
+                await release_timer()
+                raise
+            if published is None:
+                await release_timer()
             await interaction.edit_original_response(
-                content=("✅ Your approved ad was reposted. The next Free relist is in 24 hours."
+                content=(f"✅ Your approved ad was reposted. Free repost cooldown: {self.bot.runtime.listings.quick_post_cooldown_minutes} minutes."
                          if published is not None else
-                         "✅ Relist saved, but the directory is temporarily unavailable. "
-                         "Parley will retry automatically; the 24-hour timer remains in effect."),
-                view=None, allowed_mentions=safe_allowed_mentions(),
+                         "⚠️ The directory is temporarily unavailable. Your repost timer was not charged. "
+                         "Use My Server Listings to retry."),
+                view=ExistingListingHelpView(self.bot, interaction.user.id), allowed_mentions=safe_allowed_mentions(),
             )
         except ParleyError as exc:
-            await interaction.edit_original_response(content=f"⚠️ {exc.user_message}", view=None)
+            await show_quick_start(interaction, notice=f"⚠️ {exc.user_message}")
+        except discord.HTTPException:
+            await show_quick_start(interaction, notice="⚠️ Discord couldn't repost your ad. Your timer was not charged; try again here.")
         except Exception as exc:
             await handle_error(interaction, exc)
 
@@ -262,6 +310,57 @@ class QuickStartView(OwnedView):
         await acknowledge(interaction)
         from bot.views.listings import open_connected_picker
         await open_connected_picker(interaction)
+
+
+class UpdateFreeInviteModal(discord.ui.Modal):
+    """Safe replacement for an expired regular or vanity invite."""
+
+    def __init__(self, bot: ParleyBot):
+        super().__init__(title="Update Server Invite", timeout=600)
+        self.bot = bot
+        self.invite = discord.ui.TextInput(
+            label="New Discord invite", placeholder="discord.gg/your-server",
+            style=discord.TextStyle.short, max_length=120, required=True,
+        )
+        self.add_item(self.invite)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await acknowledge(interaction)
+        try:
+            code = listing_service.parse_invite_code(self.invite.value.strip())
+            try:
+                resolved = await self.bot.fetch_invite(code, with_counts=False)
+            except (discord.NotFound, discord.Forbidden) as exc:
+                raise ValidationError("That invite is expired or inaccessible. Create a working one.") from exc
+            except discord.HTTPException as exc:
+                raise ValidationError("Discord couldn't verify that invite. Try again later.") from exc
+            if resolved.guild is None:
+                raise ValidationError("Discord didn't return a server for that invite.")
+            async with self.bot.db.session() as session:
+                listing = await quick_service.my_quick_listing(session, interaction.user.id)
+                if listing is None:
+                    raise ValidationError("Your Free Listing no longer exists.")
+                guild_id = listing.guild_id
+                await quick_service.update_quick_invite(
+                    session, self.bot.runtime, actor_id=interaction.user.id,
+                    guild_id=guild_id, verified_guild_id=resolved.guild.id,
+                    new_invite_url=listing_service.canonical_invite(code), now=utcnow(),
+                )
+            # Change the existing message/button in place; no new bump or timer.
+            try:
+                await self.bot.panels.update_listing_message(guild_id)
+            except discord.HTTPException:
+                log.exception("Invite saved but Discord listing edit delayed: %s", guild_id)
+                await show_quick_start(interaction, notice=(
+                    "✅ Your new invite was saved. The public message update is delayed; "
+                    "Parley will retry after Discord recovers."
+                ))
+                return
+            await show_quick_start(interaction, notice="✅ Invite updated. Your relist cooldown is unchanged.")
+        except ParleyError as exc:
+            await show_quick_start(interaction, notice=f"⚠️ {exc.user_message}")
+        except Exception as exc:
+            await handle_error(interaction, exc)
 
 
 class ExistingListingHelpView(OwnedView):
@@ -403,6 +502,7 @@ class QuickPostModal(discord.ui.Modal):
             # listing may only be restored if its original submitter deleted it.
             async with bot.db.session() as session:
                 previous = await repository.get_listing(session, invite.guild.id)
+                attribution = await quick_service.listing_attribution(session, previous) if previous else ""
                 can_restore = bool(
                     previous is not None
                     and await quick_service.can_restore_deleted_listing(
@@ -412,7 +512,7 @@ class QuickPostModal(discord.ui.Modal):
             if previous is not None and previous.quick_submitted_by != interaction.user.id and not can_restore:
                 await interaction.edit_original_response(
                     content=(f"## Already listed · {discord.utils.escape_markdown(invite.guild.name)}\n"
-                             f"{quick_service.existing_listing_guidance(previous)}\n\n"
+                             f"{attribution}\n{quick_service.existing_listing_guidance(previous)}\n\n"
                              "**No changes were made.** You can still manage your other listings."),
                     view=ExistingListingHelpView(bot, interaction.user.id),
                     allowed_mentions=safe_allowed_mentions(),
@@ -425,7 +525,8 @@ class QuickPostModal(discord.ui.Modal):
                 getattr(invite, "approximate_member_count", 0) or 0,
             )
             draft = QuickDraft(
-                guild=guild_info, invite_url=listing_service.canonical_invite(invite.code),
+                guild=guild_info, invite_url=(existing.invite_url if self.editing and existing else
+                                             listing_service.canonical_invite(invite.code)),
                 description=self.description.value if self.intro_only else "",
                 category=self.category, editing=self.editing,
                 raw_ad=None if self.intro_only else self.description.value,
@@ -545,17 +646,14 @@ async def _submit_draft(bot: ParleyBot, draft: QuickDraft, user_id: int, *, inte
         except discord.HTTPException:
             log.exception("Directory publication failed for %s", listing.guild_id)
             message = "✅ Ad saved. The directory is currently unavailable; staff may need to republish it."
-    await interaction.edit_original_response(
-        content=message + "\n\nConnected servers get additional management and approved partnership tools; installation is optional.",
-        view=persistent_view(add_bot_button(bot)),
-        allowed_mentions=safe_allowed_mentions(),
-    )
+    await show_quick_start(interaction, notice=message)
 
 
 class QuickConfirmView(OwnedView):
     def __init__(self, bot: ParleyBot, owner_id: int, draft: QuickDraft):
         super().__init__(owner_id, timeout=300)
         self.bot, self.draft = bot, draft
+        self._submitting = False
         submit = discord.ui.Button(label="Confirm Ad", emoji="✅", style=discord.ButtonStyle.success)
         submit.callback = self._submit
         self.add_item(submit)
@@ -570,6 +668,10 @@ class QuickConfirmView(OwnedView):
 
     async def _submit(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction)
+        if self._submitting:
+            await reply(interaction, "This confirmation is already being processed. Open My Server Listings to check its status.")
+            return
+        self._submitting = True
         try:
             await _submit_draft(self.bot, self.draft, interaction.user.id, interaction=interaction)
             self.stop()

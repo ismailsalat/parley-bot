@@ -19,6 +19,8 @@ from bot.config.runtime import apply_overrides, default_config, known_keys
 from bot.config.settings import SettingsError, load_settings
 from bot.database import repository
 from bot.database.session import Database
+from bot.services import configuration
+from bot.services.errors import ValidationError
 
 
 def _show(value: object) -> str:
@@ -47,7 +49,10 @@ async def _run(args: argparse.Namespace) -> int:
                 print(f"Unknown setting: {args.key}. Run 'list' to see every setting.", file=sys.stderr)
                 return 1
             if args.command == "unset":
-                removed = await repository.delete_runtime_setting(session, args.key)
+                aliases = ("listings.refresh_cooldown_minutes", "listings.quick_post_cooldown_minutes")
+                removed = False
+                for key in aliases if args.key in aliases else (args.key,):
+                    removed = await repository.delete_runtime_setting(session, key) or removed
                 print("Reset to default." if removed else "That setting already uses the default.")
                 return 0
 
@@ -55,15 +60,12 @@ async def _run(args: argparse.Namespace) -> int:
                 value = json.loads(args.value)
             except json.JSONDecodeError:
                 value = args.value  # plain text
-            _config, notes = apply_overrides(default_config(), {**overrides, args.key: value})
-            problems = [n for n in notes if n.startswith(f"{args.key}:")]
-            if problems:
-                print(f"Invalid value: {problems[0]}", file=sys.stderr)
+            try:
+                await configuration.save(session, {args.key: value}, actor_id=None)
+            except ValidationError as exc:
+                print(f"Invalid value: {exc.user_message}", file=sys.stderr)
                 return 1
-            await repository.set_runtime_setting(session, args.key, value)
             print(f"Saved {args.key} = {_show(value)}")
-            for note in notes:
-                print(f"! {note}")
             return 0
     finally:
         await db.dispose()

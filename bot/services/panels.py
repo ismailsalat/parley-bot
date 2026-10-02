@@ -19,6 +19,7 @@ import discord
 from bot.database import repository
 from bot.database.models import ListingStatus
 from bot.services import listings as listing_service
+from bot.services import message_cleanup
 from bot.services.errors import ValidationError
 from bot.utils.helpers import listing_jump_url
 from bot.utils.mentions import safe_allowed_mentions
@@ -239,6 +240,31 @@ class PanelService:
             log.warning("Could not delete message %s in channel %s: %s", message_id, channel_id, exc)
             return False
         return True
+
+    async def _delete_queued(self, channel_id: int | None, message_id: int | None) -> bool:
+        """Attempt deletion and remove its durable record only on success/404."""
+        if not await self._delete(channel_id, message_id):
+            return False
+        async with self.bot.db.session() as session:
+            await message_cleanup.remove(session, channel_id, message_id)
+        return True
+
+    async def retry_pending_message_deletions(self, *, limit: int = 30) -> tuple[int, int]:
+        """Bounded maintenance pass; older failures remain queued for next tick."""
+        async with self.bot.db.session() as session:
+            rows = await message_cleanup.pending(session, limit=limit)
+            references = [(row.channel_id, row.message_id) for row in rows]
+        deleted = 0
+        for channel_id, message_id in references:
+            try:
+                if await self._delete_queued(channel_id, message_id):
+                    deleted += 1
+                else:
+                    async with self.bot.db.session() as session:
+                        await message_cleanup.mark_failed(session, channel_id, message_id)
+            except Exception:
+                log.exception("Unable to process pending message deletion %s/%s", channel_id, message_id)
+        return deleted, len(references) - deleted
 
     async def delete_listing_message(self, channel_id: int | None, message_id: int | None) -> None:
         await self._delete(channel_id, message_id)
@@ -511,13 +537,17 @@ class PanelService:
         log.info("Permanent panels refreshed: %s", results)
         return results
 
-    async def cleanup_orphan_entry_panels(self, *, history_limit: int = 250) -> int:
+    async def cleanup_orphan_entry_panels(self, *, history_limit: int | None = 250) -> int:
         """Remove stale bot-owned entry panels left behind by older deployments.
 
         The database tracks the current panel message in each channel, but very
         old releases or a crash between send/delete can leave an extra public
         message behind. Users may keep clicking those old controls. On startup,
-        scan only recent bot-authored messages that contain a top-level
+        normally scan recent bot-authored messages; staff may request a full
+        paginated scan (history_limit=None) to include pre-upgrade content.
+        Only messages by this exact bot account and unmistakable old panel
+        signatures are eligible. A full scan never deletes advertisements or
+        other users' posts. Look for messages that contain a top-level
         ``wp:act:*`` component and remove every one except the currently stored
         panel IDs. Listing/request cards use different custom-id prefixes and are
         therefore not touched.
@@ -575,8 +605,10 @@ class PanelService:
                     # orphan scan could never recognize duplicate rules posts.
                     is_old_rules = (
                         channel.id == self.bot.runtime.hub.rules_channel_id
-                        and (message.content or "").startswith((
-                            "# 📜 Parley Server Rules", "# 📜 Server Rules"
+                        and (message.content or "").lstrip().startswith((
+                            "# 📜 Parley Server Rules", "# 📜 Server Rules",
+                            "# Parley Server Rules", "## Parley Server Rules",
+                            "# Parley Rules", "## Server Rules",
                         ))
                     )
                     if not (has_entry_action or is_legacy_welcome or is_old_perks or is_old_rules):
@@ -680,7 +712,7 @@ class PanelService:
                 if current and current.approval_notice_message_id == message_id:
                     current.approval_notice_message_id = None
 
-    async def publish_listing(self, guild_id: int) -> discord.Message | None:
+    async def publish_listing(self, guild_id: int, *, only_if_missing: bool = False) -> discord.Message | None:
         """(Re)post a listing at the bottom of #server-directory, then the panel under it.
 
         Returns None when the listing isn't active or no listings channel is set.
@@ -697,6 +729,22 @@ class PanelService:
                 log.warning("listing.not_published guild_id=%s (listings channel not configured)", guild_id)
                 return None
 
+            if only_if_missing and listing.message_id is not None:
+                old_channel = self.bot.get_channel(listing.channel_id) if listing.channel_id else None
+                if old_channel is not None:
+                    # A partial message does not prove the Discord post exists.
+                    # This matters after staff delete a message or an outage.
+                    fetch = getattr(old_channel, "fetch_message", None)
+                    if not callable(fetch):
+                        return old_channel.get_partial_message(listing.message_id)
+                    try:
+                        return await fetch(listing.message_id)
+                    except discord.NotFound:
+                        log.info("Directory message %s missing; republishing %s", listing.message_id, guild_id)
+                    except discord.HTTPException as exc:
+                        log.warning("Could not verify directory message %s: %s", listing.message_id, exc)
+                        return None  # cannot safely assume absence during outage
+
             # 1. publish the replacement FIRST. If Discord refuses the send, the
             # current live listing stays untouched and the user can try again.
             try:
@@ -709,22 +757,47 @@ class PanelService:
                     ) from exc
                 raise
 
-            # 2. now that a replacement exists, remove the previous copy/controls.
-            await self._delete(listing.channel_id, listing.controls_message_id)
-            if listing.message_id and listing.message_id != message.id:
-                await self._delete(listing.channel_id, listing.message_id)
+            # 2. atomically remember old messages for cleanup AND record the
+            # replacement. A failed Discord delete must survive bot restarts.
+            old_messages = [
+                (listing.channel_id, mid)
+                for mid in (listing.controls_message_id, listing.message_id)
+                if mid and (listing.channel_id != channel.id or mid != message.id)
+            ]
+            try:
+                async with self.bot.db.session() as session:
+                    for old_channel, old_id in old_messages:
+                        await message_cleanup.enqueue(session, old_channel, old_id,
+                                                      guild_id=guild_id)
+                    await listing_service.record_message(
+                        session, guild_id=guild_id, channel_id=channel.id, message_id=message.id
+                    )
+                    if listing.message_id is None and listing.quick_submitted_by is not None:
+                        from bot.utils.helpers import utcnow
+                        current = await repository.get_listing(session, guild_id)
+                        current.refreshed_at = utcnow()  # first delivery starts Free timer
+            except Exception:
+                # The database did not commit the new public location. Prefer
+                # the old advertisement; do not leave an untracked replacement.
+                await self._delete(channel.id, message.id)
+                raise
 
-            # 3. store the new message ID.
-            async with self.bot.db.session() as session:
-                await listing_service.record_message(
-                    session, guild_id=guild_id, channel_id=channel.id, message_id=message.id
-                )
-            # 4. panel underneath (reposts/deletes the old panel safely).
-            await self._repost_panel(LISTINGS_PANEL, channel)
+            # 3. remove old copies. Failed deletes remain queued permanently
+            # until a later maintenance pass succeeds.
+            for old_channel, old_id in old_messages:
+                await self._delete_queued(old_channel, old_id)
+            # Auxiliary UI failures must not make a successfully sent ad look failed.
+            try:
+                await self._repost_panel(LISTINGS_PANEL, channel)
+            except Exception:
+                log.exception("Listing %s published; directory panel repair is delayed", guild_id)
         log.info("listing.published guild_id=%s message_id=%s", guild_id, message.id)
         if listing.message_id is None:  # first publication, not every relist
             from bot.views.admin.moderation import post_private_staff_controls
-            await post_private_staff_controls(self.bot, guild_id, "Directory listing")
+            try:
+                await post_private_staff_controls(self.bot, guild_id, "Directory listing")
+            except Exception:
+                log.exception("Listing %s published; staff controls are delayed", guild_id)
         return message
 
     async def adopt_self_post(self, guild_id: int, message: discord.Message) -> None:
@@ -755,16 +828,24 @@ class PanelService:
                     icon_url=icon_url, ad_jump_url=message.jump_url, include_view_ad=False, show_summary=False,
                 )
             )
-            await self._delete(old_channel, old_controls)
-            if old_message and old_message != message.id:
-                await self._delete(old_channel, old_message)
-            async with self.bot.db.session() as session:
-                stored = await repository.get_listing(session, guild_id)
-                if stored is not None:
-                    stored.channel_id = channel.id
-                    stored.message_id = message.id
-                    stored.controls_message_id = controls.id
-                    stored.self_posted = True
+            old_posts = [(old_channel, old_id) for old_id in (old_controls, old_message)
+                         if old_id and not (old_channel == channel.id and old_id in (controls.id, message.id))]
+            try:
+                async with self.bot.db.session() as session:
+                    for cid, mid in old_posts:
+                        await message_cleanup.enqueue(session, cid, mid, guild_id=guild_id,
+                                                      reason="self_post_replaced")
+                    stored = await repository.get_listing(session, guild_id)
+                    if stored is not None:
+                        stored.channel_id = channel.id
+                        stored.message_id = message.id
+                        stored.controls_message_id = controls.id
+                        stored.self_posted = True
+            except Exception:
+                await self._delete(channel.id, controls.id)
+                raise
+            for cid, mid in old_posts:
+                await self._delete_queued(cid, mid)
             await self._repost_panel(LISTINGS_PANEL, channel)
         log.info("listing.self_posted guild_id=%s message_id=%s", guild_id, message.id)
 
@@ -794,12 +875,20 @@ class PanelService:
                     icon_url=icon_url, ad_jump_url=ad_jump_url,
                 )
             )
-            # Only remove the old directory card after the new one exists.
-            await self._delete(listing.channel_id, old_controls)
-            async with self.bot.db.session() as session:
-                stored = await repository.get_listing(session, guild_id)
-                if stored is not None:
-                    stored.controls_message_id = card.id
+            # Track the retired card before deleting; failed deletions retry
+            # after restart even when the new card's ID has replaced its slot.
+            try:
+                async with self.bot.db.session() as session:
+                    if old_controls and (listing.channel_id != channel.id or old_controls != card.id):
+                        await message_cleanup.enqueue(session, listing.channel_id, old_controls,
+                                                      guild_id=guild_id, reason="directory_card_replaced")
+                    stored = await repository.get_listing(session, guild_id)
+                    if stored is not None:
+                        stored.controls_message_id = card.id
+            except Exception:
+                await self._delete(channel.id, card.id)
+                raise
+            await self._delete_queued(listing.channel_id, old_controls)
             await self._repost_panel(LISTINGS_PANEL, channel)
         log.info("listing.relisted_card guild_id=%s message_id=%s", guild_id, card.id)
         return card

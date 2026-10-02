@@ -1,0 +1,66 @@
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, Initial Parley schema.
+INFO  [alembic.runtime.migration] Running upgrade 0001 -> 0002, Discord-based setup: test listings, edit reviews and Test Center messages.
+INFO  [alembic.runtime.migration] Running upgrade 0002 -> 0003, Owner-posted listings ("Post It Myself").
+INFO  [alembic.runtime.migration] Running upgrade 0003 -> 0004, Relist edit cycle tracking.
+INFO  [alembic.runtime.migration] Running upgrade 0004 -> 0005, Concurrent direct-post sessions.
+INFO  [alembic.runtime.migration] Running upgrade 0005 -> 0006, Independent owner-authored partner posts.
+INFO  [alembic.runtime.migration] Running upgrade 0006 -> 0007, Auto Partner opt-in for the Parley Network.
+INFO  [alembic.runtime.migration] Running upgrade 0007 -> 0008, Verify My Servers: short-lived OAuth sessions.
+INFO  [alembic.runtime.migration] Running upgrade 0008 -> 0009, Allow one unverified quick listing per user, without giving them server management authority.
+INFO  [alembic.runtime.migration] Running upgrade 0009 -> 0010, Private paste recovery tracking and timed suspensions.
+INFO  [alembic.runtime.migration] Running upgrade 0010 -> 0011, Durable approved-but-unposted Free Listing state.
+Using database: SQLite (/workspace/scratch/306d7bdb3f3a/migration-check.sqlite)
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.schemas
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.tables
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.types
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.constraints
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.defaults
+INFO  [alembic.runtime.plugins] setting up autogenerate plugin alembic.autogenerate.comments
+Using database: SQLite (/workspace/scratch/306d7bdb3f3a/migration-check.sqlite)
+No new upgrade operations detected.
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running downgrade 0011 -> 0010, Durable approved-but-unposted Free Listing state.
+INFO  [alembic.runtime.migration] Running downgrade 0010 -> 0009, Private paste recovery tracking and timed suspensions.
+INFO  [alembic.runtime.migration] Running downgrade 0009 -> 0008, Allow one unverified quick listing per user, without giving them server management authority.
+INFO  [alembic.runtime.migration] Running downgrade 0008 -> 0007, Verify My Servers: short-lived OAuth sessions.
+INFO  [alembic.runtime.migration] Running downgrade 0007 -> 0006, Auto Partner opt-in for the Parley Network.
+INFO  [alembic.runtime.migration] Running downgrade 0006 -> 0005, Independent owner-authored partner posts.
+INFO  [alembic.runtime.migration] Running downgrade 0005 -> 0004, Concurrent direct-post sessions.
+INFO  [alembic.runtime.migration] Running downgrade 0004 -> 0003, Relist edit cycle tracking.
+INFO  [alembic.runtime.migration] Running downgrade 0003 -> 0002, Owner-posted listings ("Post It Myself").
+INFO  [alembic.runtime.migration] Running downgrade 0002 -> 0001, Discord-based setup: test listings, edit reviews and Test Center messages.
+INFO  [alembic.runtime.migration] Running downgrade 0001 -> , Initial Parley schema.
+Using database: SQLite (/workspace/scratch/306d7bdb3f3a/migration-check.sqlite)
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, Initial Parley schema.
+INFO  [alembic.runtime.migration] Running upgrade 0001 -> 0002, Discord-based setup: test listings, edit reviews and Test Center messages.
+INFO  [alembic.runtime.migration] Running upgrade 0002 -> 0003, Owner-posted listings ("Post It Myself").
+INFO  [alembic.runtime.migration] Running upgrade 0003 -> 0004, Relist edit cycle tracking.
+INFO  [alembic.runtime.migration] Running upgrade 0004 -> 0005, Concurrent direct-post sessions.
+INFO  [alembic.runtime.migration] Running upgrade 0005 -> 0006, Independent owner-authored partner posts.
+INFO  [alembic.runtime.migration] Running upgrade 0006 -> 0007, Auto Partner opt-in for the Parley Network.
+INFO  [alembic.runtime.migration] Running upgrade 0007 -> 0008, Verify My Servers: short-lived OAuth sessions.
+INFO  [alembic.runtime.migration] Running upgrade 0008 -> 0009, Allow one unverified quick listing per user, without giving them server management authority.
+INFO  [alembic.runtime.migration] Running upgrade 0009 -> 0010, Private paste recovery tracking and timed suspensions.
+INFO  [alembic.runtime.migration] Running upgrade 0010 -> 0011, Durable approved-but-unposted Free Listing state.
+Using database: SQLite (/workspace/scratch/306d7bdb3f3a/migration-check.sqlite)
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running downgrade 0011 -> 0010, Durable approved-but-unposted Free Listing state.
+INFO  [alembic.runtime.migration] Running downgrade 0010 -> 0009, Private paste recovery tracking and timed suspensions.
+INFO  [alembic.runtime.migration] Running downgrade 0009 -> 0008, Allow one unverified quick listing per user, without giving them server management authority.
+INFO  [alembic.runtime.migration] Running downgrade 0008 -> 0007, Verify My Servers: short-lived OAuth sessions.
+INFO  [alembic.runtime.migration] Running downgrade 0007 -> 0006, Auto Partner opt-in for the Parley Network.
+INFO  [alembic.runtime.migration] Running downgrade 0006 -> 0005, Independent owner-authored partner posts.
+INFO  [alembic.runtime.migration] Running downgrade 0005 -> 0004, Concurrent direct-post sessions.
+INFO  [alembic.runtime.migration] Running downgrade 0004 -> 0003, Relist edit cycle tracking.
+INFO  [alembic.runtime.migration] Running downgrade 0003 -> 0002, Owner-posted listings ("Post It Myself").
+INFO  [alembic.runtime.migration] Running downgrade 0002 -> 0001, Discord-based setup: test listings, edit reviews and Test Center messages.
+INFO  [alembic.runtime.migration] Running downgrade 0001 -> , Initial Parley schema.
+Using database: SQLite (/workspace/scratch/306d7bdb3f3a/migration-check.sqlite)

@@ -95,7 +95,7 @@ class ListingConfig:
     # Standard listings keep the existing cooldown. Connected servers get a shorter cooldown.
     refresh_cooldown_minutes: int = 1440  # unconnected Quick Posts: 24 hours
     connected_refresh_cooldown_minutes: int = 30  # connected managers
-    quick_post_cooldown_minutes: int = 1440  # separate, so old saved settings cannot shorten free posts
+    quick_post_cooldown_minutes: int = 1440  # canonical Free timer; refresh is the legacy settings alias
     max_ad_length: int = 1800
     categories: tuple[str, ...] = ("Gaming", "Anime", "Social", "Community", "Roleplay", "Creator")
     max_categories: int = 1
@@ -168,7 +168,7 @@ class PanelConfig:
         "# 👋 Welcome to Parley\n"
         "**Find your next community. Promote your server. Partner by choice.**\n\n"
         "**Quick Post — free, no authorization**\n"
-        "Paste your invite, choose one category, and write or paste your ad. One unconnected listing per account; repost every 24 hours.\n\n"
+        "Paste your invite, choose one category, and write or paste your ad. One unconnected listing per account; your listing menu shows when you can repost.\n\n"
         "**Connected Network — also free**\n"
         "Server managers can add Parley for faster relisting, multiple servers, and approved ad exchanges.\n"
         "Nothing is auto-posted into partner servers without both communities agreeing.\n\n"
@@ -301,7 +301,7 @@ class MessagesConfig:
         "## 📖 How {bot_name} Works\n"
         "**Quick Post:** invite + category; automatic mode publishes an ad after checks, "
         "manual mode approves the server first, then you paste your ad any time. "
-        "No OAuth or install. Relist once per 24 hours after posting.\n\n"
+        "No OAuth or install. Your listing menu shows the configured repost timer.\n\n"
         "**Connected Network:** install Parley in a server you manage to enable faster relisting and mutual, approved partnerships.\n\n"
         "**Server Directory** - one synced public ad per server.\n"
         "**Network** - choose where accepted partners' ads are delivered.\n"
@@ -400,6 +400,13 @@ def known_keys(config: RuntimeConfig | None = None) -> dict[str, Any]:
 
 def apply_overrides(base: RuntimeConfig, overrides: dict[str, Any]) -> tuple[RuntimeConfig, list[str]]:
     """Apply dotted-key overrides. Invalid entries are skipped and reported."""
+    overrides = dict(overrides)
+    # Honor the value written by older Settings screens and CLI versions.
+    free_key = "listings.quick_post_cooldown_minutes"
+    legacy_key = "listings.refresh_cooldown_minutes"
+    if free_key in overrides or legacy_key in overrides:
+        value = overrides.get(free_key, overrides.get(legacy_key))
+        overrides[free_key] = overrides[legacy_key] = value
     errors: list[str] = []
     sections = {f.name: getattr(base, f.name) for f in fields(base)}
     for key, value in overrides.items():
@@ -446,7 +453,7 @@ def sanitize(config: RuntimeConfig) -> tuple[RuntimeConfig, list[str]]:
         max_contacts=_clamp(config.listings.max_contacts, 1, 25),
         refresh_cooldown_minutes=max(0, config.listings.refresh_cooldown_minutes),
         connected_refresh_cooldown_minutes=max(0, config.listings.connected_refresh_cooldown_minutes),
-        quick_post_cooldown_minutes=max(1440, config.listings.quick_post_cooldown_minutes),
+        quick_post_cooldown_minutes=max(0, config.listings.quick_post_cooldown_minutes),
         expiration_days=max(0, config.listings.expiration_days),
         minimum_member_options=tuple(min_options[:DISCORD_SELECT_OPTION_LIMIT]),
         find_page_size=_clamp(config.listings.find_page_size, 1, 4),

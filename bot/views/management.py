@@ -621,17 +621,30 @@ async def relist(interaction: discord.Interaction, guild_id: int) -> None:
     if not interaction.response.is_done():
         await acknowledge(interaction)
     async with bot.db.session() as session:
-        await listing_service.claim_refresh(
+        claimed = await listing_service.claim_refresh(
             session, bot.runtime, guild_id=guild_id, actor_id=interaction.user.id, now=utcnow(),
             connected=connected,
         )
 
-    if listing.self_posted:
-        message = await bot.panels.relist_self_post(guild_id)
-    else:
-        message = await bot.panels.publish_listing(guild_id)
+    async def release_timer():
+        async with bot.db.session() as session:
+            await listing_service.release_failed_refresh(
+                session, guild_id=guild_id, claimed_at=claimed.refreshed_at,
+                previous_at=listing.refreshed_at, previous_message_id=listing.message_id,
+                previous_status=listing.status,
+            )
+
+    try:
+        if listing.self_posted:
+            message = await bot.panels.relist_self_post(guild_id)
+        else:
+            message = await bot.panels.publish_listing(guild_id)
+    except Exception:
+        await release_timer()
+        raise
 
     if message is None:
+        await release_timer()
         await reply(interaction, templates.render(bot.runtime, "listing_saved_unpublished", server_name=guild.name))
         return
     await reply(

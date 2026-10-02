@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import urlsplit
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,6 +62,31 @@ SHORTENERS = frozenset({
 })
 SAFE_HOSTS = frozenset({"discord.gg", "discord.com", "discordapp.com", "www.discord.com"})
 
+# Only Discord-hosted image *attachments* are treated as native media. A lookalike
+# hostname or arbitrary CDN path does not qualify. This is a URL-origin check,
+# NOT an assessment that an attached image itself is safe content.
+_DISCORD_IMAGE_HOSTS = frozenset({"cdn.discordapp.com", "media.discordapp.net"})
+_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".apng")
+
+
+def is_discord_attachment_image(url: str) -> bool:
+    try:
+        parsed = urlsplit(url if "://" in url else f"https://{url}")
+        host = (parsed.hostname or "").lower()
+        path = parsed.path.lower()
+        return (
+            parsed.scheme in ("https",)
+            and not parsed.username and not parsed.password
+            and parsed.port in (None, 443)
+            and host in _DISCORD_IMAGE_HOSTS
+            and (path.startswith("/attachments/") or path.startswith("/ephemeral-attachments/"))
+            and len(path.split("/")) >= 5
+            and path.endswith(_IMAGE_EXTENSIONS)
+        )
+    except ValueError:
+        return False
+
+
 
 def _host(url: str) -> str:
     host = url.split("//", 1)[-1].split("/", 1)[0].split("@")[-1].split(":")[0].lower()
@@ -90,7 +117,7 @@ def check_links(text: str, config: RuntimeConfig) -> bool:
         host = _host(link)
         if any(_matches_domain(host, domain) for domain in rules.blocked_domains):
             raise ValidationError(f"Links to **{host}** aren't allowed here.")
-        if host in SAFE_HOSTS:
+        if host in SAFE_HOSTS or is_discord_attachment_image(link):
             continue
         if host in SHORTENERS or re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", host):
             if rules.link_action == "block":
@@ -409,7 +436,9 @@ async def mark_ad_edit_used(session: AsyncSession, *, guild_id: int, actor_id: i
 def refresh_remaining(listing: Listing, config: RuntimeConfig, now: datetime, *, connected: bool = False) -> timedelta | None:
     if listing.refreshed_at is None:
         return None
-    cooldown = config.listings.connected_refresh_cooldown_minutes if connected else config.listings.refresh_cooldown_minutes
+    cooldown = (config.listings.connected_refresh_cooldown_minutes if connected else
+                config.listings.quick_post_cooldown_minutes if listing.quick_submitted_by is not None else
+                config.listings.refresh_cooldown_minutes)
     available_at = listing.refreshed_at + timedelta(minutes=cooldown)
     return available_at - now if available_at > now else None
 
@@ -422,7 +451,9 @@ async def claim_refresh(
     Recording first means double-clicks can't trigger two reposts.
     """
     await moderation.ensure_allowed(session, config, guild_ids=[guild_id], user_id=actor_id)
-    listing = await get_editable_listing(session, guild_id)
+    listing = await session.scalar(select(Listing).where(Listing.guild_id == guild_id).with_for_update())
+    if listing is None or listing.status == ListingStatus.REMOVED:
+        raise NotFound(LISTING_GONE)
     if listing.status == ListingStatus.SUSPENDED:
         raise ValidationError("This listing is suspended by Parley staff.")
     if listing.status == ListingStatus.PENDING:
@@ -438,6 +469,19 @@ async def claim_refresh(
     await repository.add_audit(session, "listing.refreshed", actor_id=actor_id, guild_id=guild_id)
     log.info("listing.refreshed guild_id=%s actor_id=%s", guild_id, actor_id)
     return listing
+
+
+async def release_failed_refresh(session: AsyncSession, *, guild_id: int, claimed_at: datetime,
+                                 previous_at: datetime | None, previous_message_id: int | None,
+                                 previous_status: str) -> bool:
+    """Undo only this failed delivery's reservation, never a newer post."""
+    result = await session.execute(update(Listing).where(
+        Listing.guild_id == guild_id,
+        Listing.refreshed_at == claimed_at,
+        Listing.message_id == previous_message_id,
+        Listing.status == ListingStatus.ACTIVE,
+    ).values(refreshed_at=previous_at, status=previous_status))
+    return result.rowcount > 0
 
 
 async def record_message(

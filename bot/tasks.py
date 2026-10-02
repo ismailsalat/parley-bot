@@ -262,9 +262,25 @@ class BackgroundTasks:
                 (listing.guild_id, listing.channel_id, listing.message_id, await repository.get_contact_ids(session, listing.guild_id))
                 for listing in expired_listings
             ]
+            # An expired listing loses its current message IDs, but those IDs
+            # must NOT be forgotten if Discord refuses deletion. Queue first.
+            from bot.services import message_cleanup
             for listing in expired_listings:
+                for channel_id, message_id in (
+                    (listing.channel_id, listing.message_id),
+                    (listing.channel_id, listing.controls_message_id),
+                    (listing.partner_channel_id, listing.partner_message_id),
+                    (listing.partner_channel_id, listing.partner_controls_message_id),
+                ):
+                    await message_cleanup.enqueue(session, channel_id, message_id,
+                                                  guild_id=listing.guild_id,
+                                                  reason="listing_expired")
                 listing.channel_id = None
                 listing.message_id = None
+                listing.controls_message_id = None
+                listing.partner_channel_id = None
+                listing.partner_message_id = None
+                listing.partner_controls_message_id = None
             await partnerships.expire_requests(session, config, now)
             await repository.delete_expired_cooldowns(session, now)
             await repository.delete_network_posts_before(session, now - timedelta(days=config.network.post_retention_days))
@@ -295,7 +311,7 @@ class BackgroundTasks:
                 if waiting.is_test != (config.hub.mode == "test"):
                     continue
                 try:
-                    await bot.panels.publish_listing(waiting.guild_id)
+                    await bot.panels.publish_listing(waiting.guild_id, only_if_missing=True)
                 except Exception:
                     log.exception("Failed to recover unpublished ad for guild=%s", waiting.guild_id)
 
@@ -353,6 +369,14 @@ class BackgroundTasks:
                     log.exception("Failed to clean up removed listing %s; will retry", stale.guild_id)
         except Exception:
             log.exception("Could not scan removed listings for cleanup; will retry")
+
+        # The latest successful relist may have replaced a message whose
+        # deletion failed. Those IDs live in a separate database queue and
+        # must be retried even though the listing now points to its new post.
+        try:
+            await bot.panels.retry_pending_message_deletions(limit=30)
+        except Exception:
+            log.exception("Deferred Discord message-deletion maintenance failed")
 
         # Review messages are durable DB records; a failed staff log send must
         # never silently auto-approve an ad. Retry missing notifications.

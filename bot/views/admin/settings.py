@@ -10,7 +10,7 @@ import discord
 
 from bot.services import configuration, health, permissions
 from bot.services.setup import SLOTS
-from bot.views.admin.common import ConfirmPage, Page, _HomeMarker, channel_mention
+from bot.views.admin.common import ConfirmPage, Field, FieldsModal, Page, _HomeMarker, channel_mention
 from bot.views.base import acknowledge, get_bot, home_button, reply
 from bot.views.welcome import register_action
 
@@ -91,21 +91,59 @@ class SimplePostingPage(Page):
         mode = "Staff approval" if rules.approval_required else "Automatic (safety checks still apply)"
         return (
             f"## 📢 Posting\n**Mode:** {mode}\n"
-            f"**Free repost:** {rules.quick_post_cooldown_minutes // 60} hours\n"
+            f"**Free repost:** {rules.quick_post_cooldown_minutes} minutes\n"
             f"**Connected repost:** {rules.connected_refresh_cooldown_minutes} minutes\n\n"
-            "Switch the publishing mode here. All other controls are under Advanced."
+            "Change both timers here. Changes apply to existing listings too. 0 disables a timer; ownership and review rules still apply."
         )
 
     def build(self) -> None:
         approval = self.bot.runtime.listings.approval_required
         label = "Use Automatic Posting" if approval else "Require Staff Approval"
         self.button(label, self._toggle_approval, emoji="📝", row=0)
+        self.button("Edit Repost Cooldowns", self._edit_cooldowns, row=0)
+        self.button("Reset My Repost Timer", self._confirm_reset_timer, style=discord.ButtonStyle.danger, row=1)
         back = lambda: SimplePostingPage(self.bot, self.owner_id, back=self.back)  # noqa: E731
         from bot.views.admin import rules
         self.button("More Posting Options", _opener(lambda: rules.RulesPage(
             self.bot, self.owner_id, "listings", back=back,
         )), style=discord.ButtonStyle.secondary, row=1)
         self.nav(row=2)
+
+    async def _edit_cooldowns(self, interaction: discord.Interaction) -> None:
+        from bot.views.admin.rules import Number, parse_number
+        specs = [
+            Number("listings.quick_post_cooldown_minutes", "Free repost minutes (0 = off)", "minutes", 0, 10080),
+            Number("listings.connected_refresh_cooldown_minutes", "Connected minutes (0 = off)", "minutes", 0, 10080),
+        ]
+
+        async def submitted(inter, values):
+            await permissions.require_staff(self.bot, inter.user.id)
+            changes = {spec.key: parse_number(spec, values[spec.key]) for spec in specs}
+            await acknowledge(inter, thinking=False)
+            async with self.bot.db.session() as session:
+                await configuration.save(session, changes, actor_id=inter.user.id)
+            await self.bot.settings_changed()
+            await self.show(inter, "✅ Repost cooldowns saved and applied to existing listings.")
+
+        await interaction.response.send_modal(FieldsModal("Repost Cooldowns", [
+            Field(spec.key, spec.label, default=str(getattr(self.bot.runtime.listings, spec.key.split('.')[1])),
+                  required=True, max_length=5) for spec in specs
+        ], submitted))
+
+    async def _confirm_reset_timer(self, interaction: discord.Interaction) -> None:
+        from bot.services import testmode
+
+        async def confirmed(inter):
+            await acknowledge(inter, thinking=False)
+            await testmode.reset_my_quick_cooldown(self.bot, actor_id=inter.user.id)
+            await self.show(inter, "✅ Your Free repost timer is reset. Your ad and other users' timers are unchanged.")
+
+        await ConfirmPage(
+            self.bot, self.owner_id,
+            question="Clear only your own Free repost timer, keeping your saved ad and its review status?",
+            confirm_label="Reset My Timer", on_confirm=confirmed,
+            back=lambda: SimplePostingPage(self.bot, self.owner_id, back=self.back),
+        ).show(interaction)
 
     async def _toggle_approval(self, interaction: discord.Interaction) -> None:
         # Persist first; settings_changed reloads the effective runtime from DB.
@@ -183,7 +221,7 @@ class ToolsMenu(Page):
     async def _repair_panels(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction, thinking=False)
         results = await self.bot.panels.refresh_entry_panels(repost=True)
-        removed = await self.bot.panels.cleanup_orphan_entry_panels()
+        removed = await self.bot.panels.cleanup_orphan_entry_panels(history_limit=None)
         failures = [name for name, result in results.items() if result == "error"]
         await self.show(interaction,
                         (f"⚠️ Some panels still need attention: {', '.join(failures)}."

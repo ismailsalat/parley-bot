@@ -41,7 +41,8 @@ EXPORT_VERSION = 1
 # Sections that have a "Reset to Defaults" button. Channels/hub are deliberately
 # not resettable in one click: that would disconnect the whole network.
 RESETTABLE_SECTIONS: dict[str, tuple[str, ...]] = {
-    "listings": ("listings.refresh_cooldown_minutes", "listings.max_ad_length", "listings.max_contacts",
+    "listings": ("listings.refresh_cooldown_minutes", "listings.quick_post_cooldown_minutes",
+                 "listings.connected_refresh_cooldown_minutes", "listings.max_ad_length", "listings.max_contacts",
                  "listings.expiration_days", "listings.invite_required", "listings.auto_create_invite",
                  "listings.approval_required", "listings.reapprove_ad_edits", "listings.reapprove_info_edits",
                  "listings.max_categories", "listings.minimum_member_options", "listings.find_page_size"),
@@ -115,6 +116,21 @@ async def save(session: AsyncSession, changes: dict[str, Any], *, actor_id: int 
         if key not in valid_keys:
             raise ValidationError(f"Unknown setting: {key}")
     overrides = await repository.runtime_overrides(session)
+    changes = dict(changes)
+    free_key = "listings.quick_post_cooldown_minutes"
+    legacy_key = "listings.refresh_cooldown_minutes"
+    # Either settings name updates the same timer; the newest change wins.
+    if free_key in changes or legacy_key in changes:
+        value = changes.get(free_key, changes.get(legacy_key))
+        changes[free_key] = changes[legacy_key] = value
+    for key in (free_key, legacy_key, "listings.connected_refresh_cooldown_minutes"):
+        if key in changes:
+            try:
+                value = int(changes[key])
+            except (TypeError, ValueError):
+                raise ValidationError("Repost cooldowns must be whole minutes from 0 to 10080.") from None
+            if not 0 <= value <= 10080:
+                raise ValidationError("Repost cooldowns must be whole minutes from 0 to 10080.")
     merged = {**overrides, **changes}
     config, notes = apply_overrides(default_config(), merged)
     problem = _first_error(notes, set(changes))

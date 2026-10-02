@@ -42,7 +42,8 @@ SECTIONS: dict[str, tuple[str, str, tuple, str]] = {
         "Listings",
         "📢",
         (
-            Number("listings.refresh_cooldown_minutes", "Relist cooldown", "minutes", 0, 10_080),
+            Number("listings.quick_post_cooldown_minutes", "Free repost cooldown", "minutes", 0, 10_080),
+            Number("listings.connected_refresh_cooldown_minutes", "Connected repost cooldown", "minutes", 0, 10_080),
             Number("listings.max_ad_length", "Ad character limit", "characters", 50, 2000),
             Number("listings.max_contacts", "Maximum contacts", "people", 1, 25),
             Number("listings.expiration_days", "Listing expiration (0 = never)", "days", 0, 365),

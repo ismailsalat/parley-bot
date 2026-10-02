@@ -1,0 +1,27 @@
+s....................................................................... [ 12%]
+........................................................................ [ 25%]
+........................................................................ [ 37%]
+........................................................................ [ 50%]
+........................................................................ [ 63%]
+........................................................................ [ 75%]
+........................................................................ [ 88%]
+.................................................................        [100%]
+=============================== warnings summary ===============================
+tests/unit/test_quick_post.py::test_automatic_modal_only_asks_to_paste_one_ad
+  /workspace/scratch/306d7bdb3f3a/parley_work/parley-bot-main/tests/unit/test_quick_post.py:461: DeprecationWarning: label is deprecated, use discord.ui.Label instead.
+    assert "invite" in modal.children[0].label.lower()
+
+tests/unit/test_quick_post.py::test_automatic_modal_only_asks_to_paste_one_ad
+  /workspace/scratch/306d7bdb3f3a/parley_work/parley-bot-main/tests/unit/test_quick_post.py:462: DeprecationWarning: label is deprecated, use discord.ui.Label instead.
+    assert all("server invite" not in x.label.lower() for x in modal.children)
+
+tests/unit/test_quick_post.py::test_manual_approval_requires_invite_and_short_summary
+  /workspace/scratch/306d7bdb3f3a/parley_work/parley-bot-main/tests/unit/test_quick_post.py:519: DeprecationWarning: label is deprecated, use discord.ui.Label instead.
+    assert "invite" in modal.children[0].label.lower()
+
+tests/unit/test_quick_post.py::test_manual_approval_requires_invite_and_short_summary
+  /workspace/scratch/306d7bdb3f3a/parley_work/parley-bot-main/tests/unit/test_quick_post.py:520: DeprecationWarning: label is deprecated, use discord.ui.Label instead.
+    assert "description" in modal.children[1].label.lower()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+568 passed, 1 skipped, 4 warnings in 9.80s

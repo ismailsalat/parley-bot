@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from sqlalchemy import and_, delete, or_
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database import repository
@@ -177,9 +177,20 @@ async def reset_my_quick_listing(bot: ParleyBot, *, actor_id: int) -> bool:
             # the *same* guild again, not merely a different one.
             removed.refreshed_at = None
             removed.last_ad_edit_at = None
+        else:
+            from bot.database.models import AuditLog
+            deleted = await session.scalar(select(AuditLog).where(
+                AuditLog.actor_id == actor_id,
+                AuditLog.action.in_(("listing.quick_deleted", "listing.quick_slot_released")),
+            ).order_by(AuditLog.id.desc()).limit(1))
+            candidate = await repository.get_listing(session, deleted.guild_id) if deleted else None
+            if candidate is not None and candidate.quick_submitted_by is None and candidate.status == ListingStatus.REMOVED:
+                await quick_post.ensure_not_connected(session, candidate.guild_id)
+                candidate.refreshed_at = None
+                candidate.last_ad_edit_at = None
         await session.execute(
             delete(Cooldown).where(
-                Cooldown.scope == "quick_post_deleted", Cooldown.subject == str(actor_id)
+                Cooldown.scope.in_(("quick_post_deleted", "quick_post_deleted_origin")), Cooldown.subject == str(actor_id)
             )
         )
         # Don't replace the guild-specific quick_deleted audit action: that
@@ -262,3 +273,32 @@ async def clear_test_listings(bot: ParleyBot, *, actor_id: int) -> int:
         await bot.panels.delete_listing_message(channel_id, message_id)
     log.info("testmode.cleared_listings actor_id=%s count=%s", actor_id, len(rows))
     return len(rows)
+
+
+async def reset_my_quick_cooldown(bot: ParleyBot, *, actor_id: int) -> None:
+    """Audited staff recovery for the acting account without deleting its ad."""
+    from bot.services import permissions, quick_post
+    from bot.database.models import AuditLog
+
+    await permissions.require_staff(bot, actor_id)
+    async with bot.db.session() as session:
+        row = await quick_post.my_quick_listing(session, actor_id)
+        if row is None:
+            deleted = await session.scalar(select(AuditLog).where(
+                AuditLog.actor_id == actor_id,
+                AuditLog.action.in_(("listing.quick_deleted", "listing.quick_slot_released")),
+            ).order_by(AuditLog.id.desc()).limit(1))
+            candidate = await repository.get_listing(session, deleted.guild_id) if deleted else None
+            if candidate is not None and candidate.quick_submitted_by is None and candidate.status == ListingStatus.REMOVED:
+                row = candidate
+        if row is not None:
+            await quick_post.ensure_not_connected(session, row.guild_id)
+            row.refreshed_at = None
+            row.last_ad_edit_at = None
+        await session.execute(delete(Cooldown).where(
+            Cooldown.scope.in_(("quick_post_deleted", "quick_post_deleted_origin")),
+            Cooldown.subject == str(actor_id),
+        ))
+        # Do not overwrite guild-specific deletion provenance or moderation state.
+        await repository.add_audit(session, "test.my_free_cooldown_reset", actor_id=actor_id,
+                                   details={"own_guild_id": row.guild_id if row else None})

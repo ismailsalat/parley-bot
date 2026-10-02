@@ -241,6 +241,24 @@ class NetworkPost(Base):
     posted_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
+class PendingMessageDeletion(Base):
+    """Orphaned bot messages queued for retry after Discord outages/restarts.
+
+    Unlike ``Listing.message_id``, records here survive a replacement relist.
+    The composite key ensures an old Discord message is queued only once.
+    """
+    __tablename__ = "pending_message_deletions"
+
+    channel_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    guild_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    reason: Mapped[str] = mapped_column(String(40), default="listing_replaced")
+    # Low-attempt messages go first, so a permanently forbidden deletion never
+    # starves newer entries in a large queue.
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
 class PanelState(Base):
     __tablename__ = "panel_states"
     __table_args__ = (UniqueConstraint("guild_id", "panel_type", name="uq_panel_states_guild_type"),)

@@ -1,7 +1,7 @@
 """Unverified invite-only submissions. A submission NEVER creates manager rights."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from collections.abc import Collection
 from urllib.parse import urlsplit
 
@@ -76,6 +76,7 @@ def prepare_quick_ad(
         (urlsplit(url if '://' in url else f'https://{url}').hostname or '').lower()
         not in ('discord.gg', 'www.discord.gg', 'discord.com', 'www.discord.com',
                 'discordapp.com', 'www.discordapp.com')
+        and not listings.is_discord_attachment_image(url)
         for url in links
     )
     # Keep a pasted vanity/alternate invite as-is after verifying its guild ID.
@@ -152,6 +153,51 @@ async def my_quick_listing(session: AsyncSession, actor_id: int) -> Listing | No
     return await session.scalar(select(Listing).where(Listing.quick_submitted_by == actor_id))
 
 
+async def listing_attribution(session: AsyncSession, row: Listing) -> str:
+    """Identify the recorded submitter without treating them as a verified owner."""
+    actor = row.quick_submitted_by
+    if actor is None:
+        actor = await session.scalar(select(AuditLog.actor_id).where(
+            AuditLog.guild_id == row.guild_id,
+            AuditLog.action.in_(("listing.created", "listing.quick_submitted", "listing.quick_resubmitted")),
+            AuditLog.actor_id.is_not(None),
+        ).order_by(AuditLog.id.desc()).limit(1))
+    if actor is None:
+        return "**Submitted by:** Not recorded on this older listing. Staff can review its history."
+    return f"**Submitted by:** <@{actor}> · ID `{actor}`"
+
+
+async def deleted_cooldown_remaining(session: AsyncSession, config: RuntimeConfig, actor_id: int, now):
+    """Recompute deleted/switched slot timing from its durable audit timestamp.
+
+    Cooldown rows can be cleaned up after expiry. The deletion audit survives
+    that cleanup and allows a changed setting to take effect immediately.
+    """
+    event = await session.scalar(select(AuditLog).where(
+        AuditLog.actor_id == actor_id,
+        AuditLog.action.in_(("listing.quick_deleted", "listing.quick_slot_released",
+                            "test.my_free_listing_reset", "test.my_free_cooldown_reset")),
+    ).order_by(AuditLog.id.desc()).limit(1))
+    if event is not None and event.action.startswith("test."):
+        return None
+    origin = None
+    details = event.details or {} if event else {}
+    if "cooldown_started_at" in details:
+        if details["cooldown_started_at"] is None:
+            return None
+        origin = datetime.fromisoformat(details["cooldown_started_at"])
+    elif event:
+        row = await repository.get_listing(session, event.guild_id)
+        if row is not None and row.status == ListingStatus.REMOVED and row.quick_submitted_by is None:
+            origin = row.refreshed_at
+            if origin is None:
+                return None
+    if origin is None:
+        return await cooldowns.remaining(session, "quick_post_deleted", actor_id, now)
+    ready = origin + timedelta(minutes=config.listings.quick_post_cooldown_minutes)
+    return ready - now if ready > now else None
+
+
 async def can_restore_deleted_listing(session: AsyncSession, row: Listing, actor_id: int) -> bool:
     """Only an original submitter may restore their own deleted Free Listing.
 
@@ -176,13 +222,14 @@ async def can_restore_deleted_listing(session: AsyncSession, row: Listing, actor
 
 
 def existing_listing_guidance(row: Listing) -> str:
-    """Actionable, non-disclosing guidance when a guild is already listed."""
+    """Actionable guidance when a guild is already listed."""
     if row.status == ListingStatus.SUSPENDED:
         return ("This server's listing is suspended. Ask Parley staff to review it; "
                 "a new invite cannot bypass a suspension.")
     if row.quick_submitted_by is not None:
         return (
             "This Discord server already has a Free Listing submitted from another account. "
+            f"Its submitter is <@{row.quick_submitted_by}> (ID `{row.quick_submitted_by}`). "
             "A different invite or vanity link still points to the same server. "
             "If you're an admin, use **Connected Servers** to verify management "
             "inside your server, or contact Parley staff for a listing review."
@@ -253,7 +300,7 @@ async def create_quick_listing(
         raise Conflict("Quick Post allows one unconnected server per account. Connect Parley to manage additional servers.")
     # Deleting a listing frees the slot, not the posting cooldown. This persists
     # across bot restarts and prevents delete/recreate cycles from flooding feeds.
-    wait = await cooldowns.remaining(session, "quick_post_deleted", actor_id, now)
+    wait = await deleted_cooldown_remaining(session, config, actor_id, now) if owned is None else None
     if wait is not None:
         raise CooldownActive(f"You can submit another Free Listing in {format_duration(wait)}.", wait)
 
@@ -273,11 +320,13 @@ async def create_quick_listing(
             raise Conflict("Your Quick Post is already awaiting staff review.")
         if previous.awaiting_ad and previous.status == ListingStatus.ACTIVE:
             raise Conflict("Your server is approved. Open My Server Listings and press Post Approved Ad first.")
-        if previous.refreshed_at is not None:
-            available = previous.refreshed_at + timedelta(minutes=config.listings.quick_post_cooldown_minutes)
-            if now < available:
-                remaining = available - now
-                raise CooldownActive(f"You can repost in {format_duration(remaining)}.", remaining)
+        remaining = listings.refresh_remaining(previous, config, now)
+        if remaining is not None:
+            raise CooldownActive(
+                f"You can repost this Free Listing in {format_duration(remaining)}. "
+                f"The Free repost setting is {config.listings.quick_post_cooldown_minutes} minutes. "
+                "Use **Edit Ad** to replace its text; **Repost** keeps the saved ad.", remaining,
+            )
         # A repost does not let an unverified poster rewrite the approved ad or
         # change its invite. Edits require a new submission and staff approval.
         if previous.status == ListingStatus.ACTIVE:
@@ -383,6 +432,56 @@ async def edit_quick_listing(
     return row, outcome
 
 
+async def update_quick_invite(
+    session: AsyncSession, config: RuntimeConfig, *, actor_id: int,
+    guild_id: int, verified_guild_id: int, new_invite_url: str, now,
+) -> Listing:
+    """Replace a dead invite without granting new ownership or relisting.
+
+    The Discord invite MUST have been fetched just before this call; compare
+    the resolved guild ID here again to guard the database write path.
+    """
+    await moderation.ensure_allowed(session, config, guild_ids=[guild_id], user_id=actor_id)
+    listing = await session.scalar(select(Listing).where(Listing.guild_id == guild_id).with_for_update())
+    if listing is None or listing.quick_submitted_by != actor_id:
+        raise Conflict("Only the Free Listing submitter can update this invite.")
+    await ensure_not_connected(session, guild_id)
+    if listing.status not in (ListingStatus.ACTIVE, ListingStatus.EXPIRED) or listing.pending_changes:
+        raise Conflict("This listing cannot change its invite while it is awaiting review or suspended.")
+    if verified_guild_id != guild_id:
+        raise Conflict("The new invite belongs to a different Discord server.")
+    code = listings.parse_invite_code(new_invite_url)
+    canonical = listings.canonical_invite(code)
+    old_code = listings.parse_invite_code(listing.invite_url) if listing.invite_url else None
+    if canonical == listing.invite_url:
+        raise ValidationError("That's already your listing's current invite.")
+    # Replace only the *previously stored* invite, never arbitrary other URLs.
+    # Previously verified vanity/alternate links remain untouched.
+    if old_code:
+        import re
+        invite_pattern = re.compile(
+            r"(?i)(?<![\w./-])(?:https?://)?(?:www\.)?"
+            r"(?:discord\.gg/|discord(?:app)?\.com/invite/)"
+            + re.escape(old_code) + r"(?=$|[\s)\]}>?#.,!*])"
+        )
+        replacement_text = invite_pattern.sub(lambda _m: canonical, listing.advertisement_text)
+    else:
+        replacement_text = listing.advertisement_text
+    # The permanent join button always uses canonical. If the old text omitted
+    # its canonical invite, append a working link only where it fits.
+    if replacement_text == listing.advertisement_text and not advertisement_invite_codes(replacement_text):
+        candidate = f"{replacement_text.rstrip()}\n\n{canonical}"
+        if len(candidate) <= config.listings.max_ad_length:
+            replacement_text = candidate
+    listing.invite_url = canonical
+    listing.advertisement_text = replacement_text
+    listing.updated_at = now
+    # Important: don't change refreshed_at, last_ad_edit_at, or review status.
+    await repository.add_audit(session, "listing.quick_invite_updated", actor_id=actor_id,
+                               guild_id=guild_id, details={"invite_code": code})
+    return listing
+
+
 async def delete_quick_listing(
     session: AsyncSession, config: RuntimeConfig, *, actor_id: int, guild_id: int, now,
 ) -> Listing:
@@ -413,6 +512,7 @@ async def delete_quick_listing(
         session,
         "listing.quick_slot_released" if was_staff_removed else "listing.quick_deleted",
         actor_id=actor_id, guild_id=guild_id,
+        details={"cooldown_started_at": row.refreshed_at.isoformat() if row.refreshed_at else None},
     )
     return row
 

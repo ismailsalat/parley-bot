@@ -1,0 +1,25 @@
+Parley partnership-flow cleanup
+2026-09-24
+
+What changed
+- Start Here now has one green partnership CTA: Find Partners.
+- The joined-server card also uses Find Partners as the single green CTA.
+- Find Partners is now a guided setup flow:
+  1. pick/identify the connected server,
+  2. create the synced server ad if it is missing,
+  3. choose that server's Partner Ad Channel and enable Network,
+  4. choose a category and browse partners.
+- Direct Network setup also requires a live server ad and routes through the same ad wizard when missing.
+- Creating an ad from partnership setup automatically returns to Network setup when the ad becomes live.
+- Existing ads remain one synced record everywhere; Post Server Ad still routes to management when the ad already exists.
+- Removing the server ad also disables Network so a server cannot exchange stale/removed ads.
+- Partner-ad exchange now refuses removed/non-active listings as an extra safeguard.
+- The server owner still receives one install-time onboarding DM.
+- A server manager who actually uses Parley receives one concise one-time DM per server, so day-to-day partnership staff are also guided even when they are not the owner.
+- Manager-onboarding DMs are audit guarded and will not resend on normal restarts/reconnects.
+- Existing server-manager slash-command restrictions remain in place.
+
+Validation
+- python -m compileall: passed
+- test suite: 456 passed, 1 skipped
+- 3 startup subprocess tests cannot run correctly in this sandbox because those subprocesses do not inherit the temporary discord.py PYTHONPATH. The failures are environment/dependency failures before Parley startup code runs.

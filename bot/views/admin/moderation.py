@@ -27,6 +27,8 @@ async def listing_embed(bot: ParleyBot, guild_id: int) -> tuple[discord.Embed, L
         ban = await repository.get_ban(session, moderation.GUILD, guild_id)
         net = await repository.get_network_settings(session, guild_id)
         audit = await repository.recent_audit(session, guild_id)
+        from bot.services.quick_post import listing_attribution
+        attribution = await listing_attribution(session, listing) if listing else ""
 
     embed = discord.Embed(title=guild.name if guild else f"Server {guild_id}", color=bot.runtime.bot.color_primary)
     embed.add_field(name="Guild ID", value=f"`{guild_id}`")
@@ -38,6 +40,7 @@ async def listing_embed(bot: ParleyBot, guild_id: int) -> tuple[discord.Embed, L
         status = listing.status + (" · edit waiting for review" if listing.pending_changes else "")
         status += " · 🧪 test" if listing.is_test else ""
         embed.add_field(name="Listing status", value=status)
+        embed.add_field(name="Submitter", value=attribution.removeprefix("**Submitted by:** "), inline=False)
         embed.add_field(name="Category", value=", ".join(listing.categories) or "—")
         embed.add_field(
             name="Partnerships",

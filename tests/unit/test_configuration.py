@@ -29,7 +29,7 @@ async def test_save_validates_before_writing(db):
     with pytest.raises(ValidationError, match="Unknown setting"):
         async with db.session() as session:
             await configuration.save(session, {"listings.nope": 1}, actor_id=ACTOR)
-    assert await overrides(db) == {"listings.refresh_cooldown_minutes": 15}
+    assert await overrides(db) == {"listings.refresh_cooldown_minutes": 15, "listings.quick_post_cooldown_minutes": 15}
 
 
 async def test_channel_and_staff_config_live_in_the_database(db):
@@ -61,7 +61,7 @@ async def test_reset_section_only_touches_that_section(db):
             {"listings.refresh_cooldown_minutes": 5, "network.repeat_window_hours": 3, "hub.main_guild_id": 9},
             actor_id=ACTOR,
         )
-        assert await configuration.reset_section(session, "listings", actor_id=ACTOR) == 1
+        assert await configuration.reset_section(session, "listings", actor_id=ACTOR) == 2
         with pytest.raises(ValidationError):
             await configuration.reset_section(session, "hub", actor_id=ACTOR)  # never reset the hub in one click
     assert await overrides(db) == {"network.repeat_window_hours": 3, "hub.main_guild_id": 9}
