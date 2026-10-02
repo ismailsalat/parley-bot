@@ -33,6 +33,7 @@ LOOKING_PANEL = "looking"
 WELCOME_PANEL = "welcome"
 PERKS_PANEL = "perks"
 PARLEY_PERKS_PANEL = "parley_perks"
+RULES_PANEL = "server_rules"
 STARTUP_PANEL_SPACING_SECONDS = 0.9
 LISTING_REFRESH_SPACING_SECONDS = 0.8
 
@@ -77,6 +78,73 @@ class PanelService:
     def benefits_channel(self) -> discord.TextChannel | None:
         return self.main_channel(self.bot.runtime.hub.benefits_channel_id)
 
+    def review_channel(self) -> discord.TextChannel | None:
+        return self.main_channel(self.bot.runtime.hub.review_channel_id)
+
+    def rules_channel(self) -> discord.TextChannel | None:
+        return self.main_channel(self.bot.runtime.hub.rules_channel_id)
+
+    async def ensure_aux_channels(self) -> None:
+        """Upgrade an EXISTING hub without making the owner rerun /setup.
+
+        Only create channels if the bot already has Manage Channels. Never
+        silently fall back from staff approvals to public/ordinary log channels.
+        """
+        hub = self.bot.runtime.hub
+        get_guild = getattr(self.bot, "get_guild", None)
+        guild = get_guild(hub.main_guild_id) if callable(get_guild) and hub.main_guild_id else None
+        if guild is None or getattr(guild, "me", None) is None:
+            return
+        permissions = getattr(guild.me, "guild_permissions", None)
+        if not getattr(permissions, "manage_channels", False):
+            return
+        from bot.services import configuration, setup as setup_service
+        get_role = getattr(guild, "get_role", None)
+        roles = [role for rid in hub.staff_role_ids
+                 if callable(get_role) and (role := get_role(rid))]
+        changes = {}
+        for key in ("review_channel_id", "rules_channel_id"):
+            slot = setup_service.SLOT_BY_KEY[key]
+            configured = guild.get_channel(getattr(hub, key) or 0)
+            if isinstance(configured, discord.TextChannel):
+                continue
+            existing = setup_service.find_existing(guild, slot)
+            if existing is None:
+                try:
+                    existing = await guild.create_text_channel(
+                        slot.name, topic=slot.topic,
+                        overwrites=setup_service.overwrites_for(slot, guild, roles),
+                        reason="Parley: add approval queue and public rules",
+                    )
+                except discord.HTTPException as exc:
+                    log.error("Could not create %s: %s", slot.name, exc)
+                    continue
+            changes[f"hub.{key}"] = existing.id
+            # Repair any reused channel: approvals must be private, rules
+            # must be read-only. Failure must never expose a public review queue.
+            try:
+                if key == "review_channel_id":
+                    await existing.set_permissions(
+                        guild.default_role, view_channel=False,
+                        reason="Parley: staff-only ad approvals")
+                    for role in roles:
+                        await existing.set_permissions(
+                            role, view_channel=True, read_message_history=True,
+                            reason="Parley: allow staff to review ads")
+                else:
+                    await existing.set_permissions(
+                        guild.default_role, send_messages=False,
+                        create_public_threads=False, create_private_threads=False,
+                        send_messages_in_threads=False,
+                        reason="Parley: read-only server rules")
+            except discord.HTTPException as exc:
+                log.error("Cannot secure channel %s: %s", existing.id, exc)
+                changes.pop(f"hub.{key}", None)
+        if changes:
+            async with self.bot.db.session() as session:
+                await configuration.save(session, changes, actor_id=None)
+            await self.bot.settings_changed(refresh_panels=False)
+
     async def _refresh_how_it_works_channel(self) -> None:
         """Rename the old Parley Perks channel in place on upgrade.
 
@@ -111,7 +179,7 @@ class PanelService:
         return {
             cid for cid in (
                 h.listings_channel_id, h.looking_channel_id, h.welcome_channel_id,
-                h.perks_channel_id, h.benefits_channel_id
+                h.perks_channel_id, h.benefits_channel_id, h.rules_channel_id
             ) if cid
         }
 
@@ -169,6 +237,7 @@ class PanelService:
         """Delete every public post owned by a listing after removal/suspension/ban."""
         if listing is None:
             return
+        await self.clear_approval_notice(listing.guild_id)
         ad_controls_ok = await self._delete(listing.channel_id, listing.controls_message_id)
         ad_ok = await self._delete(listing.channel_id, listing.message_id)
         partner_controls_ok = await self._delete(listing.partner_channel_id, listing.partner_controls_message_id)
@@ -211,6 +280,7 @@ class PanelService:
             WELCOME_PANEL: (welcome.welcome_panel, panels.welcome_panel_enabled),
             PERKS_PANEL: (welcome.perks_panel, panels.perks_panel_enabled),
             PARLEY_PERKS_PANEL: (welcome.parley_perks_panel, panels.benefits_panel_enabled),
+            RULES_PANEL: (welcome.server_rules_panel, True),
         }[panel_type]
 
     def _channel_for(self, panel_type: str) -> discord.TextChannel | None:
@@ -220,6 +290,7 @@ class PanelService:
             WELCOME_PANEL: self.welcome_channel,
             PERKS_PANEL: self.perks_channel,
             PARLEY_PERKS_PANEL: self.benefits_channel,
+            RULES_PANEL: self.rules_channel,
         }[panel_type]()
 
     def _welcome_mentions(self) -> str | None:
@@ -259,10 +330,12 @@ class PanelService:
         guild_id = channel.guild.id
         async with self.bot.db.session() as session:
             stored = await repository.get_panel(session, guild_id, panel_type)
-        if stored is not None:
-            if stored.message_id:
-                self._intentional_panel_deletes[stored.message_id] = time.monotonic() + 60.0
-            await self._delete(stored.channel_id, stored.message_id)
+        if stored is not None and stored.message_id:
+            # Do not generate duplicates if Discord cannot delete the old panel.
+            if not await self._delete(stored.channel_id, stored.message_id):
+                log.warning("Panel %s old message could not be removed; retrying on next refresh", panel_type)
+                return None
+            self._intentional_panel_deletes[stored.message_id] = time.monotonic() + 60.0
 
         _builder, enabled = self._builder(panel_type)
         message: discord.Message | None = None
@@ -358,7 +431,9 @@ class PanelService:
         ``force_edit`` re-renders existing panels (after text or button changes in Settings).
         """
         results: dict[str, str] = {}
+        await self.ensure_aux_channels()
         await self._refresh_how_it_works_channel()
+        await self.ensure_panel(RULES_PANEL, keep_at_bottom=False, force_edit=force_edit)
         async with self._listings_lock:
             results[LISTINGS_PANEL] = await self.ensure_panel(LISTINGS_PANEL, keep_at_bottom=True, force_edit=force_edit)
         async with self._looking_lock:
@@ -378,6 +453,7 @@ class PanelService:
         ``repost=False`` is used after gateway resumes and by periodic recovery;
         it force-edits current messages in place to avoid needless churn.
         """
+        await self.ensure_aux_channels()
         await self._refresh_how_it_works_channel()
         results: dict[str, str] = {}
         ordered = (
@@ -386,6 +462,7 @@ class PanelService:
             LOOKING_PANEL,
             PERKS_PANEL,
             PARLEY_PERKS_PANEL,
+            RULES_PANEL,
         )
         async def refresh_one(panel_type: str) -> str:
             channel = self._channel_for(panel_type)
@@ -438,7 +515,7 @@ class PanelService:
         async with self.bot.db.session() as session:
             current_ids = {
                 panel.message_id
-                for panel_type in (LISTINGS_PANEL, LOOKING_PANEL, WELCOME_PANEL, PERKS_PANEL, PARLEY_PERKS_PANEL)
+                for panel_type in (LISTINGS_PANEL, LOOKING_PANEL, WELCOME_PANEL, PERKS_PANEL, PARLEY_PERKS_PANEL, RULES_PANEL)
                 if (panel := await repository.get_panel(session, guild_id, panel_type)) is not None
                 and panel.message_id is not None
             }
@@ -469,7 +546,19 @@ class PanelService:
                         channel.id == self.bot.runtime.hub.welcome_channel_id
                         and "Welcome to Parley" in (message.content or "")
                     )
-                    if not has_entry_action and not is_legacy_welcome:
+                    is_old_perks = (
+                        channel.id == self.bot.runtime.hub.benefits_channel_id
+                        and (
+                            "Parley Perks" in (message.content or "")
+                            or "Connected Perks" in (message.content or "")
+                            or any("Parley Perks" in (getattr(embed, "title", "") or "")
+                                   for embed in getattr(message, "embeds", ()))
+                            or any(getattr(child, "label", "") == "How Parley Works"
+                                   for row in message.components
+                                   for child in getattr(row, "children", ()))
+                        )
+                    )
+                    if not has_entry_action and not is_legacy_welcome and not is_old_perks:
                         continue
                     try:
                         await message.delete()
@@ -512,7 +601,7 @@ class PanelService:
         if channel_id not in self.panel_channel_ids() or not main_guild_id:
             return
         async with self.bot.db.session() as session:
-            for panel_type in (LISTINGS_PANEL, LOOKING_PANEL, WELCOME_PANEL, PERKS_PANEL, PARLEY_PERKS_PANEL):
+            for panel_type in (LISTINGS_PANEL, LOOKING_PANEL, WELCOME_PANEL, PERKS_PANEL, PARLEY_PERKS_PANEL, RULES_PANEL):
                 stored = await repository.get_panel(session, main_guild_id, panel_type)
                 if stored is not None and stored.message_id == message_id:
                     break
@@ -525,6 +614,51 @@ class PanelService:
 
     # ------------------------------------------------------------ listings
 
+    async def notify_approval_ready(self, guild_id: int) -> bool:
+        """Ping once in the directory; do not grant public posting permissions.
+
+        Repeated calls after a restart are idempotent when message ID is saved.
+        Members click My Server Listings and submit a normal Markdown message.
+        """
+        async with self.bot.db.session() as session:
+            listing = await repository.get_listing(session, guild_id)
+            if (listing is None or listing.status != ListingStatus.ACTIVE
+                    or not listing.awaiting_ad or listing.quick_submitted_by is None
+                    or listing.approval_notice_message_id):
+                return bool(listing and listing.approval_notice_message_id)
+            user_id = listing.quick_submitted_by
+        channel = self.listings_channel()
+        if channel is None:
+            log.warning("Approved server %s waiting: directory not configured", guild_id)
+            return False
+        try:
+            message = await channel.send(
+                f"<@{user_id}> ✅ Your server has been approved for Parley! "
+                "Open **My Server Listings → Post Approved Ad** whenever you're ready. "
+                "There is **no deadline** to post.",
+                allowed_mentions=discord.AllowedMentions(
+                    everyone=False, roles=False, users=[discord.Object(id=user_id)], replied_user=False,
+                ),
+            )
+        except discord.HTTPException:
+            log.exception("Failed to send approval-ready notice %s; retry later", guild_id)
+            return False
+        async with self.bot.db.session() as session:
+            current = await repository.get_listing(session, guild_id)
+            if current and current.awaiting_ad:
+                current.approval_notice_message_id = message.id
+        return True
+
+    async def clear_approval_notice(self, guild_id: int) -> None:
+        async with self.bot.db.session() as session:
+            listing = await repository.get_listing(session, guild_id)
+            message_id = listing.approval_notice_message_id if listing else None
+        if message_id and await self._delete(self.bot.runtime.hub.listings_channel_id, message_id):
+            async with self.bot.db.session() as session:
+                current = await repository.get_listing(session, guild_id)
+                if current and current.approval_notice_message_id == message_id:
+                    current.approval_notice_message_id = None
+
     async def publish_listing(self, guild_id: int) -> discord.Message | None:
         """(Re)post a listing at the bottom of #server-directory, then the panel under it.
 
@@ -536,7 +670,7 @@ class PanelService:
         async with self._listings_lock:
             async with self.bot.db.session() as session:
                 listing = await repository.get_listing(session, guild_id)
-            if listing is None or listing.status != ListingStatus.ACTIVE:
+            if listing is None or listing.status != ListingStatus.ACTIVE or listing.awaiting_ad:
                 return None
             if channel is None:
                 log.warning("listing.not_published guild_id=%s (listings channel not configured)", guild_id)

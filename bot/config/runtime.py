@@ -249,6 +249,8 @@ class HubConfig:
     benefits_channel_id: int = 0
     support_channel_id: int = 0
     log_channel_id: int = 0
+    review_channel_id: int = 0
+    rules_channel_id: int = 0
     staff_role_ids: tuple[int, ...] = ()
     mode: str = "live"  # test | live | off  (setup switches a fresh install to test)
     setup_completed: bool = False
@@ -273,7 +275,7 @@ class MessagesConfig:
     listing_created: str = "**{server_name}** is live. {jump_url}\nUse **My Listing** anytime to edit or Relist it."
     listing_saved_unpublished: str = "**{server_name}** is saved. It will appear once the server directory is ready."
     listing_pending: str = "**{server_name}** was sent to staff for review. I'll DM you when it's live."
-    listing_approved: str = "✅ Your listing for **{server_name}** was approved and is now live."
+    listing_approved: str = "✅ Your server **{server_name}** is approved. If your ad was already supplied it is live; otherwise open My Server Listings to post it."
     listing_rejected: str = "Your listing for **{server_name}** was not approved. Contact support if you have questions."
     edit_pending: str = "Your changes to **{server_name}** were sent to staff. Your current ad stays live until they're approved."
     edit_approved: str = "✅ Your changes to **{server_name}** were approved and are now live."
@@ -297,7 +299,9 @@ class MessagesConfig:
     )
     help: str = (
         "## 📖 How {bot_name} Works\n"
-        "**Quick Post:** paste an invite to list one community with no OAuth and no installation. Every submission is reviewed. Repost once per 24 hours.\n\n"
+        "**Quick Post:** invite + category; automatic mode publishes an ad after checks, "
+        "manual mode approves the server first, then you paste your ad any time. "
+        "No OAuth or install. Relist once per 24 hours after posting.\n\n"
         "**Connected Network:** install Parley in a server you manage to enable faster relisting and mutual, approved partnerships.\n\n"
         "**Server Directory** - one synced public ad per server.\n"
         "**Network** - choose where accepted partners' ads are delivered.\n"

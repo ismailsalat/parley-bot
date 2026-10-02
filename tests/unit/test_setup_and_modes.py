@@ -59,7 +59,8 @@ async def test_automatic_setup_creates_only_the_recommended_channels():
     result = await setup_service.automatic_setup(guild, staff_roles=[])
     assert [name for name, _ in guild.created] == [
         "👋・start-here", "📣・server-directory", "🤝・partner-board",
-        "📖・how-parley-works", "💬・support", "🛡️・parley-logs"
+        "📖・how-parley-works", "💬・support", "🛡️・parley-logs",
+        "📝・ad-approvals", "📜・server-rules"
     ]
     assert "benefits_channel_id" not in result.channels  # owner chooses Parley Perks placement separately
     assert result.ok and not result.failed

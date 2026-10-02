@@ -109,6 +109,9 @@ class Listing(Base):
     )
     # A *submitter*, NOT a verified server manager. Unique, nullable: one unconnected listing per account.
     quick_submitted_by: Mapped[int | None] = mapped_column(BigInteger, unique=True, index=True, nullable=True)
+    # Staff approved this *server*, but its author may return later to paste the ad.
+    awaiting_ad: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    approval_notice_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     advertisement_text: Mapped[str] = mapped_column(Text)
     category: Mapped[str] = mapped_column(String(300))  # comma separated category names
     accepting_partnerships: Mapped[bool] = mapped_column(Boolean, default=True)

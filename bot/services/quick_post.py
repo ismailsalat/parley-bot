@@ -43,6 +43,9 @@ def prepare_quick_ad(
     content ping server members, and never treat a copied ad as a verified claim.
     """
     chosen = listings.clean_categories([category], config)
+    from re import search
+    if search(r"(?i)(?<![a-z0-9])(?:nsfw|18\+|adult[- ]only)(?![a-z0-9])", f"{info.name} {description} {raw_ad or ''}"):
+        raise ValidationError("Adult/NSFW communities and advertisements aren't allowed on Parley.")
     if raw_ad is None:
         clean = quick_description(description, config)
         formatted = listings.build_simple_ad(
@@ -64,7 +67,7 @@ def prepare_quick_ad(
         if code != primary_code and code not in trusted_codes:
             raise ValidationError(
                 "This ad includes an additional invite that Parley hasn't verified. "
-                "Paste it in your draft room so Parley can check that it leads to the same server."
+                "Please correct the invite links and try again."
             )
     suspicious = listings.check_links(clean, config)
     extra = any(
@@ -176,6 +179,8 @@ async def create_quick_listing(
         verified_invite_codes=verified_invite_codes,
     )
     requires_review = config.listings.approval_required or force_review
+    # Staff approval is for SERVER + category + summary. Full ad comes later.
+    awaiting_ad = bool(config.listings.approval_required and raw_ad is None)
     if not invite_url or not invite_url.startswith('https://discord.gg/'):
         raise ValidationError("Please use a valid Discord invite.")
 
@@ -216,6 +221,8 @@ async def create_quick_listing(
             raise Conflict("This server's listing is suspended. Contact Parley staff.")
         if previous.status == ListingStatus.PENDING:
             raise Conflict("Your Quick Post is already awaiting staff review.")
+        if previous.awaiting_ad and previous.status == ListingStatus.ACTIVE:
+            raise Conflict("Your server is approved. Open My Server Listings and press Post Approved Ad first.")
         if previous.refreshed_at is not None:
             available = previous.refreshed_at + timedelta(minutes=config.listings.quick_post_cooldown_minutes)
             if now < available:
@@ -237,6 +244,7 @@ async def create_quick_listing(
             previous.category = chosen[0]
             previous.invite_url = invite_url
             previous.status = ListingStatus.PENDING if requires_review else ListingStatus.ACTIVE
+            previous.awaiting_ad = awaiting_ad
             previous.refreshed_at = now
             previous.updated_at = now
             previous.pending_submitted_by = actor_id if requires_review else None
@@ -266,7 +274,7 @@ async def create_quick_listing(
         advertisement_text=formatted, category=chosen[0],
         accepting_partnerships=False, minimum_members=0,
         invite_url=invite_url, status=ListingStatus.PENDING if requires_review else ListingStatus.ACTIVE,
-        created_at=now, updated_at=now, refreshed_at=now,
+        awaiting_ad=awaiting_ad, created_at=now, updated_at=now, refreshed_at=now,
         pending_submitted_by=actor_id if requires_review else None, review_revision=1,
         is_test=is_test,
     )
@@ -346,4 +354,35 @@ async def delete_quick_listing(
         if remaining.total_seconds() > 0:
             await cooldowns.start(session, "quick_post_deleted", actor_id, now, remaining)
     await repository.add_audit(session, "listing.quick_deleted", actor_id=actor_id, guild_id=guild_id)
+    return row
+
+
+async def publish_approved_ad(
+    session: AsyncSession, config: RuntimeConfig, *, guild_id: int, actor_id: int,
+    info: listings.GuildInfo, text: str, verified_invite_codes: Collection[str], now,
+) -> Listing:
+    """One-time transition from staff-approved server to a real, formatted ad.
+
+    The database is the truth: confirmed text is saved before any Discord API
+    call. If the bot crashes afterwards, background publishing can retry safely.
+    The published copy is limited to same-guild Discord invites; no external
+    links, mass pings or mentions can slip past the server-only staff review.
+    """
+    await moderation.ensure_allowed(session, config, guild_ids=[guild_id], user_id=actor_id)
+    row = await session.scalar(select(Listing).where(Listing.guild_id == guild_id).with_for_update())
+    if not row or row.quick_submitted_by != actor_id or row.status != ListingStatus.ACTIVE or not row.awaiting_ad:
+        raise Conflict("This server is not waiting for your approved advertisement.")
+    if info.guild_id != guild_id or not row.invite_url:
+        raise Conflict("The approved server no longer matches. Ask staff for help.")
+    content, unsafe = prepare_quick_ad(
+        config, info=info, invite_url=row.invite_url, category=row.categories[0],
+        raw_ad=text, verified_invite_codes=verified_invite_codes,
+    )
+    if unsafe:
+        raise ValidationError("Approved-server ads may contain only Discord invite links for this server. Remove external links.")
+    row.advertisement_text = content
+    row.awaiting_ad = False
+    row.refreshed_at = now  # cooldown begins AFTER actually posting, not approval
+    row.updated_at = now
+    await repository.add_audit(session, "listing.quick_approved_ad_confirmed", actor_id=actor_id, guild_id=guild_id)
     return row

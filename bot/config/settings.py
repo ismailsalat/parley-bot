@@ -130,7 +130,7 @@ class Settings:
     run_migrations_on_startup: bool = True
     sync_commands: bool = True
     on_railway: bool = False
-    # Required for the controlled "Paste My Own Ad" channel flow.
+    # Legacy controlled self-post moderation; Free Post now uses a modal with no temporary channels.
     message_content_intent: bool = True
     # "Verify My Servers": listing a server without installing Parley. The client id is
     # the application id; only the secret and redirect URL come from the environment.

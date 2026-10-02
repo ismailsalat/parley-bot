@@ -255,10 +255,10 @@ class ChannelPicker(Page):
     def slots(self):
         required = [s for s in setup_service.SLOTS if s.required]
         optional = [s for s in setup_service.SLOTS if not s.required]
-        return required if self.page == 0 else optional
+        return required if self.page == 0 else optional[(self.page - 1)*4:self.page*4]
 
     def content(self) -> str:
-        head = "## Choose Channels" + (" (optional)" if self.page else "")
+        head = "## Choose Channels" + (f" (optional {self.page}/2)" if self.page else "")
         lines = [head]
         for slot in self.slots():
             lines.append(f"**{slot.label}:** {channel_mention(self.chosen.get(slot.key, 0))}")
@@ -279,10 +279,10 @@ class ChannelPicker(Page):
             self.add_item(select)
         nav_row = len(self.slots())
         self.button("Save Setup", self._save, emoji="💾", row=nav_row)
-        if self.page == 0:
-            self.button("Optional Channels", self._next_page, emoji="➡️", row=nav_row)
-        else:
-            self.button("Required Channels", self._prev_page, emoji="⬅️", row=nav_row)
+        if self.page < 2:
+            self.button("Next Channels", self._next_page, emoji="➡️", row=nav_row)
+        if self.page > 0:
+            self.button("Previous Channels", self._prev_page, emoji="⬅️", row=nav_row)
         if self.back is not None:
             self.button("Back", self._go_back, emoji="⬅️", style=discord.ButtonStyle.secondary, row=nav_row)
 
@@ -294,11 +294,11 @@ class ChannelPicker(Page):
         return callback
 
     async def _next_page(self, interaction: discord.Interaction) -> None:
-        self.page = 1
+        self.page = min(self.page + 1, 2)
         await self.show(interaction)
 
     async def _prev_page(self, interaction: discord.Interaction) -> None:
-        self.page = 0
+        self.page = max(0, self.page - 1)
         await self.show(interaction)
 
     async def _save(self, interaction: discord.Interaction) -> None:

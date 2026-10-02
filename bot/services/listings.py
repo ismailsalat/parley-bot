@@ -497,8 +497,12 @@ async def review_listing(
     if listing.status == ListingStatus.PENDING:
         kind = "new"
         listing.status = ListingStatus.ACTIVE if approve else ListingStatus.REMOVED
-        if approve:
+        if approve and not listing.awaiting_ad:
             listing.refreshed_at = now
+        elif approve and listing.awaiting_ad:
+            # The application was approved, but no final advertisement exists.
+            # The submitter can return any day; their 24h clock starts on post.
+            listing.refreshed_at = None
     else:
         kind = "edit"
         if approve:

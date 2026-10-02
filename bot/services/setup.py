@@ -60,8 +60,18 @@ SLOTS: tuple[ChannelSlot, ...] = (
     ),
     ChannelSlot(
         "log_channel_id", "🛡️・parley-logs", "Staff logs", False,
-        "Parley staff logs and approvals.",
+        "Operational events and audit trail (approvals are in #ad-approvals).",
         ("parley-logs", "waypoint-logs"),
+    ),
+    ChannelSlot(
+        "review_channel_id", "📝・ad-approvals", "Ad approvals", False,
+        "Private staff queue: approve or reject community submissions here.",
+        ("ad-approvals", "server-approvals"),
+    ),
+    ChannelSlot(
+        "rules_channel_id", "📜・server-rules", "Server rules", False,
+        "Parley rules for advertisements, server listings and partnerships.",
+        ("server-rules", "rules"),
     ),
 )
 
@@ -82,8 +92,7 @@ def bot_channel_permissions() -> discord.PermissionOverwrite:
 
 
 def listings_channel_permissions() -> discord.PermissionOverwrite:
-    """The listings channel also needs message and permission management, so Parley can
-    open a one-off posting window for "Paste My Own Ad" and clean up afterwards."""
+    """Lock public directory posting; legacy connected self-post windows still cleanly recover."""
     overwrite = bot_channel_permissions()
     overwrite.update(manage_messages=True, manage_roles=True)
     return overwrite
@@ -101,11 +110,11 @@ def overwrites_for(
     everyone = guild.default_role
     own = listings_channel_permissions() if slot.key in ("listings_channel_id", "looking_channel_id") else bot_channel_permissions()
     result: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {guild.me: own}
-    if slot.key in ("welcome_channel_id", "listings_channel_id", "looking_channel_id", "perks_channel_id", "benefits_channel_id"):
+    if slot.key in ("welcome_channel_id", "listings_channel_id", "looking_channel_id", "perks_channel_id", "benefits_channel_id", "rules_channel_id"):
         result[everyone] = discord.PermissionOverwrite(
             send_messages=False, create_public_threads=False, create_private_threads=False, send_messages_in_threads=False
         )
-    elif slot.key == "log_channel_id":
+    elif slot.key in ("log_channel_id", "review_channel_id"):
         result[everyone] = discord.PermissionOverwrite(view_channel=False)
         for role in staff_roles:
             result[role] = discord.PermissionOverwrite(view_channel=True, read_message_history=True)

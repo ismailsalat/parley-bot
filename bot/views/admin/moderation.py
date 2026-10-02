@@ -345,10 +345,11 @@ async def post_private_staff_controls(bot: ParleyBot, guild_id: int, context: st
     # Moderation controls are optional during isolated panel tests and in
     # partially configured installations. Do not fail public ad publication
     # if the staff-log channel accessor is unavailable.
-    get_log_channel = getattr(bot, "log_channel", None)
-    if not callable(get_log_channel):
+    panels = getattr(bot, "panels", None)
+    get_review_channel = getattr(panels, "review_channel", None)
+    if not callable(get_review_channel):
         return
-    channel = get_log_channel()
+    channel = get_review_channel()
     if channel is None:
         return
     # Never expose moderation controls in a staff channel accidentally visible

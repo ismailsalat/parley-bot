@@ -287,6 +287,7 @@ class BackgroundTasks:
                     select(Listing).where(
                         Listing.status == ListingStatus.ACTIVE,
                         Listing.message_id.is_(None),
+                        Listing.awaiting_ad.is_(False),
                         Listing.self_posted.is_(False),
                     ).limit(10)
                 ))
@@ -297,6 +298,40 @@ class BackgroundTasks:
                     await bot.panels.publish_listing(waiting.guild_id)
                 except Exception:
                     log.exception("Failed to recover unpublished ad for guild=%s", waiting.guild_id)
+
+        # Approved server applications are durable even when Discord went
+        # offline during review. Send a pending notice on the next maintenance.
+        if bot.panels.listings_channel() is not None:
+            from sqlalchemy import select
+            from bot.database.models import Listing, ListingStatus
+            async with bot.db.session() as session:
+                approved_waiting = list(await session.scalars(
+                    select(Listing).where(
+                        Listing.status == ListingStatus.ACTIVE,
+                        Listing.awaiting_ad.is_(True),
+                        Listing.approval_notice_message_id.is_(None),
+                    ).limit(10)
+                ))
+            for application in approved_waiting:
+                try:
+                    await bot.panels.notify_approval_ready(application.guild_id)
+                except Exception:
+                    log.exception("Could not recover approval notice for guild=%s", application.guild_id)
+
+        # Clean stale approval notices after publication/deletion on restart.
+        if bot.panels.listings_channel() is not None:
+            from sqlalchemy import or_, select
+            from bot.database.models import Listing, ListingStatus
+            async with bot.db.session() as session:
+                obsolete_notices = list(await session.scalars(
+                    select(Listing).where(
+                        or_(Listing.awaiting_ad.is_(False),
+                            Listing.status != ListingStatus.ACTIVE),
+                        Listing.approval_notice_message_id.is_not(None),
+                    ).limit(10)
+                ))
+            for obsolete in obsolete_notices:
+                await bot.panels.clear_approval_notice(obsolete.guild_id)
 
         # Delete any public messages left over from removed/suspended ads.
         # This also repairs interrupted deletions after a Railway restart.
@@ -321,7 +356,7 @@ class BackgroundTasks:
 
         # Review messages are durable DB records; a failed staff log send must
         # never silently auto-approve an ad. Retry missing notifications.
-        if bot.log_channel() is not None:
+        if bot.panels.review_channel() is not None:
             async with bot.db.session() as session:
                 due_reviews = await repository.listings_awaiting_review(session, limit=25)
                 due_reviews = [l for l in due_reviews if not l.review_message_id]

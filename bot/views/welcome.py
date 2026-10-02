@@ -463,8 +463,8 @@ async def trust_and_safety(interaction: discord.Interaction) -> None:
         "## 🛡️ Parley · Privacy & Safety\n\n"
         "**To list a server:** No OAuth account authorization, no bot installation, "
         "and no access to the advertised server is needed. Paste a public invite; "
-        "staff review the submission before it appears. The invite is not proof "
-        "that you own the server.\n\n"
+        "new posts follow the current safety checks, and staff review them if manual approval is enabled. "
+        "The invite is not proof that you own the server.\n\n"
         "**If you choose to install Parley:** Discord shows the requested bot "
         "permissions. Parley needs access to agreed listing/partnership channels "
         "to publish messages and uses server/member information for management checks. "
@@ -833,3 +833,19 @@ async def how_it_works(interaction: discord.Interaction) -> None:
     if bot.runtime.bot.support_url:
         text += "\n" + templates.render(bot.runtime, "support")
     await reply(interaction, text, view=persistent_view(add_bot_button(bot), *links) if (links or invite_url(bot)) else None)
+
+
+def server_rules_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
+    """Short, public, neutral rules. Updated in place on restarts."""
+    return (
+        "# 📜 Parley Server Rules\n"
+        "1. **No NSFW/18+ communities or explicit advertisements.**\n"
+        "2. **Follow Discord's Terms of Service and Community Guidelines.**\n"
+        "3. No scams, malware, phishing, stolen accounts, impersonation, or misleading invites.\n"
+        "4. Advertise the server you selected. Other Discord invites and vanity URLs are allowed only when they lead to that same server.\n"
+        "5. No mass pings, harassment, hate speech, spam, or reposting around cooldowns.\n"
+        "6. Staff may reject, remove, suspend or ban listings that break these rules.\n\n"
+        "**Free listings:** no OAuth and no server bot installation required. "
+        "Install Parley only if you want optional Connected features.",
+        discord.ui.View(timeout=None),
+    )

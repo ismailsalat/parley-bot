@@ -45,21 +45,53 @@ async def test_quick_post_has_no_manager_or_partnership_authority(db, config):
             await submit(session, config, gid=1001, user=3003)  # cannot hijack another listing
 
 
-async def test_quick_relist_24_hours_after_approval(db, config):
+async def test_quick_approval_does_not_publish_or_start_cooldown_until_ad_posted(db, config):
     config = replace(config, listings=replace(config.listings, approval_required=True))
     async with db.session() as session:
-        await submit(session, config)
+        initial, state = await submit(session, config)
+        assert state == "pending" and initial.awaiting_ad
         await listings.review_listing(
             session, guild_id=1001, approve=True, moderator_id=4444,
             now=NOW + timedelta(minutes=15), revision=1,
         )
     async with db.session() as session:
+        approved = await repository.get_listing(session, 1001)
+        assert approved.status == ListingStatus.ACTIVE and approved.awaiting_ad
+        assert approved.refreshed_at is None
+        with pytest.raises(Conflict):
+            await submit(session, config, at=NOW + timedelta(hours=25))
+        posted = await quick_post.publish_approved_ad(
+            session, config, guild_id=1001, actor_id=2002, info=guild(1001),
+            text="## Join our community!", verified_invite_codes=(),
+            now=NOW + timedelta(hours=30),
+        )
+        assert posted.awaiting_ad is False
+        assert posted.advertisement_text.startswith("## Join our community!")
+    async with db.session() as session:
         with pytest.raises(CooldownActive):
-            await submit(session, config, at=NOW + timedelta(hours=23))
-        row, action = await submit(session, config, at=NOW + timedelta(hours=25))
-        assert action == "reposted"
-        assert row.status == ListingStatus.ACTIVE
-        assert row.quick_submitted_by == 2002
+            await submit(session, config, at=NOW + timedelta(hours=53))
+        repost, action = await submit(session, config, at=NOW + timedelta(hours=55))
+        assert action == "reposted" and repost.status == ListingStatus.ACTIVE
+
+
+async def test_approved_ad_rejects_other_owner_and_external_links(db, config):
+    config = replace(config, listings=replace(config.listings, approval_required=True))
+    async with db.session() as session:
+        await submit(session, config)
+        await listings.review_listing(session, guild_id=1001, approve=True,
+                                      moderator_id=4444, now=NOW, revision=1)
+    async with db.session() as session:
+        with pytest.raises(Conflict):
+            await quick_post.publish_approved_ad(
+                session, config, guild_id=1001, actor_id=9000, info=guild(1001),
+                text="Hello", verified_invite_codes=(), now=NOW,
+            )
+        with pytest.raises(ValidationError):
+            await quick_post.publish_approved_ad(
+                session, config, guild_id=1001, actor_id=2002, info=guild(1001),
+                text="https://some-website.example/", verified_invite_codes=(), now=NOW,
+            )
+        assert (await repository.get_listing(session, 1001)).awaiting_ad is True
 
 
 async def test_rejected_quick_post_can_be_corrected_next_day(db, config):

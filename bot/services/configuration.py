@@ -57,7 +57,7 @@ RESETTABLE_SECTIONS: dict[str, tuple[str, ...]] = {
 
 HUB_CHANNEL_FIELDS = (
     "welcome_channel_id", "listings_channel_id", "looking_channel_id", "perks_channel_id",
-    "benefits_channel_id", "support_channel_id", "log_channel_id"
+    "benefits_channel_id", "support_channel_id", "log_channel_id", "review_channel_id", "rules_channel_id"
 )
 _ENV_HUB_FIELDS = ("main_guild_id", *HUB_CHANNEL_FIELDS)
 

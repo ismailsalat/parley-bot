@@ -1404,13 +1404,13 @@ def _info_changes(listing: Listing) -> list[str]:
 
 
 def review_payload(bot: ParleyBot, listing: Listing, guild_name: str, member_count: int | None) -> dict:
-    """The review message: the ad exactly as it would be posted, plus a staff summary."""
+    """Staff preview of application or ad. Short applications are not public ads."""
     edit = listing.status != ListingStatus.PENDING
     pending = listing.pending_changes or {}
     ad_text = pending.get("advertisement_text", listing.advertisement_text)
     category = pending.get("category", listing.category)
     header = discord.Embed(
-        title=("✏️ EDIT REVIEW" if edit else "📝 NEW LISTING") + f" · {truncate(guild_name, 150)}",
+        title=("✏️ EDIT REVIEW" if edit else "📝 SERVER APPROVAL" if listing.awaiting_ad else "📝 AD REVIEW") + f" · {truncate(guild_name, 150)}",
         color=bot.runtime.bot.color_warning,
     )
     header.add_field(name="Server", value=f"{truncate(guild_name, 100)}\n`{listing.guild_id}`")
@@ -1427,7 +1427,8 @@ def review_payload(bot: ParleyBot, listing: Listing, guild_name: str, member_cou
         if "advertisement_text" in pending:
             changed.insert(0, "**Advertisement text** changed (new version above, current live version below)")
         header.description = "\n".join(changed) or "No visible changes."
-    header.set_footer(text=f"Review #{listing.review_revision} · the advertisement is shown above this box")
+    header.set_footer(text=(f"Review #{listing.review_revision} · server application only; user posts ad later" if listing.awaiting_ad else
+                            f"Review #{listing.review_revision} · advertisement above"))
     embeds = [header]
     if edit and "advertisement_text" in pending:
         embeds.append(
@@ -1444,10 +1445,10 @@ def review_payload(bot: ParleyBot, listing: Listing, guild_name: str, member_cou
 
 
 async def send_for_review(bot: ParleyBot, listing: Listing, guild_name: str) -> bool:
-    """Post a review in the staff log. A newer submission replaces (outdates) the previous review."""
-    channel = bot.log_channel()
+    """Post a review in the dedicated private approvals channel, never in logs."""
+    channel = bot.panels.review_channel()
     if channel is None:
-        log.warning("listing.review_unrouted guild_id=%s (no staff log channel set)", listing.guild_id)
+        log.warning("listing.review_unrouted guild_id=%s (#ad-approvals is missing)", listing.guild_id)
         return False
     async with bot.db.session() as session:
         stored = await repository.get_guild(session, listing.guild_id)
@@ -1489,13 +1490,23 @@ async def review(interaction: discord.Interaction, guild_id: int, approve: bool,
         stored = await repository.get_guild(session, guild_id)
     name = stored.name if stored else str(guild_id)
 
-    if approve and kind == "new":
+    if approve and kind == "new" and not listing.awaiting_ad:
         await bot.panels.publish_listing(guild_id)
+    elif approve and kind == "new" and listing.awaiting_ad:
+        # Durable approval, no deadline and NO public advertisement until the
+        # submitter supplies/validates a real ad. A restart can retry notice.
+        await bot.panels.notify_approval_ready(guild_id)
     elif approve and kind == "edit":
         await bot.panels.update_listing_message(guild_id)
     key = {("new", True): "listing_approved", ("new", False): "listing_rejected",
            ("edit", True): "edit_approved", ("edit", False): "edit_rejected"}[(kind, approve)]
-    await deliver_dms(bot, contacts, actor_id=interaction.user.id, content=templates.render(bot.runtime, key, server_name=name))
+    notification = (
+        f"✅ **{name}** is approved. Open **My Server Listings → Post Approved Ad** "
+        "when you're ready. No expiration or temporary channel."
+        if approve and kind == "new" and listing.awaiting_ad else
+        templates.render(bot.runtime, key, server_name=name)
+    )
+    await deliver_dms(bot, contacts, actor_id=interaction.user.id, content=notification)
 
     verdict = f"{'✅ Approved' if approve else '❌ Rejected'} by {interaction.user.mention}"
     if interaction.message is not None:
