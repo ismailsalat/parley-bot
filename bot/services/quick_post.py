@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from collections.abc import Collection
+from urllib.parse import urlsplit
+
+import discord
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -31,6 +35,7 @@ def quick_description(text: str, config: RuntimeConfig) -> str:
 def prepare_quick_ad(
     config: RuntimeConfig, *, info: listings.GuildInfo, invite_url: str,
     category: str, description: str = "", raw_ad: str | None = None,
+    verified_invite_codes: Collection[str] = (),
 ) -> tuple[str, bool]:
     """Validate public copy; force review for unfamiliar URLs even in automatic mode.
 
@@ -52,22 +57,90 @@ def prepare_quick_ad(
     if any(token in lowered for token in ("@everyone", "@here", "<@", "<#!", "<@&")):
         raise ValidationError("Advertisements cannot include user, role, or mass mentions.")
     links = listings.find_links(clean)
-    # An ad may embed the canonical invite for its own community; additional
-    # invites risk silently advertising a different guild under this listing.
-    for link in links:
-        if "discord.gg/" in link.lower() or "discord.com/invite/" in link.lower():
-            if listings.parse_invite_code(link) != listings.parse_invite_code(invite_url):
-                raise ValidationError("The advertisement contains an invite for a different server.")
+    codes = advertisement_invite_codes(clean)
+    primary_code = listings.parse_invite_code(invite_url)
+    trusted_codes = set(verified_invite_codes)
+    for code in codes:
+        if code != primary_code and code not in trusted_codes:
+            raise ValidationError(
+                "This ad includes an additional invite that Parley hasn't verified. "
+                "Paste it in your draft room so Parley can check that it leads to the same server."
+            )
     suspicious = listings.check_links(clean, config)
-    from urllib.parse import urlparse
     extra = any(
-        (urlparse(url).hostname or "").lower() not in ("discord.gg", "discord.com", "www.discord.com")
+        (urlsplit(url if '://' in url else f'https://{url}').hostname or '').lower()
+        not in ('discord.gg', 'www.discord.gg', 'discord.com', 'www.discord.com',
+                'discordapp.com', 'www.discordapp.com')
         for url in links
     )
-    # Limit total message length after adding the verified target invite.
-    if invite_url not in clean:
+    # Keep a pasted vanity/alternate invite as-is after verifying its guild ID.
+    # Don't append a duplicate canonical invite when a valid same-server link
+    # already exists in the ad.
+    if not codes:
         clean = listings.clean_advertisement(f"{clean}\n\n{invite_url}", config)
     return clean, suspicious or extra
+
+
+def advertisement_invite_codes(text: str) -> list[str]:
+    """Official Discord invite links in pasted text; refuse malformed URLs.
+
+    Non-Discord external links still use the existing moderator-review policy.
+    Parsing an invite does *not* establish its server: the caller must resolve
+    each non-primary code through Discord before treating it as trusted.
+    """
+    codes = []
+    for link in listings.find_links(text):
+        url = urlsplit(link if '://' in link else f'https://{link}')
+        hostname = (url.hostname or '').lower()
+        is_invite_host = hostname in ('discord.gg', 'www.discord.gg') or (
+            hostname in ('discord.com', 'www.discord.com', 'discordapp.com', 'www.discordapp.com')
+            and url.path.lower().startswith('/invite')
+        )
+        if not is_invite_host:
+            continue
+        # Never silently ignore a malformed or disguised Discord invite.
+        code = listings.parse_invite_code(link)
+        if code not in codes:
+            codes.append(code)
+    return codes
+
+
+async def verify_advertisement_invites(bot, raw_ad: str, *, guild_id: int, invite_url: str) -> frozenset[str]:
+    """Verify every additional invite against the intended Discord guild ID.
+
+    Normal codes and vanity codes use the same fetch_invite API; no OAuth is
+    required. Fail closed on expired/unavailable invites or Discord outages.
+    """
+    # Reject oversized/overlinked advertisements before making Discord API calls.
+    listings.clean_advertisement(raw_ad, bot.runtime)
+    listings.check_links(raw_ad, bot.runtime)
+    primary_code = listings.parse_invite_code(invite_url)
+    codes = advertisement_invite_codes(raw_ad)
+    if len(codes) > 5:
+        raise ValidationError("Please use at most five Discord invite links in an advertisement.")
+    approved = set()
+    for code in codes:
+        if code == primary_code:
+            continue  # already fetched and guild-checked by QuickPostModal
+        try:
+            result = await bot.fetch_invite(code, with_counts=False)
+        except (discord.NotFound, discord.Forbidden) as exc:
+            raise ValidationError(
+                f"The invite discord.gg/{code} is expired, invalid, or inaccessible. "
+                "Use a working invite for your server."
+            ) from exc
+        except discord.HTTPException as exc:
+            raise ValidationError(
+                "Discord couldn't verify every invite in your ad right now. "
+                "Please try again shortly."
+            ) from exc
+        if result.guild is None or result.guild.id != guild_id:
+            raise ValidationError(
+                f"The invite discord.gg/{code} belongs to a different server. "
+                "Only invites for the server you're advertising are allowed."
+            )
+        approved.add(code)
+    return frozenset(approved)
 
 
 async def my_quick_listing(session: AsyncSession, actor_id: int) -> Listing | None:
@@ -86,6 +159,7 @@ async def create_quick_listing(
     now,
     is_test: bool = False,
     raw_ad: str | None = None,
+    verified_invite_codes: Collection[str] = (),
 ) -> tuple[Listing, str]:
     """Reserve one unverified listing, or repost the same previously approved ad.
 
@@ -99,6 +173,7 @@ async def create_quick_listing(
     formatted, force_review = prepare_quick_ad(
         config, info=info, invite_url=invite_url, category=chosen[0],
         description=description, raw_ad=raw_ad,
+        verified_invite_codes=verified_invite_codes,
     )
     requires_review = config.listings.approval_required or force_review
     if not invite_url or not invite_url.startswith('https://discord.gg/'):
@@ -212,6 +287,7 @@ async def edit_quick_listing(
     session: AsyncSession, config: RuntimeConfig, *, guild_id: int, actor_id: int,
     category: str, info: listings.GuildInfo, invite_url: str,
     description: str, now, raw_ad: str | None = None,
+    verified_invite_codes: Collection[str] = (),
 ) -> tuple[Listing, str]:
     """One edit per relist cycle. Never changes unverified guild authority or rank."""
     await moderation.ensure_allowed(session, config, guild_ids=[guild_id], user_id=actor_id)
@@ -227,6 +303,7 @@ async def edit_quick_listing(
     content, unsafe_links = prepare_quick_ad(
         config, info=info, invite_url=row.invite_url, category=category,
         description=description, raw_ad=raw_ad,
+        verified_invite_codes=verified_invite_codes,
     )
     changed = content != row.advertisement_text or category != row.category
     if not changed:

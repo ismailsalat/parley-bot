@@ -207,3 +207,108 @@ async def test_only_original_submitter_can_restore_deleted_guild(db, config):
             await submit(session, config, gid=6055, user=9999, at=NOW + timedelta(hours=26))
         row, outcome = await submit(session, config, gid=6055, user=7111, at=NOW + timedelta(hours=26))
         assert (outcome, row.quick_submitted_by) == ("published", 7111)
+
+
+def test_vanity_codes_and_invite_variants_use_one_server_identity(config):
+    """An invite code/vanity slug is not a guild ID: Discord must resolve it."""
+    from bot.services.listings import parse_invite_code
+
+    assert parse_invite_code("camelot") == "camelot"
+    assert parse_invite_code("discord.gg/camelot") == "camelot"
+    assert parse_invite_code("https://discord.gg/camelot?utm_source=test") == "camelot"
+    assert parse_invite_code("https://discord.com/invite/camelot") == "camelot"
+    assert parse_invite_code("https://discordapp.com/invite/camelot") == "camelot"
+    with pytest.raises(ValidationError):
+        parse_invite_code("https://discord.gg.bad-domain.example/camelot")
+
+
+async def test_pasted_ad_accepts_two_codes_and_vanity_for_same_guild(config):
+    from types import SimpleNamespace
+
+    checked = []
+
+    class Bot:
+        runtime = config
+
+        async def fetch_invite(self, code, *, with_counts=False):
+            checked.append(code)
+            return SimpleNamespace(guild=SimpleNamespace(id=1001), code=code)
+
+    raw = (
+        "# 🏰 Camelot ⚔️\n"
+        "https://discord.gg/Camelot\n"
+        "https://discord.com/invite/alternate123?utm_source=parley"
+    )
+    validated = await quick_post.verify_advertisement_invites(
+        Bot(), raw, guild_id=1001, invite_url="https://discord.gg/original123"
+    )
+    assert validated == frozenset({"Camelot", "alternate123"})
+    assert checked == ["Camelot", "alternate123"]
+    formatted, requires_review = quick_post.prepare_quick_ad(
+        config, info=guild(1001), invite_url="https://discord.gg/original123",
+        category="Gaming", raw_ad=raw, verified_invite_codes=validated,
+    )
+    assert formatted == raw  # the confirmed ad should not acquire a duplicate invite
+    assert requires_review is False
+
+
+async def test_vanity_only_pasted_ad_does_not_append_another_invite(config):
+    from types import SimpleNamespace
+
+    class Bot:
+        runtime = config
+
+        async def fetch_invite(self, code, *, with_counts=False):
+            return SimpleNamespace(guild=SimpleNamespace(id=1001), code=code)
+
+    raw = "Join Camelot: discord.gg/camelot"
+    verified = await quick_post.verify_advertisement_invites(
+        Bot(), raw, guild_id=1001, invite_url="https://discord.gg/otherCode"
+    )
+    text, _ = quick_post.prepare_quick_ad(
+        config, info=guild(1001), invite_url="https://discord.gg/otherCode",
+        category="Gaming", raw_ad=raw, verified_invite_codes=verified,
+    )
+    assert text == raw
+
+
+async def test_different_server_invite_stays_blocked_even_if_vanity(config):
+    from types import SimpleNamespace
+
+    class Bot:
+        runtime = config
+
+        async def fetch_invite(self, code, *, with_counts=False):
+            return SimpleNamespace(guild=SimpleNamespace(id=9999), code=code)
+
+    with pytest.raises(ValidationError, match="different server"):
+        await quick_post.verify_advertisement_invites(
+            Bot(), "Visit https://discord.gg/unrelatedVanity",
+            guild_id=1001, invite_url="https://discord.gg/original123",
+        )
+    with pytest.raises(ValidationError, match="additional invite"):
+        quick_post.prepare_quick_ad(
+            config, info=guild(1001), invite_url="https://discord.gg/original123",
+            category="Gaming", raw_ad="https://discord.gg/unrelatedVanity",
+        )
+
+
+async def test_same_guild_invites_do_not_bypass_publish_time_gate(db, config):
+    """Validated aliases must be explicitly passed to the database writer."""
+    raw = "Join https://discord.gg/camelot"
+    async with db.session() as session:
+        with pytest.raises(ValidationError, match="additional invite"):
+            await quick_post.create_quick_listing(
+                session, config, info=guild(1234567), actor_id=7654321,
+                invite_url="https://discord.gg/original123", description="",
+                category="Gaming", raw_ad=raw, now=NOW,
+            )
+    async with db.session() as session:
+        listing, outcome = await quick_post.create_quick_listing(
+            session, config, info=guild(1234567), actor_id=7654321,
+            invite_url="https://discord.gg/original123", description="",
+            category="Gaming", raw_ad=raw, now=NOW,
+            verified_invite_codes=frozenset({"camelot"}),
+        )
+        assert (outcome, listing.status) == ("published", ListingStatus.ACTIVE)
+        assert listing.advertisement_text == raw

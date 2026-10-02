@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 import logging
+import inspect
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -130,7 +131,7 @@ async def capture_pasted_ad(
     bot: ParleyBot, *, user_id: int, guild_id: int,
     notify_channel: Callable[[discord.TextChannel], Awaitable[None]] | None = None,
     save_confirmed: Callable[[str], Awaitable[None]] | None = None,
-    preview_text: Callable[[str], str] | None = None,
+    preview_text: Callable[[str], str | Awaitable[str]] | None = None,
 ) -> str:
     """Return only explicitly confirmed text; always close draft room.
 
@@ -199,6 +200,7 @@ async def capture_pasted_ad(
             f"<@{user_id}> **Your private Parley draft is ready.**\n"
             "Paste **one** existing text advertisement here within **10 minutes**. "
             "It is visible only to you and authorized staff.\n"
+            "Multiple Discord invites and vanity links are fine if they all lead to the server you're listing. "
             "After you paste, **Confirm Ad** or **Try Again**. "
             "This channel will be deleted after submission, cancellation, timeout, or a bot restart. "
             "Never paste passwords or secrets.",
@@ -241,6 +243,8 @@ async def capture_pasted_ad(
             # that the user must approve.
             try:
                 final_preview = preview_text(content) if preview_text else content
+                if inspect.isawaitable(final_preview):
+                    final_preview = await final_preview
             except ParleyError as exc:
                 await channel.send(f"⚠️ {exc.user_message} Paste a corrected ad.")
                 continue

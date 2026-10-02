@@ -22,9 +22,10 @@ log = logging.getLogger(__name__)
 
 ALREADY_LISTED = "This server is already listed."
 _INVITE_RE = re.compile(
-    r"^(?:https?://)?(?:www\.)?(?:discord\.gg|discord(?:app)?\.com/invite)/([A-Za-z0-9-]{2,40})/?$",
+    r"^(?:https?://)?(?:www\.)?(?:discord\.gg|discord(?:app)?\.com/invite)/([A-Za-z0-9-]{2,40})/?(?:[?#][^\s]*)?$",
     re.IGNORECASE,
 )
+_BARE_INVITE_CODE_RE = re.compile(r"^[A-Za-z0-9-]{2,40}$")
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
@@ -171,10 +172,19 @@ def clean_contacts(contact_ids: Sequence[int], actor_id: int, config: RuntimeCon
 
 
 def parse_invite_code(raw: str) -> str:
-    match = _INVITE_RE.match((raw or "").strip())
-    if not match:
-        raise ValidationError("That doesn't look like a Discord invite link (for example https://discord.gg/abc123).")
-    return match.group(1)
+    """Extract a Discord invite code, including official vanity invites.
+
+    Discord resolves vanity codes through the same invite endpoint as normal
+    codes. Accept bare invite codes in the submission field, but never treat
+    arbitrary words in advertisement text as invites.
+    """
+    value = (raw or "").strip()
+    match = _INVITE_RE.fullmatch(value)
+    if match:
+        return match.group(1)
+    if _BARE_INVITE_CODE_RE.fullmatch(value):
+        return value
+    raise ValidationError("Enter a valid Discord invite or vanity URL (for example https://discord.gg/camelot).")
 
 
 def canonical_invite(code: str) -> str:

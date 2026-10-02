@@ -64,6 +64,7 @@ async def show_quick_start(interaction: discord.Interaction) -> None:
             "**No OAuth. No bot installation. No server permissions.**\n\n"
             "1. Choose **exactly one** category from the dropdown.\n"
             "2. **Write a short ad** or **paste your existing Discord advertisement** in a private room.\n"
+            "   Different invite links and vanity URLs are okay if they lead to the same server.\n"
             "3. Preview and confirm.\n\n"
             f"**Current publishing mode:** {'Staff approval' if bot.runtime.listings.approval_required else 'Automatic after safety checks'}.\n"
             "**Free limit:** one unconnected community per account, repost every 24 hours.\n"
@@ -329,10 +330,14 @@ class QuickPostModal(discord.ui.Modal):
                         raw_ad=raw_ad, editing=self.editing,
                     )
                     await _submit_draft(bot, confirmed, interaction.user.id, interaction=interaction)
-                def preview_text(text: str) -> str:
+                async def preview_text(text: str) -> str:
+                    trusted_codes = await quick_service.verify_advertisement_invites(
+                        bot, text, guild_id=guild_info.guild_id, invite_url=draft.invite_url,
+                    )
                     final, _ = quick_service.prepare_quick_ad(
                         bot.runtime, info=guild_info, invite_url=draft.invite_url,
                         category=self.category, raw_ad=text,
+                        verified_invite_codes=trusted_codes,
                     )
                     return final
                 await capture_pasted_ad(
@@ -369,9 +374,15 @@ class QuickPostModal(discord.ui.Modal):
 async def _submit_draft(bot: ParleyBot, draft: QuickDraft, user_id: int, *, interaction: discord.Interaction) -> None:
     """Save confirmed copy atomically; public publishing follows the DB transaction."""
     from bot.views.listings import send_for_review
+    trusted_codes = (
+        await quick_service.verify_advertisement_invites(
+            bot, draft.raw_ad, guild_id=draft.guild.guild_id, invite_url=draft.invite_url,
+        ) if draft.raw_ad is not None else frozenset()
+    )
     _, risky = quick_service.prepare_quick_ad(
         bot.runtime, info=draft.guild, invite_url=draft.invite_url,
         category=draft.category, description=draft.description, raw_ad=draft.raw_ad,
+        verified_invite_codes=trusted_codes,
     )
     if (bot.runtime.listings.approval_required or risky) and bot.log_channel() is None:
         raise ValidationError("Manual review is needed but the staff review channel is not configured. Contact Parley staff.")
@@ -382,6 +393,7 @@ async def _submit_draft(bot: ParleyBot, draft: QuickDraft, user_id: int, *, inte
                 info=draft.guild, invite_url=draft.invite_url,
                 description=draft.description, category=draft.category,
                 now=utcnow(), raw_ad=draft.raw_ad,
+                verified_invite_codes=trusted_codes,
             )
         else:
             listing, outcome = await quick_service.create_quick_listing(
@@ -389,6 +401,7 @@ async def _submit_draft(bot: ParleyBot, draft: QuickDraft, user_id: int, *, inte
                 invite_url=draft.invite_url, description=draft.description,
                 category=draft.category, now=utcnow(),
                 is_test=bot.runtime.hub.mode == "test", raw_ad=draft.raw_ad,
+                verified_invite_codes=trusted_codes,
             )
     if outcome in ("pending", "pending_edit"):
         # If sending fails, the DB keeps the pending submission and the
