@@ -44,8 +44,10 @@ def prepare_quick_ad(
     """
     chosen = listings.clean_categories([category], config)
     from re import search
-    if search(r"(?i)(?<![a-z0-9])(?:nsfw|18\+|adult[- ]only)(?![a-z0-9])", f"{info.name} {description} {raw_ad or ''}"):
-        raise ValidationError("Adult/NSFW communities and advertisements aren't allowed on Parley.")
+    # "18+" or "adults only" can describe a legitimate non-sexual server.
+    # Reject clear NSFW/explicit advertising, never age wording by itself.
+    if search(r"(?i)(?<![a-z0-9])(?:nsfw|porn(?:ography)?|sexual[ -]content|explicit[ -]content)(?![a-z0-9])", f"{info.name} {description} {raw_ad or ''}"):
+        raise ValidationError("Sexually explicit or NSFW communities and ads aren't allowed on Parley.")
     if raw_ad is None:
         clean = quick_description(description, config)
         formatted = listings.build_simple_ad(
@@ -163,6 +165,7 @@ async def create_quick_listing(
     is_test: bool = False,
     raw_ad: str | None = None,
     verified_invite_codes: Collection[str] = (),
+    additional_review: bool = False,
 ) -> tuple[Listing, str]:
     """Reserve one unverified listing, or repost the same previously approved ad.
 
@@ -178,7 +181,7 @@ async def create_quick_listing(
         description=description, raw_ad=raw_ad,
         verified_invite_codes=verified_invite_codes,
     )
-    requires_review = config.listings.approval_required or force_review
+    requires_review = config.listings.approval_required or force_review or additional_review
     # Staff approval is for SERVER + category + summary. Full ad comes later.
     awaiting_ad = bool(config.listings.approval_required and raw_ad is None)
     if not invite_url or not invite_url.startswith('https://discord.gg/'):
@@ -296,6 +299,7 @@ async def edit_quick_listing(
     category: str, info: listings.GuildInfo, invite_url: str,
     description: str, now, raw_ad: str | None = None,
     verified_invite_codes: Collection[str] = (),
+    additional_review: bool = False,
 ) -> tuple[Listing, str]:
     """One edit per relist cycle. Never changes unverified guild authority or rank."""
     await moderation.ensure_allowed(session, config, guild_ids=[guild_id], user_id=actor_id)
@@ -317,7 +321,7 @@ async def edit_quick_listing(
     if not changed:
         raise ValidationError("Your advertisement hasn't changed.")
     row.last_ad_edit_at = now
-    if config.listings.approval_required or unsafe_links:
+    if config.listings.approval_required or unsafe_links or additional_review:
         row.pending_changes = {"advertisement_text": content, "category": category}
         row.pending_submitted_by = actor_id
         row.review_revision = (row.review_revision or 0) + 1

@@ -147,6 +147,56 @@ async def reset_test_cooldowns(session: AsyncSession, *, actor_id: int) -> tuple
     return len(guild_ids), result.rowcount or 0
 
 
+async def reset_my_quick_listing(bot: ParleyBot, *, actor_id: int) -> bool:
+    """Staff-only utility (enforced by its Settings page), for the caller alone.
+
+    A Free Listing uses BOTH a database ownership slot and cooldown rows.
+    The old Reset Cooldowns action cleared neither a live Free Listing's slot
+    nor its quick_post_deleted cooldown. This deliberate, confirmed reset does
+    both for the acting staff member and nobody else.
+
+    Keep the removed listing as an audit tombstone: the existing create flow
+    permits only that same submitter to restore the same guild later.
+    """
+    from bot.services import quick_post
+    from bot.database.models import Cooldown
+
+    removed = None
+    async with bot.db.session() as session:
+        row = await quick_post.my_quick_listing(session, actor_id)
+        if row is not None:
+            guild = await repository.get_guild(session, row.guild_id)
+            if guild is not None and guild.connected_by is not None:
+                raise ValidationError("This is a connected server; manage it from My Server Listings instead.")
+            removed = await quick_post.delete_quick_listing(
+                session, bot.runtime, actor_id=actor_id, guild_id=row.guild_id,
+                now=utcnow(),
+            )
+            # A deleted listing also keeps its old refreshed_at timestamp;
+            # clear it so the acting staff member can actually test posting
+            # the *same* guild again, not merely a different one.
+            removed.refreshed_at = None
+            removed.last_ad_edit_at = None
+        await session.execute(
+            delete(Cooldown).where(
+                Cooldown.scope == "quick_post_deleted", Cooldown.subject == str(actor_id)
+            )
+        )
+        # Don't replace the guild-specific quick_deleted audit action: that
+        # action is needed to safely restore a previously deleted guild.
+        await repository.add_audit(
+            session, "test.my_free_listing_reset", actor_id=actor_id,
+            details={"own_guild_id": removed.guild_id if removed else None},
+        )
+
+    if removed is not None:
+        try:
+            await bot.panels.take_down_listing(removed)
+        except Exception:
+            log.exception("Couldn't immediately remove reset listing %s; cleanup will retry", removed.guild_id)
+    return removed is not None
+
+
 async def clear_test_listings(bot: ParleyBot, *, actor_id: int) -> int:
     """Hard-delete every TEST listing and its Discord-owned helper messages.
 

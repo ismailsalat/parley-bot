@@ -200,13 +200,16 @@ class TestUtilitiesPage(Page):
     def content(self) -> str:
         return (
             "## Test Utilities\n"
-            "Shortcuts for repeating flows. These tools only target **TEST** data; live listings are left alone."
+            "Reset Cooldowns and Clear Test Listings only touch TEST data. "
+            "**Reset My Free Listing** affects only your own listing, even in LIVE mode, "
+            "after confirmation."
         )
 
     def build(self) -> None:
-        self.button("Reset Cooldowns", self._reset_cooldowns, emoji="⏱️", row=0)
+        self.button("Reset Cooldowns (TEST)", self._reset_cooldowns, emoji="⏱️", row=0)
         self.button("Delete Test Messages", self._cleanup_messages, emoji="🧹", style=discord.ButtonStyle.danger, row=0)
         self.button("Clear Test Listings", self._confirm_clear, style=discord.ButtonStyle.danger, row=1)
+        self.button("Reset My Free Listing", self._confirm_my_free_reset, style=discord.ButtonStyle.danger, row=2)
         self.nav()
 
     async def _require_test_mode(self) -> None:
@@ -222,6 +225,30 @@ class TestUtilitiesPage(Page):
             interaction,
             f"✅ Reset relist/ad-edit timing for **{listings}** test listing(s) and cleared **{cooldown_rows}** matching cooldown row(s).",
         )
+
+    async def _confirm_my_free_reset(self, interaction: discord.Interaction) -> None:
+        """Explicitly scoped to acting staff's own quick submission, not all users."""
+        async def confirmed(done: discord.Interaction) -> None:
+            await acknowledge(done, thinking=False)
+            had_listing = await testmode.reset_my_quick_listing(
+                self.bot, actor_id=done.user.id,
+            )
+            await self.show(
+                done,
+                "✅ Your Free Listing and its cooldown were reset. You can test posting again."
+                if had_listing else
+                "✅ Your Free Post deletion cooldown was cleared. You have no active Free Listing.",
+            )
+
+        await ConfirmPage(
+            self.bot, self.owner_id,
+            question=("Reset **your own** Free Listing? This removes its public ad and "
+                      "clears your Free Posting cooldown, including in LIVE mode. "
+                      "It will not change anybody else's listing. This action is audited."),
+            confirm_label="Reset My Free Listing",
+            on_confirm=confirmed,
+            back=lambda: TestUtilitiesPage(self.bot, self.owner_id, back=self.back),
+        ).show(interaction)
 
     async def _cleanup_messages(self, interaction: discord.Interaction) -> None:
         await acknowledge(interaction, thinking=False)

@@ -839,7 +839,7 @@ def server_rules_panel(bot: ParleyBot) -> tuple[str, discord.ui.View]:
     """Short, public, neutral rules. Updated in place on restarts."""
     return (
         "# 📜 Parley Server Rules\n"
-        "1. **No NSFW/18+ communities or explicit advertisements.**\n"
+        "1. **No sexually explicit or NSFW communities or advertisements.**\n"
         "2. **Follow Discord's Terms of Service and Community Guidelines.**\n"
         "3. No scams, malware, phishing, stolen accounts, impersonation, or misleading invites.\n"
         "4. Advertise the server you selected. Other Discord invites and vanity URLs are allowed only when they lead to that same server.\n"

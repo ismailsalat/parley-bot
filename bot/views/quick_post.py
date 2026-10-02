@@ -35,6 +35,7 @@ class QuickDraft:
     category: str
     raw_ad: str | None = None
     editing: bool = False
+    additional_review: bool = False
 
 
 async def show_quick_start(interaction: discord.Interaction) -> None:
@@ -65,11 +66,9 @@ async def show_quick_start(interaction: discord.Interaction) -> None:
         message = (
             "## 📣 Post your Discord server for free\n"
             "**No OAuth. No bot installation. No server permissions.**\n\n"
-            "1. Choose **exactly one** category from the dropdown.\n"
-            "2. **Automatic:** paste your full Discord-formatted ad directly into the form.\n"
-            "   **Staff approval:** give a short server description; write your ad after approval.\n"
-            "   Regular and vanity invite links work when they lead to the same server.\n"
-            "3. Confirm; Parley publishes the ad as a **normal message, not an embed**.\n\n"
+            "**Step 1:** Choose a category.\n"
+            "**Step 2:** Paste your ad with its Discord invite.\n"
+            "When staff approval is on, provide an invite and short description instead.\n\n"
             f"**Current publishing mode:** {'Staff approval' if bot.runtime.listings.approval_required else 'Automatic after safety checks'}.\n"
             "**Free limit:** one unconnected community per account, repost every 24 hours.\n"
             "-# Public invites identify servers, but never prove who owns them."
@@ -128,13 +127,13 @@ class QuickStartView(OwnedView):
 
     async def _quick(self, interaction: discord.Interaction) -> None:
         await interaction.response.edit_message(
-            content="## Choose ONE category\nThen enter your invite and paste your ad (or a short summary if staff approval is on).",
+            content="**Step 1 of 2:** Choose your server category below.",
             view=QuickWizardView(self.bot, interaction.user.id),
         )
 
     async def _edit(self, interaction: discord.Interaction) -> None:
         await interaction.response.edit_message(
-            content="## Edit your Free Listing\nOne edit per relist cycle. Choose one category, then paste the updated ad.",
+            content="**Step 1 of 2:** Choose a category for your updated ad.",
             view=QuickWizardView(self.bot, interaction.user.id, editing=True),
         )
 
@@ -244,9 +243,6 @@ class QuickWizardView(OwnedView):
         category = discord.ui.Select(placeholder="Choose exactly ONE category (required)", min_values=1, max_values=1, options=options, row=0)
         category.callback = self._pick
         self.add_item(category)
-        written = discord.ui.Button(label=("Submit Server for Approval" if bot.runtime.listings.approval_required and not editing else "Write or Paste Ad"), emoji="✏️", style=discord.ButtonStyle.primary, row=1)
-        written.callback = self._written
-        self.add_item(written)
         back = discord.ui.Button(label="Back to My Listing", style=discord.ButtonStyle.secondary, row=2)
         back.callback = self._back
         self.add_item(back)
@@ -256,41 +252,34 @@ class QuickWizardView(OwnedView):
         await show_quick_start(interaction)
 
     async def _pick(self, interaction: discord.Interaction) -> None:
+        # A category selection is the first step; open step two immediately.
+        # Do not ask the member to click the dropdown and then another button.
         self.category = interaction.data["values"][0]
-        await interaction.response.edit_message(
-            content=f"✅ Selected category: **{discord.utils.escape_markdown(self.category)}** (one category only).\n"
-                    "Next, press the button to submit your server or ad.",
-            view=self,
-        )
-
-    async def _modal(self, interaction: discord.Interaction, *, paste: bool) -> None:
-        if not self.category:
-            await reply(interaction, "Choose one category from the dropdown before continuing.")
-            return
-        if not interaction.response.is_done():
-            await interaction.response.send_modal(QuickPostModal(self.bot, self.category, paste=paste, editing=self.editing))
-
-    async def _written(self, interaction: discord.Interaction) -> None:
-        await self._modal(interaction, paste=False)
-
+        await interaction.response.send_modal(QuickPostModal(self.bot, self.category, editing=self.editing))
 
 
 class QuickPostModal(discord.ui.Modal):
-    def __init__(self, bot: ParleyBot, category: str, *, paste: bool = False, editing: bool = False):
-        super().__init__(title=("Edit Free Listing" if editing else "Parley · Free Server Listing")[:45], timeout=600)
-        self.bot, self.category, self.paste, self.editing = bot, category, paste, editing
-        self.invite = discord.ui.TextInput(
-            label="Discord server invite" + (" (existing invite)" if editing else ""),
-            placeholder="https://discord.gg/example", style=discord.TextStyle.short,
-            max_length=120, required=not editing,
-        )
-        self.add_item(self.invite)
+    """Step two: one ad field in automatic mode; invite + summary for review."""
+    def __init__(self, bot: ParleyBot, category: str, *, editing: bool = False):
         self.intro_only = bot.runtime.listings.approval_required and not editing
+        title = "Submit Server for Review" if self.intro_only else ("Edit Server Ad" if editing else "Post Your Server Ad")
+        super().__init__(title=title, timeout=600)
+        self.bot, self.category, self.editing = bot, category, editing
+        self.invite = None
+        if self.intro_only:
+            self.invite = discord.ui.TextInput(
+                label="Discord invite (regular or vanity)",
+                placeholder="https://discord.gg/your-server", style=discord.TextStyle.short,
+                max_length=120, required=True,
+            )
+            self.add_item(self.invite)
         self.description = discord.ui.TextInput(
-            label="Short server summary (rules apply)" if self.intro_only else "Paste your formatted Discord ad",
-            placeholder=("Briefly describe your community. No NSFW, scams or Discord ToS violations."
-                         if self.intro_only else "# Your community\nGaming, friends, events...\nhttps://discord.gg/your-invite"),
-            style=discord.TextStyle.paragraph, max_length=500 if self.intro_only else 1750,
+            label="Short server description" if self.intro_only else "Paste your ad (include invite)",
+            placeholder=("What is your server about? Must follow #server-rules."
+                         if self.intro_only else "Paste the full ad here, including discord.gg/your-server"),
+            style=discord.TextStyle.paragraph,
+            max_length=500 if self.intro_only else 1750,
+            required=True,
         )
         self.add_item(self.description)
 
@@ -303,8 +292,19 @@ class QuickPostModal(discord.ui.Modal):
             if self.editing and existing is None:
                 raise ValidationError("Your original Free Listing no longer exists.")
             if not self.editing and existing is not None and existing.status != ListingStatus.REMOVED:
-                raise ValidationError("You already have a Free Listing. Choose **Edit Ad** or **Repost Existing Ad**.")
-            raw_invite = self.invite.value.strip() or (existing.invite_url if existing else "")
+                raise ValidationError("You already have a Free Listing. Open **My Server Listings** to edit, repost, or delete it.")
+            if self.intro_only:
+                raw_invite = self.invite.value.strip()
+            elif self.editing and existing:
+                raw_invite = existing.invite_url
+            else:
+                # The advertisement itself contains the invite: no duplicate
+                # URL field, no paste-twice onboarding. Each additional invite
+                # is checked below against the resolved guild ID.
+                invite_codes = quick_service.advertisement_invite_codes(self.description.value)
+                if not invite_codes:
+                    raise ValidationError("Include your Discord invite in the advertisement (discord.gg/name works too).")
+                raw_invite = listing_service.canonical_invite(invite_codes[0])
             code = listing_service.parse_invite_code(raw_invite)
             try:
                 invite = await bot.fetch_invite(code, with_counts=True)
@@ -317,8 +317,11 @@ class QuickPostModal(discord.ui.Modal):
             if invite.guild.id == bot.runtime.hub.main_guild_id:
                 raise ValidationError("You cannot advertise Parley's main server as a Quick Post.")
             nsfw_level = getattr(getattr(invite.guild, "nsfw_level", None), "name", "").lower()
-            if getattr(getattr(invite, "channel", None), "nsfw", False) or nsfw_level in ("explicit", "age_restricted"):
-                raise ValidationError("Adult/NSFW servers cannot be advertised on Parley. See #server-rules.")
+            if getattr(getattr(invite, "channel", None), "nsfw", False) or nsfw_level == "explicit":
+                raise ValidationError("Discord marks this invite as NSFW/explicit. See #server-rules.")
+            # Age restrictions alone do not prove sexual/adult content.
+            # Review a server marked age_restricted instead of blanket-rejecting it.
+            additional_review = nsfw_level == "age_restricted"
             if existing is not None and invite.guild.id != existing.guild_id:
                 raise ValidationError("You can only edit the server already listed on your account.")
             icon = getattr(invite.guild, "icon", None)
@@ -332,6 +335,7 @@ class QuickPostModal(discord.ui.Modal):
                 description=self.description.value if self.intro_only else "",
                 category=self.category, editing=self.editing,
                 raw_ad=None if self.intro_only else self.description.value,
+                additional_review=additional_review,
             )
             trusted = (await quick_service.verify_advertisement_invites(
                 bot, draft.raw_ad, guild_id=draft.guild.guild_id, invite_url=draft.invite_url,
@@ -344,11 +348,10 @@ class QuickPostModal(discord.ui.Modal):
             await interaction.edit_original_response(
                 content=(
                     f"## Preview · {discord.utils.escape_markdown(guild_info.name)}\n"
-                    f"**Category (one only):** {self.category}\n\n"
-                    f"{preview[:1300]}\n\n"
-                    f"**Next step:** {'Staff approve this server; you will paste your ad later with no deadline' if self.intro_only else ('Staff review' if force_review or bot.runtime.listings.approval_required else 'Publish automatically after checks')}. "
-                    "This is an unverified listing, not proof of ownership.\n"
-                    "**Confirm** only if this is the exact ad you want Parley to use."
+                    f"**Category:** {self.category}\n\n"
+                    f"{preview[:1500]}\n\n"
+                    f"**After confirmation:** {'Staff review, then post your ad whenever ready' if self.intro_only else ('Staff review' if force_review or additional_review or bot.runtime.listings.approval_required else 'Post to directory')}.\n"
+                    "Press **Confirm** to continue."
                 ),
                 view=QuickConfirmView(bot, interaction.user.id, draft),
                 allowed_mentions=safe_allowed_mentions(),
@@ -381,7 +384,7 @@ async def _submit_draft(bot: ParleyBot, draft: QuickDraft, user_id: int, *, inte
                           already_approved.status == ListingStatus.ACTIVE)
     if risky and is_approved_ad:
         raise ValidationError("Only server invite links are allowed after server approval; remove external links.")
-    if ((bot.runtime.listings.approval_required and not is_approved_ad) or risky) and bot.panels.review_channel() is None:
+    if ((bot.runtime.listings.approval_required and not is_approved_ad) or risky or draft.additional_review) and bot.panels.review_channel() is None:
         raise ValidationError("The private staff approvals channel is not ready. Please contact Parley staff.")
     async with bot.db.session() as session:
         waiting = await quick_service.my_quick_listing(session, user_id)
@@ -399,6 +402,7 @@ async def _submit_draft(bot: ParleyBot, draft: QuickDraft, user_id: int, *, inte
                 description=draft.description, category=draft.category,
                 now=utcnow(), raw_ad=draft.raw_ad,
                 verified_invite_codes=trusted_codes,
+                additional_review=draft.additional_review,
             )
         else:
             listing, outcome = await quick_service.create_quick_listing(
@@ -407,6 +411,7 @@ async def _submit_draft(bot: ParleyBot, draft: QuickDraft, user_id: int, *, inte
                 category=draft.category, now=utcnow(),
                 is_test=bot.runtime.hub.mode == "test", raw_ad=draft.raw_ad,
                 verified_invite_codes=trusted_codes,
+                additional_review=draft.additional_review,
             )
     if outcome in ("pending", "pending_edit"):
         # If sending fails, the DB keeps the pending submission and the

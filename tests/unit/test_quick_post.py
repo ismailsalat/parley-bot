@@ -344,3 +344,101 @@ async def test_same_guild_invites_do_not_bypass_publish_time_gate(db, config):
         )
         assert (outcome, listing.status) == ("published", ListingStatus.ACTIVE)
         assert listing.advertisement_text == raw
+
+
+# Parley 4 UX regression tests: these protect trust-first no-OAuth posting.
+
+def test_age_only_language_is_not_classified_as_explicit(config):
+    info = listings.GuildInfo(guild_id=94001, name="Camelot 18+ Gaming", icon_url=None, member_count=42)
+    text, needs_review = quick_post.prepare_quick_ad(
+        config, info=info, invite_url="https://discord.gg/Camelot",
+        category="Gaming", raw_ad="18+ friends, weekend game nights! https://discord.gg/Camelot",
+    )
+    assert "18+" in text and needs_review is False
+    with pytest.raises(ValidationError, match="NSFW"):
+        quick_post.prepare_quick_ad(
+            config, info=info, invite_url="https://discord.gg/Camelot",
+            category="Gaming", raw_ad="NSFW server https://discord.gg/Camelot",
+        )
+
+
+async def test_platform_age_flag_routes_to_review_without_banning(db, config):
+    # Discord age-restriction metadata is ambiguous; request review, don't ban.
+    async with db.session() as session:
+        row, action = await quick_post.create_quick_listing(
+            session, config, info=guild(95001), actor_id=95002,
+            invite_url="https://discord.gg/Camelot", category="Gaming",
+            description="", raw_ad="Gaming friends: https://discord.gg/Camelot",
+            additional_review=True, now=NOW,
+        )
+        assert action == "pending" and row.status == ListingStatus.PENDING
+        assert row.awaiting_ad is False
+
+
+def test_automatic_modal_only_asks_to_paste_one_ad(db, config):
+    from bot.views.quick_post import QuickPostModal, QuickWizardView
+    from tests.fakes import FakeBot
+    bot = FakeBot(db, runtime=config)
+    modal = QuickPostModal(bot, "Gaming")
+    assert modal.intro_only is False
+    assert len(modal.children) == 1
+    assert "invite" in modal.children[0].label.lower()
+    assert all("server invite" not in x.label.lower() for x in modal.children)
+    wizard = QuickWizardView(bot, user_id=95002)
+    assert len([x for x in wizard.children if getattr(x, "options", None)]) == 1
+    assert "Write or Paste Ad" not in [getattr(x, "label", None) for x in wizard.children]
+
+
+async def test_category_select_opens_modal_immediately(db, config):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from bot.views.quick_post import QuickWizardView, QuickPostModal
+    from tests.fakes import FakeBot
+    wizard = QuickWizardView(FakeBot(db, runtime=config), user_id=95002)
+    response = SimpleNamespace(send_modal=AsyncMock())
+    await wizard._pick(SimpleNamespace(data={"values": ["Gaming"]}, response=response))
+    response.send_modal.assert_awaited_once()
+    assert isinstance(response.send_modal.await_args.args[0], QuickPostModal)
+
+
+async def test_staff_reset_only_clears_own_free_listing_and_cooldown(db, config):
+    from types import SimpleNamespace
+    from bot.services import testmode, cooldowns
+    from tests.fakes import FakeBot
+    bot = FakeBot(db, runtime=config)
+    cleaned = []
+    async def take_down(row):
+        cleaned.append(row.guild_id)
+    bot.panels = SimpleNamespace(take_down_listing=take_down)
+
+    async with db.session() as session:
+        await submit(session, config, gid=96001, user=96002)
+        await submit(session, config, gid=96003, user=96004)
+        await cooldowns.start(session, "quick_post_deleted", 96002, NOW, timedelta(hours=10))
+        await cooldowns.start(session, "quick_post_deleted", 96004, NOW, timedelta(hours=10))
+
+    assert await testmode.reset_my_quick_listing(bot, actor_id=96002) is True
+    assert cleaned == [96001]
+    async with db.session() as session:
+        mine = await repository.get_listing(session, 96001)
+        other = await repository.get_listing(session, 96003)
+        assert mine.status == ListingStatus.REMOVED and mine.quick_submitted_by is None
+        assert mine.refreshed_at is None and mine.last_ad_edit_at is None
+        assert other.status == ListingStatus.ACTIVE and other.quick_submitted_by == 96004
+        assert await cooldowns.remaining(session, "quick_post_deleted", 96002, NOW) is None
+        assert await cooldowns.remaining(session, "quick_post_deleted", 96004, NOW) is not None
+        # Same server can be submitted again by its original submitter.
+        restored, state = await submit(session, config, gid=96001, user=96002, at=NOW+timedelta(minutes=5))
+        assert state == "published" and restored.quick_submitted_by == 96002
+
+
+def test_manual_approval_requires_invite_and_short_summary(db, config):
+    from bot.views.quick_post import QuickPostModal
+    from dataclasses import replace
+    from tests.fakes import FakeBot
+    manual = replace(config, listings=replace(config.listings, approval_required=True))
+    modal = QuickPostModal(FakeBot(db, runtime=manual), "Gaming")
+    assert modal.intro_only
+    assert len(modal.children) == 2
+    assert "invite" in modal.children[0].label.lower()
+    assert "description" in modal.children[1].label.lower()
